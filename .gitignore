@@ -4,5 +4,4 @@ xcuserdata/
 DerivedData/
 build/
 *.xcodeproj/
-!StormCRM.xcodeproj
 *.xcworkspace/
