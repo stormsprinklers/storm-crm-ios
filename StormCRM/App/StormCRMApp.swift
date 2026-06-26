@@ -8,6 +8,7 @@ struct StormCRMApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(appEnvironment)
+                .environmentObject(appEnvironment.auth)
                 .onOpenURL { url in
                     appEnvironment.handleDeepLink(url)
                 }
@@ -16,16 +17,16 @@ struct StormCRMApp: App {
 }
 
 struct RootView: View {
-    @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var auth: AuthManager
 
     var body: some View {
         Group {
-            if env.auth.isAuthenticated {
+            if auth.isAuthenticated {
                 MainTabView()
             } else {
                 LoginView()
             }
         }
-        .animation(.easeInOut, value: env.auth.isAuthenticated)
+        .animation(.easeInOut, value: auth.isAuthenticated)
     }
 }

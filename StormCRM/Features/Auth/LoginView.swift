@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct LoginView: View {
-    @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var auth: AuthManager
     @State private var email = ""
     @State private var password = ""
     @State private var isLoading = false
@@ -18,7 +18,7 @@ struct LoginView: View {
                         .textContentType(.password)
                 }
 
-                if let error = env.auth.lastError {
+                if let error = auth.lastError {
                     Section {
                         Text(error).foregroundStyle(.red)
                     }
@@ -28,7 +28,7 @@ struct LoginView: View {
                     Button {
                         Task {
                             isLoading = true
-                            await env.auth.login(email: email, password: password)
+                            await auth.login(email: email, password: password)
                             isLoading = false
                         }
                     } label: {

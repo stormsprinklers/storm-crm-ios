@@ -10,6 +10,7 @@ final class APIClient {
         self.tokenStore = tokenStore
         self.session = session
         self.decoder = JSONDecoder()
+        self.decoder.keyDecodingStrategy = .convertFromSnakeCase
         self.encoder = JSONEncoder()
     }
 

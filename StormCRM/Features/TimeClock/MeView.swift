@@ -30,6 +30,7 @@ final class TimeClockViewModel: ObservableObject {
 
 struct MeView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var auth: AuthManager
     @StateObject private var clock = TimeClockViewModel()
 
     var body: some View {
@@ -59,7 +60,7 @@ struct MeView: View {
 
                 Section {
                     Button("Sign out", role: .destructive) {
-                        Task { await env.auth.logout() }
+                        Task { await auth.logout() }
                     }
                 }
             }

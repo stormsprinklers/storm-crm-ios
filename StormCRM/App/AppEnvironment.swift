@@ -3,13 +3,22 @@ import SwiftUI
 
 @MainActor
 final class AppEnvironment: ObservableObject {
-    let tokenStore = TokenStore()
-    lazy var apiClient = APIClient(tokenStore: tokenStore)
-    lazy var auth = AuthManager(tokenStore: tokenStore, apiClient: apiClient)
+    let tokenStore: TokenStore
+    let apiClient: APIClient
+    let auth: AuthManager
     let location = LocationManager()
-    lazy var voice = VoiceManager(apiClient: apiClient)
+    let voice: VoiceManager
 
     @Published var paymentReturn: PaymentReturn?
+
+    init() {
+        let tokenStore = TokenStore()
+        let apiClient = APIClient(tokenStore: tokenStore)
+        self.tokenStore = tokenStore
+        self.apiClient = apiClient
+        self.auth = AuthManager(tokenStore: tokenStore, apiClient: apiClient)
+        self.voice = VoiceManager(apiClient: apiClient)
+    }
 
     func handleDeepLink(_ url: URL) {
         guard url.scheme == "stormcrm" else { return }
