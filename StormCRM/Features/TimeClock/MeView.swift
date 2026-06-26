@@ -12,7 +12,7 @@ final class TimeClockViewModel: ObservableObject {
         do {
             response = try await api.get(path: APIPath.timeClock)
         } catch {
-            error = (error as? APIError)?.message
+            self.error = (error as? APIError)?.message
         }
     }
 
@@ -23,7 +23,7 @@ final class TimeClockViewModel: ObservableObject {
             let _: TimeClockResponse = try await api.post(path: APIPath.timeClock, body: Body(action: action))
             await load(api: api)
         } catch {
-            error = (error as? APIError)?.message
+            self.error = (error as? APIError)?.message
         }
     }
 }
