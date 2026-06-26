@@ -1,6 +1,83 @@
 import SwiftUI
 
 @MainActor
+final class TeamInboxViewModel: ObservableObject {
+    @Published var conversations: [ConversationDTO] = []
+    @Published var isLoading = false
+    @Published var error: String?
+
+    func load(api: APIClient) async {
+        isLoading = true
+        error = nil
+        defer { isLoading = false }
+        do {
+            conversations = try await api.get(path: APIPath.smsConversations)
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+}
+
+struct TeamInboxView: View {
+    @EnvironmentObject private var env: AppEnvironment
+    @StateObject private var viewModel = TeamInboxViewModel()
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if viewModel.isLoading && viewModel.conversations.isEmpty {
+                    ProgressView("Loading inbox…")
+                } else if let error = viewModel.error {
+                    ContentUnavailableView("Could not load inbox", systemImage: "exclamationmark.triangle", description: Text(error))
+                } else if viewModel.conversations.isEmpty {
+                    ContentUnavailableView("No conversations", systemImage: "message")
+                } else {
+                    List(viewModel.conversations) { conversation in
+                        NavigationLink(value: conversation.id) {
+                            ConversationRow(conversation: conversation)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Inbox")
+            .navigationDestination(for: String.self) { conversationId in
+                ConversationView(conversationId: conversationId)
+            }
+            .refreshable { await viewModel.load(api: env.apiClient) }
+            .task { await viewModel.load(api: env.apiClient) }
+        }
+    }
+}
+
+struct ConversationRow: View {
+    let conversation: ConversationDTO
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(conversation.title ?? conversation.customer?.name ?? conversation.participantPhone ?? "Conversation")
+                .font(.headline)
+            if let customer = conversation.customer, conversation.title != nil {
+                Text(customer.name).foregroundStyle(.secondary)
+            } else if let phone = conversation.participantPhone, conversation.customer == nil {
+                Text(phone).foregroundStyle(.secondary)
+            }
+            if let lastMessageAt = conversation.lastMessageAt {
+                Text(formatDate(lastMessageAt))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func formatDate(_ iso: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: iso) else { return iso }
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+@MainActor
 final class ConversationViewModel: ObservableObject {
     @Published var messages: [MessageDTO] = []
     @Published var conversation: ConversationDTO?
