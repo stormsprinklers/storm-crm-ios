@@ -34,13 +34,13 @@ The app reads the backend URL from the **`API_BASE_URL` environment variable** i
 
 Examples:
 
-| Where you run the app | `API_BASE_URL` value |
-|----------------------|----------------------|
-| Simulator, API on same Mac | `http://localhost:3000` |
-| Physical iPhone, API on your Mac | `http://192.168.x.x:3000` (your Mac's LAN IP) |
-| Staging / production | `https://crm.stormsprinklers.com` |
+| Scenario | `API_BASE_URL` value |
+|----------|----------------------|
+| Production (default) | `https://crm.stormsprinklers.com` |
+| Local API on your Mac (simulator) | `http://localhost:3000` |
+| Local API on your Mac (physical device) | `http://192.168.x.x:3000` |
 
-If you use XcodeGen, `project.yml` seeds this to `http://localhost:3000` — change it there and run `xcodegen generate`, or override it in **Edit Scheme** (scheme edits win at launch).
+The default is `https://crm.stormsprinklers.com` in `AppConfig.swift` and `project.yml`. After changing `project.yml`, run `xcodegen generate`. You can also override in **Edit Scheme** (scheme values win at launch).
 
 **Also make sure:**
 

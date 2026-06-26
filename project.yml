@@ -27,5 +27,5 @@ targets:
     scheme:
       environmentVariables:
         - variable: API_BASE_URL
-          value: http://localhost:3000
+          value: https://crm.stormsprinklers.com
           isEnabled: true
