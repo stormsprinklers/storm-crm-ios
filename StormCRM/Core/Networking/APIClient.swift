@@ -159,8 +159,8 @@ final class APIClient {
     }
 
     private func parseError(data: Data, status: Int) -> APIError {
-        if let body = try? decoder.decode(APIErrorBody.self, from: data), let msg = body.error {
-            if status == 401 { return .unauthorized }
+        if let body = try? decoder.decode(APIErrorBody.self, from: data), let msg = body.error, !msg.isEmpty {
+            if status == 401 { return .server(msg) }
             if status == 403 { return .forbidden(msg) }
             if status == 400 { return .badRequest(msg) }
             return .server(msg)
