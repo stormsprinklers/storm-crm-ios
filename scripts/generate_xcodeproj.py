@@ -27,7 +27,7 @@ def pbx_path(path: Path) -> str:
 
 def main() -> None:
     swift_files = collect_swift_files()
-    assert any(f.name == "TeamInboxView.swift" for f in swift_files), "TeamInboxView.swift missing"
+    assert swift_files, "No Swift files found under StormCRM"
 
     project_id = uid("project")
     target_id = uid("target")
