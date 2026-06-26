@@ -1,6 +1,6 @@
 import Foundation
 
-struct VisitDTO: Codable, Identifiable, Hashable {
+struct VisitDTO: Decodable, Identifiable, Hashable {
     let id: String
     let title: String
     let startAt: String
@@ -98,7 +98,7 @@ struct CustomersListResponse: Decodable {
     let customers: [CustomerDTO]
 }
 
-struct VisitDetailDTO: Codable, Identifiable {
+struct VisitDetailDTO: Decodable, Identifiable {
     let id: String
     let title: String
     let startAt: String
@@ -139,7 +139,7 @@ struct CustomerSummary: Codable, Hashable {
     let doNotService: Bool?
 }
 
-struct PropertySummary: Codable, Hashable {
+struct PropertySummary: Decodable, Hashable {
     let id: String
     let name: String?
     let address: String?
@@ -225,7 +225,7 @@ struct DiscountDTO: Decodable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         name = try container.decodeIfPresent(String.self, forKey: .name)
-            ?? container.decodeIfPresent(String.self, forKey: .label)
+            ?? (try container.decodeIfPresent(String.self, forKey: .label))
             ?? "Discount"
         amount = try container.decodeFlexibleDouble(forKey: .amount) ?? 0
         type = try container.decode(String.self, forKey: .type)
