@@ -9,9 +9,8 @@ final class APIClient {
     init(tokenStore: TokenStore, session: URLSession = .shared) {
         self.tokenStore = tokenStore
         self.session = session
-        self.decoder = JSONDecoder()
-        self.decoder.keyDecodingStrategy = .convertFromSnakeCase
-        self.encoder = JSONEncoder()
+        self.decoder = JSONCoding.makeDecoder()
+        self.encoder = JSONCoding.makeEncoder()
     }
 
     func get<T: Decodable>(
@@ -133,6 +132,8 @@ final class APIClient {
             }
             do {
                 return try decoder.decode(T.self, from: data)
+            } catch let decodingError as DecodingError {
+                throw APIError.decoding(decodingError)
             } catch {
                 throw APIError.decoding(error)
             }

@@ -95,9 +95,7 @@ struct ConversationRow: View {
     }
 
     private func formatDate(_ iso: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: iso) else { return iso }
-        return date.formatted(date: .abbreviated, time: .shortened)
+        APIDateFormatting.displayString(from: iso)
     }
 }
 

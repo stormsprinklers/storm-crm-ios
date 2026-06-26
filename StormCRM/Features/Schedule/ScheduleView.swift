@@ -12,16 +12,17 @@ final class ScheduleViewModel: ObservableObject {
         defer { isLoading = false }
 
         let calendar = Calendar.current
-        let start = calendar.startOfDay(for: Date())
-        let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start
-        let formatter = ISO8601DateFormatter()
+        let startDay = calendar.date(byAdding: .day, value: -7, to: calendar.startOfDay(for: Date())) ?? Date()
+        let start = calendar.startOfDay(for: startDay)
+        guard let endDay = calendar.date(byAdding: .day, value: 21, to: start) else { return }
+        let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDay) ?? endDay
 
         do {
             jobs = try await api.get(
                 path: APIPath.mobileSchedule,
                 query: [
-                    URLQueryItem(name: "start", value: formatter.string(from: start)),
-                    URLQueryItem(name: "end", value: formatter.string(from: end)),
+                    URLQueryItem(name: "start", value: APIDateFormatting.queryString(from: start)),
+                    URLQueryItem(name: "end", value: APIDateFormatting.queryString(from: end)),
                 ]
             )
         } catch {
@@ -42,7 +43,7 @@ struct ScheduleView: View {
                 } else if let error = viewModel.error {
                     ContentUnavailableView("Could not load schedule", systemImage: "exclamationmark.triangle", description: Text(error))
                 } else if viewModel.jobs.isEmpty {
-                    ContentUnavailableView("No jobs this week", systemImage: "calendar")
+                    ContentUnavailableView("No jobs in this range", systemImage: "calendar", description: Text("Nothing scheduled in the past week or next 3 weeks."))
                 } else {
                     List(viewModel.jobs) { job in
                         NavigationLink(value: job) {
@@ -81,9 +82,7 @@ struct ScheduleRow: View {
     }
 
     private func formatDate(_ iso: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        guard let date = formatter.date(from: iso) else { return iso }
-        return date.formatted(date: .abbreviated, time: .shortened)
+        APIDateFormatting.displayString(from: iso)
     }
 }
 

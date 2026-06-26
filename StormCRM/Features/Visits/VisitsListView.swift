@@ -16,7 +16,8 @@ final class VisitsListViewModel: ObservableObject {
             query.append(URLQueryItem(name: "search", value: search))
         }
         do {
-            visits = try await api.get(path: APIPath.visits, query: query)
+            let response: VisitsListResponse = try await api.get(path: APIPath.visits, query: query)
+            visits = response.visits
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }

@@ -22,6 +22,80 @@ struct VisitDTO: Codable, Identifiable, Hashable {
     let total: Double?
     let enRouteEtaSeconds: Int?
     let enRouteEtaAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, startAt, endAt, division, status, tags, isCallback
+        case address, city, state, zip, customer, property, serviceArea
+        case assignedUser, crew, subtotal, total, enRouteEtaSeconds, enRouteEtaAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        startAt = try Self.decodeDateString(from: container, forKey: .startAt)
+        endAt = try Self.decodeDateString(from: container, forKey: .endAt)
+        division = try container.decode(String.self, forKey: .division)
+        status = try container.decode(String.self, forKey: .status)
+        tags = try container.decodeIfPresent([String].self, forKey: .tags)
+        isCallback = try container.decodeIfPresent(Bool.self, forKey: .isCallback)
+        address = try container.decodeIfPresent(String.self, forKey: .address)
+        city = try container.decodeIfPresent(String.self, forKey: .city)
+        state = try container.decodeIfPresent(String.self, forKey: .state)
+        zip = try container.decodeIfPresent(String.self, forKey: .zip)
+        customer = try container.decodeIfPresent(CustomerSummary.self, forKey: .customer)
+        property = try container.decodeIfPresent(PropertySummary.self, forKey: .property)
+        serviceArea = try container.decodeIfPresent(NamedColor.self, forKey: .serviceArea)
+        assignedUser = try container.decodeIfPresent(NamedColor.self, forKey: .assignedUser)
+        crew = try container.decodeIfPresent(NamedColor.self, forKey: .crew)
+        subtotal = try container.decodeFlexibleDouble(forKey: .subtotal)
+        total = try container.decodeFlexibleDouble(forKey: .total)
+        enRouteEtaSeconds = try container.decodeIfPresent(Int.self, forKey: .enRouteEtaSeconds)
+        enRouteEtaAt = try Self.decodeOptionalDateString(from: container, forKey: .enRouteEtaAt)
+    }
+
+    private static func decodeDateString(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) throws -> String {
+        if let text = try container.decodeIfPresent(String.self, forKey: key) {
+            return text
+        }
+        if let date = try container.decodeIfPresent(Date.self, forKey: key) {
+            return APIDateFormatting.queryString(from: date)
+        }
+        throw DecodingError.keyNotFound(key, .init(codingPath: container.codingPath, debugDescription: "Missing date"))
+    }
+
+    private static func decodeOptionalDateString(
+        from container: KeyedDecodingContainer<CodingKeys>,
+        forKey key: CodingKeys
+    ) throws -> String? {
+        if (try? container.decodeNil(forKey: key)) == true { return nil }
+        if let text = try container.decodeIfPresent(String.self, forKey: key) {
+            return text
+        }
+        if let date = try container.decodeIfPresent(Date.self, forKey: key) {
+            return APIDateFormatting.queryString(from: date)
+        }
+        return nil
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: VisitDTO, rhs: VisitDTO) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+struct VisitsListResponse: Decodable {
+    let visits: [VisitDTO]
+}
+
+struct CustomersListResponse: Decodable {
+    let customers: [CustomerDTO]
 }
 
 struct VisitDetailDTO: Codable, Identifiable {
@@ -77,6 +151,34 @@ struct PropertySummary: Codable, Hashable {
     let aerialImageUrl: String?
     let propertyDiagramUrl: String?
     let irrigationMapStatus: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, address, city, state, zip, latitude, longitude
+        case aerialImageUrl, propertyDiagramUrl, irrigationMapStatus
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        address = try container.decodeIfPresent(String.self, forKey: .address)
+        city = try container.decodeIfPresent(String.self, forKey: .city)
+        state = try container.decodeIfPresent(String.self, forKey: .state)
+        zip = try container.decodeIfPresent(String.self, forKey: .zip)
+        latitude = try container.decodeFlexibleDouble(forKey: .latitude)
+        longitude = try container.decodeFlexibleDouble(forKey: .longitude)
+        aerialImageUrl = try container.decodeIfPresent(String.self, forKey: .aerialImageUrl)
+        propertyDiagramUrl = try container.decodeIfPresent(String.self, forKey: .propertyDiagramUrl)
+        irrigationMapStatus = try container.decodeIfPresent(String.self, forKey: .irrigationMapStatus)
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: PropertySummary, rhs: PropertySummary) -> Bool {
+        lhs.id == rhs.id
+    }
 }
 
 struct NamedColor: Codable, Hashable {
@@ -86,20 +188,48 @@ struct NamedColor: Codable, Hashable {
     let photoUrl: String?
 }
 
-struct LineItemDTO: Codable, Identifiable {
+struct LineItemDTO: Decodable, Identifiable {
     let id: String
     let name: String
     let description: String?
     let quantity: Double
     let unitPrice: Double
     let total: Double
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, description, quantity, unitPrice, total
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
+        quantity = try container.decodeFlexibleDouble(forKey: .quantity) ?? 0
+        unitPrice = try container.decodeFlexibleDouble(forKey: .unitPrice) ?? 0
+        total = try container.decodeFlexibleDouble(forKey: .total) ?? 0
+    }
 }
 
-struct DiscountDTO: Codable, Identifiable {
+struct DiscountDTO: Decodable, Identifiable {
     let id: String
     let name: String
     let amount: Double
     let type: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, label, amount, type
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+            ?? container.decodeIfPresent(String.self, forKey: .label)
+            ?? "Discount"
+        amount = try container.decodeFlexibleDouble(forKey: .amount) ?? 0
+        type = try container.decode(String.self, forKey: .type)
+    }
 }
 
 struct TimeEventDTO: Codable, Identifiable {
@@ -124,12 +254,31 @@ struct AttachmentDTO: Codable, Identifiable {
     let createdAt: String
 }
 
-struct InvoiceSummaryDTO: Codable, Identifiable {
+struct InvoiceSummaryDTO: Decodable, Identifiable {
     let id: String
     let invoiceNumber: String
     let status: String
     let total: Double
     let paidAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, invoiceNumber, status, total, paidAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        invoiceNumber = try container.decode(String.self, forKey: .invoiceNumber)
+        status = try container.decode(String.self, forKey: .status)
+        total = try container.decodeFlexibleDouble(forKey: .total) ?? 0
+        if let text = try container.decodeIfPresent(String.self, forKey: .paidAt) {
+            paidAt = text
+        } else if let date = try container.decodeIfPresent(Date.self, forKey: .paidAt) {
+            paidAt = APIDateFormatting.queryString(from: date)
+        } else {
+            paidAt = nil
+        }
+    }
 }
 
 struct ETADTO: Codable {
@@ -244,12 +393,31 @@ struct ProgramZoneDTO: Codable, Identifiable {
     let runTimes: [String]?
 }
 
-struct ConversationDTO: Codable, Identifiable {
+struct ConversationDTO: Decodable, Identifiable {
     let id: String
     let title: String?
     let participantPhone: String?
     let lastMessageAt: String?
     let customer: CustomerSummary?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        participantPhone = try container.decodeIfPresent(String.self, forKey: .participantPhone)
+        customer = try container.decodeIfPresent(CustomerSummary.self, forKey: .customer)
+        if let text = try container.decodeIfPresent(String.self, forKey: .lastMessageAt) {
+            lastMessageAt = text
+        } else if let date = try container.decodeIfPresent(Date.self, forKey: .lastMessageAt) {
+            lastMessageAt = APIDateFormatting.queryString(from: date)
+        } else {
+            lastMessageAt = nil
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, participantPhone, lastMessageAt, customer
+    }
 }
 
 struct MessagesResponse: Decodable {
@@ -294,4 +462,6 @@ struct CustomerDTO: Codable, Identifiable {
     let city: String?
     let state: String?
     let zip: String?
+    let companyName: String?
+    let status: String?
 }

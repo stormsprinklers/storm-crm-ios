@@ -75,15 +75,28 @@ struct CustomerSearchView: View {
     @EnvironmentObject private var env: AppEnvironment
     @State private var search = ""
     @State private var customers: [CustomerDTO] = []
+    @State private var isLoading = false
     @State private var error: String?
 
     var body: some View {
-        List(customers) { customer in
-            NavigationLink(value: customer.id) {
-                VStack(alignment: .leading) {
-                    Text(customer.name)
-                    if let phone = customer.phone {
-                        Text(phone).font(.caption).foregroundStyle(.secondary)
+        Group {
+            if isLoading && customers.isEmpty {
+                ProgressView("Loading customers…")
+            } else if customers.isEmpty {
+                ContentUnavailableView(
+                    "No customers found",
+                    systemImage: "person.2",
+                    description: Text(error ?? "Try a different search.")
+                )
+            } else {
+                List(customers) { customer in
+                    NavigationLink(value: customer.id) {
+                        VStack(alignment: .leading) {
+                            Text(customer.name)
+                            if let phone = customer.phone {
+                                Text(phone).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
             }
@@ -94,20 +107,30 @@ struct CustomerSearchView: View {
         .navigationDestination(for: String.self) { customerId in
             CustomerDetailView(customerId: customerId)
         }
-        .overlay {
-            if let error { Text(error).foregroundStyle(.red) }
-        }
+        .refreshable { await load() }
+        .task { await load() }
     }
 
     private func load() async {
-        guard !search.isEmpty else { return }
+        isLoading = true
+        error = nil
+        defer { isLoading = false }
+
+        var query: [URLQueryItem] = []
+        let trimmed = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            query.append(URLQueryItem(name: "search", value: trimmed))
+        }
+
         do {
-            customers = try await env.apiClient.get(
+            let response: CustomersListResponse = try await env.apiClient.get(
                 path: APIPath.customers,
-                query: [URLQueryItem(name: "search", value: search)]
+                query: query
             )
+            customers = response.customers
         } catch {
             self.error = (error as? APIError)?.message
+            customers = []
         }
     }
 }

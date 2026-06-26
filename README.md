@@ -58,7 +58,26 @@ The default is `https://crm.stormsprinklers.com` in `AppConfig.swift` and `proje
 2. Delete any stale local copy of `StormCRM/Features/Inbox/TeamInboxView.swift` if it still exists on disk.
 3. Run `xcodegen generate` again and clean build.
 
-**"Project file is damaged"**
+**Tabs load but show no data / "Invalid response"**
+
+The CRM API returns **camelCase** JSON (`startAt`, `accessToken`, …). If you see decoding errors on Visits, pull the latest code — older builds used snake_case decoding and failed on every response.
+
+After updating:
+
+```bash
+git pull
+xcodegen generate
+```
+
+Then **Product → Clean Build Folder** and rebuild.
+
+Also check:
+
+- **Schedule empty** — Shows jobs from the past 7 days through the next 21 days. Field techs only see visits assigned to them; admins see the full company schedule.
+- **Customers empty** — The list loads automatically on open (up to 500). Use search to filter.
+- **Inbox empty** — Team inbox only shows **internal** SMS threads. If your team uses external/customer SMS only, this tab will be empty until internal conversations exist.
+- **401 / session errors** — Confirm `API_BASE_URL` points at a server with the mobile auth endpoints deployed (`/api/mobile/auth/login`).
+
 
 Do not use an old committed `.xcodeproj`. Remove it and regenerate:
 
