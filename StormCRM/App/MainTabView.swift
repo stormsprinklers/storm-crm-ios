@@ -114,7 +114,7 @@ final class ConversationViewModel: ObservableObject {
             conversation = response.conversation
             messages = response.messages
         } catch {
-            error = (error as? APIError)?.message
+            self.error = (error as? APIError)?.message
         }
     }
 
@@ -144,7 +144,7 @@ final class ConversationViewModel: ObservableObject {
             draft = ""
             await load(api: api, conversationId: conversationId)
         } catch {
-            error = (error as? APIError)?.message
+            self.error = (error as? APIError)?.message
         }
     }
 }

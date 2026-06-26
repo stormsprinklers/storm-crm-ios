@@ -192,7 +192,7 @@ struct TimeTrackingBar: View {
                 Text("ETA: \(eta)").font(.subheadline)
             }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 8) {
-                ForEach(actionsForStatus(visit.status), id: \.self) { action in
+                ForEach(actionsForStatus(visit.status), id: \.type) { action in
                     Button(action.label) {
                         Task { await onAction(action.type) }
                     }
