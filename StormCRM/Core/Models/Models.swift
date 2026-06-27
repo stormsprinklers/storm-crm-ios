@@ -122,9 +122,63 @@ struct VisitDetailDTO: Decodable, Identifiable {
     let notes: [VisitNoteDTO]?
     let attachments: [AttachmentDTO]?
     let invoices: [InvoiceSummaryDTO]?
+    let estimates: [EstimateSummaryDTO]?
     let total: Double?
     let subtotal: Double?
     let eta: ETADTO?
+    let designProjectId: String?
+    let installDurationDays: Int?
+    let designExportMetadata: JSONValue?
+
+    var hasInstallPlan: Bool {
+        designExportMetadata != nil && designExportMetadata != .null
+    }
+}
+
+struct EstimateSummaryDTO: Decodable, Identifiable {
+    let id: String
+    let status: String
+    let total: Double
+    let createdAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, status, total, createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        status = try container.decode(String.self, forKey: .status)
+        total = try container.decodeFlexibleDouble(forKey: .total) ?? 0
+        if let text = try container.decodeIfPresent(String.self, forKey: .createdAt) {
+            createdAt = text
+        } else if let date = try container.decodeIfPresent(Date.self, forKey: .createdAt) {
+            createdAt = APIDateFormatting.queryString(from: date)
+        } else {
+            createdAt = ""
+        }
+    }
+}
+
+struct InvoicePaymentDTO: Decodable {
+    let amount: Double
+    let refundedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case amount, refundedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        amount = try container.decodeFlexibleDouble(forKey: .amount) ?? 0
+        if let text = try container.decodeIfPresent(String.self, forKey: .refundedAt) {
+            refundedAt = text
+        } else if let date = try container.decodeIfPresent(Date.self, forKey: .refundedAt) {
+            refundedAt = APIDateFormatting.queryString(from: date)
+        } else {
+            refundedAt = nil
+        }
+    }
 }
 
 struct CustomerSummary: Codable, Hashable {
@@ -232,18 +286,54 @@ struct DiscountDTO: Decodable, Identifiable {
     }
 }
 
-struct TimeEventDTO: Codable, Identifiable {
+struct TimeEventDTO: Decodable, Identifiable {
     let id: String
     let type: String
     let occurredAt: String
     let user: NamedColor?
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, occurredAt, user
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        type = try container.decode(String.self, forKey: .type)
+        user = try container.decodeIfPresent(NamedColor.self, forKey: .user)
+        if let text = try container.decodeIfPresent(String.self, forKey: .occurredAt) {
+            occurredAt = text
+        } else if let date = try container.decodeIfPresent(Date.self, forKey: .occurredAt) {
+            occurredAt = APIDateFormatting.queryString(from: date)
+        } else {
+            occurredAt = ""
+        }
+    }
 }
 
-struct VisitNoteDTO: Codable, Identifiable {
+struct VisitNoteDTO: Decodable, Identifiable {
     let id: String
     let body: String
     let createdAt: String
     let author: NamedColor?
+
+    enum CodingKeys: String, CodingKey {
+        case id, body, createdAt, author
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        body = try container.decode(String.self, forKey: .body)
+        author = try container.decodeIfPresent(NamedColor.self, forKey: .author)
+        if let text = try container.decodeIfPresent(String.self, forKey: .createdAt) {
+            createdAt = text
+        } else if let date = try container.decodeIfPresent(Date.self, forKey: .createdAt) {
+            createdAt = APIDateFormatting.queryString(from: date)
+        } else {
+            createdAt = ""
+        }
+    }
 }
 
 struct AttachmentDTO: Codable, Identifiable {
@@ -260,9 +350,10 @@ struct InvoiceSummaryDTO: Decodable, Identifiable {
     let status: String
     let total: Double
     let paidAt: String?
+    let payments: [InvoicePaymentDTO]?
 
     enum CodingKeys: String, CodingKey {
-        case id, invoiceNumber, status, total, paidAt
+        case id, invoiceNumber, status, total, paidAt, payments
     }
 
     init(from decoder: Decoder) throws {
@@ -271,6 +362,7 @@ struct InvoiceSummaryDTO: Decodable, Identifiable {
         invoiceNumber = try container.decode(String.self, forKey: .invoiceNumber)
         status = try container.decode(String.self, forKey: .status)
         total = try container.decodeFlexibleDouble(forKey: .total) ?? 0
+        payments = try container.decodeIfPresent([InvoicePaymentDTO].self, forKey: .payments)
         if let text = try container.decodeIfPresent(String.self, forKey: .paidAt) {
             paidAt = text
         } else if let date = try container.decodeIfPresent(Date.self, forKey: .paidAt) {
@@ -305,6 +397,7 @@ struct ChecklistItemDTO: Codable, Identifiable {
     let id: String
     let label: String
     let type: String?
+    let helpText: String?
     let sortOrder: Int?
     let response: JSONValue?
     let completedAt: String?
@@ -322,6 +415,7 @@ enum JSONValue: Codable, Equatable {
     case string(String)
     case bool(Bool)
     case number(Double)
+    case object([String: JSONValue])
     case null
 
     init(from decoder: Decoder) throws {
@@ -332,6 +426,8 @@ enum JSONValue: Codable, Equatable {
             self = .bool(value)
         } else if let value = try? container.decode(Double.self) {
             self = .number(value)
+        } else if let value = try? container.decode([String: JSONValue].self) {
+            self = .object(value)
         } else if let value = try? container.decode(String.self) {
             self = .string(value)
         } else {
@@ -345,6 +441,7 @@ enum JSONValue: Codable, Equatable {
         case .string(let value): try container.encode(value)
         case .bool(let value): try container.encode(value)
         case .number(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
         case .null: try container.encodeNil()
         }
     }
@@ -464,4 +561,57 @@ struct CustomerDTO: Codable, Identifiable {
     let zip: String?
     let companyName: String?
     let status: String?
+}
+
+struct VisitProfitDTO: Decodable {
+    let revenue: Double
+    let grossProfit: Double
+    let netProfit: Double
+    let marginPercent: Double
+    let breakdown: [VisitProfitLineDTO]?
+    let notes: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case revenue, grossProfit, netProfit, marginPercent, breakdown, notes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        revenue = try container.decodeFlexibleDouble(forKey: .revenue) ?? 0
+        grossProfit = try container.decodeFlexibleDouble(forKey: .grossProfit) ?? 0
+        netProfit = try container.decodeFlexibleDouble(forKey: .netProfit) ?? 0
+        marginPercent = try container.decodeFlexibleDouble(forKey: .marginPercent) ?? 0
+        breakdown = try container.decodeIfPresent([VisitProfitLineDTO].self, forKey: .breakdown)
+        notes = try container.decodeIfPresent([String].self, forKey: .notes)
+    }
+}
+
+struct VisitProfitLineDTO: Decodable, Identifiable {
+    var id: String { label }
+    let label: String
+    let amount: Double
+
+    enum CodingKeys: String, CodingKey {
+        case label, amount
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        label = try container.decode(String.self, forKey: .label)
+        amount = try container.decodeFlexibleDouble(forKey: .amount) ?? 0
+    }
+}
+
+struct CustomerHistoryDTO: Decodable {
+    let pastVisitCount: Int
+    let visits: [CustomerHistoryVisitDTO]
+    let estimatesWithoutVisit: [EstimateSummaryDTO]
+}
+
+struct CustomerHistoryVisitDTO: Decodable, Identifiable {
+    let id: String
+    let title: String
+    let startAt: String
+    let status: String
+    let assignedUserName: String?
 }

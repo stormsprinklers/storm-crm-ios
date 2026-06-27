@@ -9,6 +9,8 @@ struct StormCRMApp: App {
             RootView()
                 .environmentObject(appEnvironment)
                 .environmentObject(appEnvironment.auth)
+                .environmentObject(appEnvironment.branding)
+                .tint(StormTheme.coral)
                 .onOpenURL { url in
                     appEnvironment.handleDeepLink(url)
                 }
@@ -18,15 +20,28 @@ struct StormCRMApp: App {
 
 struct RootView: View {
     @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var env: AppEnvironment
 
     var body: some View {
-        Group {
+        ZStack(alignment: .top) {
+            Group {
+                if auth.isAuthenticated {
+                    MainTabView()
+                        .task {
+                            await env.branding.load(api: env.apiClient)
+                            await env.voice.prepare()
+                        }
+                } else {
+                    LoginView()
+                }
+            }
+            .animation(.easeInOut, value: auth.isAuthenticated)
+
             if auth.isAuthenticated {
-                MainTabView()
-            } else {
-                LoginView()
+                VoiceCallBar(voice: env.voice)
+                    .padding(.top, 4)
             }
         }
-        .animation(.easeInOut, value: auth.isAuthenticated)
+        .background(StormTheme.page.ignoresSafeArea())
     }
 }

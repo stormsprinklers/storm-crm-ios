@@ -4,17 +4,32 @@ import SwiftUI
 final class VisitDetailViewModel: ObservableObject {
     @Published var visit: VisitDetailDTO?
     @Published var checklists: [ChecklistDTO] = []
+    @Published var timeEvents: [TimeEventDTO] = []
+    @Published var profit: VisitProfitDTO?
+    @Published var customerHistory: CustomerHistoryDTO?
     @Published var isLoading = false
     @Published var error: String?
     @Published var actionMessage: String?
 
-    func load(api: APIClient, visitId: String) async {
+    func load(api: APIClient, visitId: String, userRole: String?) async {
         isLoading = true
         error = nil
         defer { isLoading = false }
         do {
             visit = try await api.get(path: APIPath.visit(visitId))
             checklists = (try? await api.get(path: APIPath.visitChecklists(visitId))) ?? []
+            timeEvents = (try? await api.get(path: APIPath.visitTime(visitId))) ?? []
+
+            if let customerId = visit?.customer?.id {
+                customerHistory = try? await api.get(
+                    path: APIPath.customerHistory(customerId),
+                    query: [URLQueryItem(name: "excludeVisitId", value: visitId)]
+                )
+            }
+
+            if let role = userRole, UserRoles.canViewProfitMargins(role) {
+                profit = try? await api.get(path: APIPath.visitProfit(visitId))
+            }
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
@@ -37,36 +52,36 @@ final class VisitDetailViewModel: ObservableObject {
                 originLat: location?.lat,
                 originLng: location?.lng
             )
-            let _: VisitDetailDTO = try await api.post(path: APIPath.visitTime(visitId), body: body)
-            await load(api: api, visitId: visitId)
+            visit = try await api.post(path: APIPath.visitTime(visitId), body: body)
+            timeEvents = (try? await api.get(path: APIPath.visitTime(visitId))) ?? timeEvents
             actionMessage = "Updated: \(type.replacingOccurrences(of: "_", with: " "))"
         } catch {
             actionMessage = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 
-    func addNote(api: APIClient, visitId: String, body: String) async {
+    func addNote(api: APIClient, visitId: String, body: String, userRole: String?) async {
         struct Body: Encodable { let body: String }
         do {
             let _: VisitNoteDTO = try await api.post(path: APIPath.visitNotes(visitId), body: Body(body: body))
-            await load(api: api, visitId: visitId)
+            await load(api: api, visitId: visitId, userRole: userRole)
         } catch {
             actionMessage = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 
-    func toggleChecklistItem(
+    func saveChecklistItem(
         api: APIClient,
         visitId: String,
         checklistId: String,
         itemId: String,
-        completed: Bool
+        response: JSONValue
     ) async {
-        struct Body: Encodable { let response: Bool }
+        struct Body: Encodable { let response: JSONValue }
         do {
             let _: ChecklistItemDTO = try await api.patch(
                 path: APIPath.visitChecklistItem(visitId, checklistId: checklistId, itemId: itemId),
-                body: Body(response: completed)
+                body: Body(response: response)
             )
             checklists = (try? await api.get(path: APIPath.visitChecklists(visitId))) ?? checklists
         } catch {
@@ -92,15 +107,42 @@ struct VisitDetailView: View {
             } else if let visit = viewModel.visit {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        TimeTrackingBar(visit: visit) { event in
-                            await handleTimeEvent(event)
+                        let subtotal = visitSubtotal(from: visit.lineItems ?? [])
+                        let discountTotal = visitDiscountTotal(subtotal: subtotal, discounts: visit.discounts ?? [])
+                        let total = max(0, subtotal - discountTotal)
+                        let paymentSummary = VisitPaymentSummary.from(visit: visit, computedTotal: total)
+
+                        VisitHeaderSection(visit: visit, paymentSummary: paymentSummary)
+
+                        if visit.customer?.doNotService == true {
+                            DoNotServiceBanner()
                         }
 
                         if let message = viewModel.actionMessage {
                             Text(message).font(.footnote).foregroundStyle(.secondary)
                         }
 
+                        TimeTrackingBar(visit: visit, timeEvents: viewModel.timeEvents) { event in
+                            await handleTimeEvent(event)
+                        }
+
+                        HStack {
+                            Button("Parts run") { showPartsRun = true }
+                                .buttonStyle(StormSecondaryButtonStyle())
+                            Button("Collect payment") { showPayment = true }
+                                .buttonStyle(StormPrimaryButtonStyle())
+                                .disabled(paymentSummary.isPaid || total <= 0)
+                        }
+
+                        if visit.hasInstallPlan {
+                            VisitInstallPlanSection(visit: visit)
+                        }
+
                         CustomerVisitCard(visit: visit, voice: env.voice)
+
+                        if let property = visit.property {
+                            VisitPropertyImagesSection(property: property)
+                        }
 
                         if let property = visit.property, let customerId = visit.customer?.id {
                             NavigationLink {
@@ -111,21 +153,36 @@ struct VisitDetailView: View {
                                 )
                             } label: {
                                 Label("Irrigation map & program", systemImage: "drop.fill")
+                                    .foregroundStyle(StormTheme.sky)
                             }
                         }
 
-                        VisitChecklistsSection(
-                            checklists: viewModel.checklists,
-                            onToggle: { checklistId, itemId, completed in
-                                await viewModel.toggleChecklistItem(
-                                    api: env.apiClient,
-                                    visitId: visitId,
-                                    checklistId: checklistId,
-                                    itemId: itemId,
-                                    completed: completed
-                                )
-                            }
+                        VisitScheduleInfoSection(visit: visit)
+                        VisitTimeEventsSection(events: viewModel.timeEvents)
+                        VisitTotalsSection(
+                            subtotal: subtotal,
+                            discountTotal: discountTotal,
+                            total: total,
+                            paymentSummary: paymentSummary
                         )
+
+                        LineItemsSection(
+                            items: visit.lineItems ?? [],
+                            discounts: visit.discounts ?? [],
+                            subtotal: subtotal,
+                            discountTotal: discountTotal,
+                            total: total
+                        )
+
+                        VisitChecklistsSection(checklists: viewModel.checklists) { checklistId, itemId, response in
+                            await viewModel.saveChecklistItem(
+                                api: env.apiClient,
+                                visitId: visitId,
+                                checklistId: checklistId,
+                                itemId: itemId,
+                                response: response
+                            )
+                        }
 
                         VisitNotesSection(
                             notes: visit.notes ?? [],
@@ -133,24 +190,33 @@ struct VisitDetailView: View {
                             onAdd: {
                                 let text = newNote
                                 newNote = ""
-                                await viewModel.addNote(api: env.apiClient, visitId: visitId, body: text)
+                                await viewModel.addNote(
+                                    api: env.apiClient,
+                                    visitId: visitId,
+                                    body: text,
+                                    userRole: env.auth.user?.role
+                                )
                             }
                         )
 
                         VisitAttachmentsSection(visitId: visitId)
 
-                        LineItemsSection(items: visit.lineItems ?? [], total: visit.total)
+                        if let estimates = visit.estimates, !estimates.isEmpty {
+                            VisitEstimatesSection(estimates: estimates)
+                        }
 
-                        HStack {
-                            Button("Parts run") { showPartsRun = true }
-                                .buttonStyle(.bordered)
-                            Button("Collect payment") { showPayment = true }
-                                .buttonStyle(.borderedProminent)
+                        if let history = viewModel.customerHistory {
+                            VisitCustomerHistorySection(history: history)
+                        }
+
+                        if let profit = viewModel.profit {
+                            VisitProfitSectionView(profit: profit)
                         }
                     }
                     .padding()
                 }
-                .navigationTitle(visit.title)
+                .background(StormTheme.page.ignoresSafeArea())
+                .navigationTitle("Visit")
                 .navigationBarTitleDisplayMode(.inline)
                 .sheet(isPresented: $showPayment) {
                     PaymentSheet(visitId: visitId)
@@ -160,8 +226,12 @@ struct VisitDetailView: View {
                 }
             }
         }
-        .refreshable { await viewModel.load(api: env.apiClient, visitId: visitId) }
-        .task { await viewModel.load(api: env.apiClient, visitId: visitId) }
+        .refreshable {
+            await viewModel.load(api: env.apiClient, visitId: visitId, userRole: env.auth.user?.role)
+        }
+        .task {
+            await viewModel.load(api: env.apiClient, visitId: visitId, userRole: env.auth.user?.role)
+        }
     }
 
     private func handleTimeEvent(_ type: String) async {
@@ -182,27 +252,32 @@ struct VisitDetailView: View {
 
 struct TimeTrackingBar: View {
     let visit: VisitDetailDTO
+    let timeEvents: [TimeEventDTO]
     let onAction: (String) async -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Time tracking").font(.headline)
-            StatusBadge(status: visit.status)
-            if let eta = visit.eta?.formatted {
-                Text("ETA: \(eta)").font(.subheadline)
-            }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 8) {
-                ForEach(actionsForStatus(visit.status), id: \.type) { action in
-                    Button(action.label) {
-                        Task { await onAction(action.type) }
+        StormCard {
+            VStack(alignment: .leading, spacing: 8) {
+                StormSectionHeader(title: "Time tracking", systemImage: "timer")
+                StormBadge(text: visit.status, style: .accent)
+                if let eta = visit.eta?.formatted {
+                    Text("ETA: \(eta)").font(.subheadline).foregroundStyle(StormTheme.sky)
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 8) {
+                    ForEach(actionsForStatus(visit.status), id: \.type) { action in
+                        Button(action.label) {
+                            Task { await onAction(action.type) }
+                        }
+                        .buttonStyle(StormPrimaryButtonStyle())
                     }
-                    .buttonStyle(.borderedProminent)
+                }
+                if !timeEvents.isEmpty {
+                    Text("Last: \(timeEvents.last?.type.replacingOccurrences(of: "_", with: " ") ?? "")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
-        .padding()
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private struct Action {
@@ -237,34 +312,41 @@ struct CustomerVisitCard: View {
     @ObservedObject var voice: VoiceManager
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Customer").font(.headline)
-            if let customer = visit.customer {
-                Text(customer.name).font(.title3)
-                if let phone = customer.phone, !phone.isEmpty {
-                    HStack {
-                        Link(destination: URL(string: "sms:\(phone)")!) {
-                            Label("Text", systemImage: "message")
+        StormCard {
+            VStack(alignment: .leading, spacing: 8) {
+                StormSectionHeader(title: "Customer", systemImage: "person.crop.circle")
+                if let customer = visit.customer {
+                    Text(customer.name).font(.title3.weight(.semibold))
+                    if let email = customer.email, !email.isEmpty {
+                        Link(destination: URL(string: "mailto:\(email)")!) {
+                            Label(email, systemImage: "envelope")
                         }
-                        Button {
-                            Task { await voice.call(phone: phone) }
-                        } label: {
-                            Label("Call", systemImage: "phone")
+                        .font(.subheadline)
+                    }
+                    if let phone = customer.phone, !phone.isEmpty {
+                        HStack(spacing: 12) {
+                            Link(destination: URL(string: "sms:\(phone)")!) {
+                                Label("Text", systemImage: "message")
+                            }
+                            Button {
+                                Task { await voice.call(phone: phone, customerId: customer.id) }
+                            } label: {
+                                Label("Call", systemImage: "phone")
+                            }
                         }
+                        .font(.subheadline)
+                    }
+                }
+                if let address = formattedAddress(visit) {
+                    Text(address).foregroundStyle(.secondary)
+                    if let url = mapsURL(address) {
+                        Link("Open in Maps", destination: url)
+                            .font(.subheadline)
+                            .foregroundStyle(StormTheme.sky)
                     }
                 }
             }
-            if let address = formattedAddress(visit) {
-                Text(address).foregroundStyle(.secondary)
-                if let url = mapsURL(address) {
-                    Link("Open in Maps", destination: url)
-                }
-            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(.quaternary.opacity(0.4))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func formattedAddress(_ visit: VisitDetailDTO) -> String? {

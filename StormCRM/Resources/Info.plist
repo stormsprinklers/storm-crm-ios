@@ -42,8 +42,15 @@
 	<string>Attach job photos to visits.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Share your location when heading to a job for accurate ETA.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Place and receive calls through Storm CRM.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Attach photos to visits.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>voip</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

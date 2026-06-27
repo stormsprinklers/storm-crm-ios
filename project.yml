@@ -5,6 +5,10 @@ options:
     iOS: "17.0"
   xcodeVersion: "15.0"
   createIntermediateGroups: true
+packages:
+  TwilioVoice:
+    url: https://github.com/twilio/twilio-voice-ios
+    from: 6.13.0
 settings:
   base:
     SWIFT_VERSION: "5.9"
@@ -20,6 +24,9 @@ targets:
       - path: StormCRM
         excludes:
           - Resources/Info.plist
+    dependencies:
+      - package: TwilioVoice
+        product: TwilioVoice
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

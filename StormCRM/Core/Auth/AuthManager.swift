@@ -12,8 +12,22 @@ final class AuthManager: ObservableObject {
     init(tokenStore: TokenStore, apiClient: APIClient) {
         self.tokenStore = tokenStore
         self.apiClient = apiClient
+        if let data = UserDefaults.standard.data(forKey: Self.userStorageKey),
+           let saved = try? JSONDecoder().decode(UserDTO.self, from: data) {
+            user = saved
+        }
         if tokenStore.tokens != nil {
             isAuthenticated = true
+        }
+    }
+
+    private static let userStorageKey = "stormcrm.user"
+
+    private func persistUser(_ user: UserDTO?) {
+        if let user, let data = try? JSONEncoder().encode(user) {
+            UserDefaults.standard.set(data, forKey: Self.userStorageKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.userStorageKey)
         }
     }
 
@@ -36,6 +50,7 @@ final class AuthManager: ObservableObject {
                 expiresIn: response.expiresIn
             )
             user = response.user
+            persistUser(response.user)
             isAuthenticated = true
         } catch {
             lastError = (error as? APIError)?.message ?? error.localizedDescription
@@ -52,6 +67,7 @@ final class AuthManager: ObservableObject {
         }
         tokenStore.clear()
         user = nil
+        persistUser(nil)
         isAuthenticated = false
     }
 
@@ -71,6 +87,7 @@ final class AuthManager: ObservableObject {
             expiresIn: response.expiresIn
         )
         user = response.user
+        persistUser(response.user)
         isAuthenticated = true
     }
 }

@@ -6,6 +6,7 @@ final class AppEnvironment: ObservableObject {
     let tokenStore: TokenStore
     let apiClient: APIClient
     let auth: AuthManager
+    let branding: CompanyBranding
     let location = LocationManager()
     let voice: VoiceManager
 
@@ -17,7 +18,8 @@ final class AppEnvironment: ObservableObject {
         self.tokenStore = tokenStore
         self.apiClient = apiClient
         self.auth = AuthManager(tokenStore: tokenStore, apiClient: apiClient)
-        self.voice = VoiceManager(apiClient: apiClient)
+        self.branding = CompanyBranding()
+        self.voice = VoiceManager(apiClient: apiClient, auth: self.auth)
     }
 
     func handleDeepLink(_ url: URL) {

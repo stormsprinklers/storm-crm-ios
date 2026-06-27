@@ -64,14 +64,3 @@ struct IrrigationReadOnlyView: View {
         }
     }
 }
-
-extension Color {
-    init?(hex: String?) {
-        guard let hex, hex.hasPrefix("#"), hex.count >= 7 else { return nil }
-        let start = hex.index(hex.startIndex, offsetBy: 1)
-        let r = Int(hex[start..<hex.index(start, offsetBy: 2)], radix: 16) ?? 0
-        let g = Int(hex[hex.index(start, offsetBy: 2)..<hex.index(start, offsetBy: 4)], radix: 16) ?? 0
-        let b = Int(hex[hex.index(start, offsetBy: 4)..<hex.index(start, offsetBy: 6)], radix: 16) ?? 0
-        self.init(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255)
-    }
-}

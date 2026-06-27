@@ -9,35 +9,37 @@ struct VisitAttachmentsSection: View {
     @State private var error: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Attachments").font(.headline)
-            if let error {
-                Text(error).font(.caption).foregroundStyle(.red)
-            }
-            ScrollView(.horizontal) {
-                HStack {
-                    ForEach(attachments) { file in
-                        VStack {
-                            if file.mimeType.hasPrefix("image/"), let url = URL(string: file.blobUrl) {
-                                AsyncImage(url: url) { image in
-                                    image.resizable().scaledToFill()
-                                } placeholder: {
-                                    ProgressView()
-                                }
-                                .frame(width: 80, height: 80)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                            } else {
-                                Image(systemName: "doc.fill")
+        StormCard {
+            VStack(alignment: .leading, spacing: 8) {
+                StormSectionHeader(title: "Attachments", systemImage: "paperclip")
+                if let error {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
+                ScrollView(.horizontal) {
+                    HStack {
+                        ForEach(attachments) { file in
+                            VStack {
+                                if file.mimeType.hasPrefix("image/"), let url = URL(string: file.blobUrl) {
+                                    AsyncImage(url: url) { image in
+                                        image.resizable().scaledToFill()
+                                    } placeholder: {
+                                        ProgressView()
+                                    }
                                     .frame(width: 80, height: 80)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                } else {
+                                    Image(systemName: "doc.fill")
+                                        .frame(width: 80, height: 80)
+                                }
+                                Text(file.fileName).font(.caption2).lineLimit(1)
                             }
-                            Text(file.fileName).font(.caption2).lineLimit(1)
                         }
-                    }
-                    PhotosPicker(selection: $pickerItem, matching: .images) {
-                        Label("Add photo", systemImage: "camera.fill")
-                            .frame(width: 80, height: 80)
-                            .background(.quaternary)
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        PhotosPicker(selection: $pickerItem, matching: .images) {
+                            Label("Add photo", systemImage: "camera.fill")
+                                .frame(width: 80, height: 80)
+                                .background(StormTheme.ice.opacity(0.5))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
                     }
                 }
             }

@@ -78,6 +78,7 @@ Also check:
 - **Inbox empty** — Team inbox only shows **internal** SMS threads. If your team uses external/customer SMS only, this tab will be empty until internal conversations exist.
 - **401 / session errors** — Confirm `API_BASE_URL` points at a server with the mobile auth endpoints deployed (`/api/mobile/auth/login`).
 
+**"Project file is damaged"**
 
 Do not use an old committed `.xcodeproj`. Remove it and regenerate:
 
@@ -85,3 +86,31 @@ Do not use an old committed `.xcodeproj`. Remove it and regenerate:
 rm -rf StormCRM.xcodeproj
 xcodegen generate
 ```
+
+## Twilio Voice (in-app calling)
+
+Calls use the **Twilio Voice iOS SDK** over VoIP — the same `/api/inbox/voice/token` endpoint as the web CRM softphone.
+
+After pulling:
+
+```bash
+xcodegen generate   # links TwilioVoice SPM package from project.yml
+```
+
+**Requirements on the CRM server** (see `crm/.env.example`):
+
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_API_KEY`, `TWILIO_API_SECRET`
+- `TWILIO_TWIML_APP_SID` with Voice URL → `{APP_URL}/api/twilio/voice/client`
+- Company `twilioPhone` configured in Settings → Voice
+
+**On device:**
+
+- Grant **Microphone** permission when prompted
+- Test on a **physical iPhone/iPad** — the Simulator has limited VoIP/audio support
+- A call bar appears at the top while connected (mute / end)
+
+If the SDK is not linked, the app falls back to opening the native Phone app (`tel:`).
+
+## Branding
+
+The app uses Storm Sprinklers colors (navy, sky, coral) and loads your company **email logo** from `GET /api/settings/company` after sign-in. Upload the logo in CRM → Settings → Company → Email branding.

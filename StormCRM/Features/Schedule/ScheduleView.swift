@@ -59,6 +59,7 @@ struct ScheduleView: View {
             .refreshable { await viewModel.load(api: env.apiClient) }
             .task { await viewModel.load(api: env.apiClient) }
         }
+        .background(StormTheme.page.ignoresSafeArea())
     }
 }
 
@@ -90,11 +91,6 @@ struct StatusBadge: View {
     let status: String
 
     var body: some View {
-        Text(status.replacingOccurrences(of: "_", with: " "))
-            .font(.caption)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 2)
-            .background(.quaternary)
-            .clipShape(Capsule())
+        StormBadge(text: status, style: .accent)
     }
 }
