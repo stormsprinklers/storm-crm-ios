@@ -229,7 +229,7 @@ final class NewSmsConversationViewModel: ObservableObject {
                 employeeResults = response.employees
             }
         } catch {
-            error = (error as? APIError)?.message ?? error.localizedDescription
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 

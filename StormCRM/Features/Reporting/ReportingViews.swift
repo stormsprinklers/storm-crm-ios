@@ -419,20 +419,20 @@ private struct FinancialBar: View {
             HStack(spacing: 4) {
                 RoundedRectangle(cornerRadius: 3)
                     .fill(StormTheme.sky.opacity(0.7))
-                    .frame(width: barWidth(revenue, max: maxValue), height: 8)
+                    .frame(width: barWidth(revenue, maxValue: maxValue), height: 8)
                 Text("Invoiced").font(.caption2).foregroundStyle(.secondary)
             }
             HStack(spacing: 4) {
                 RoundedRectangle(cornerRadius: 3)
                     .fill(StormTheme.success.opacity(0.7))
-                    .frame(width: barWidth(payments, max: maxValue), height: 8)
+                    .frame(width: barWidth(payments, maxValue: maxValue), height: 8)
                 Text("Collected").font(.caption2).foregroundStyle(.secondary)
             }
         }
     }
 
-    private func barWidth(_ value: Double, max: Double) -> CGFloat {
-        CGFloat(max(4, (value / max) * 120))
+    private func barWidth(_ value: Double, maxValue: Double) -> CGFloat {
+        CGFloat(Swift.max(4, (value / maxValue) * 120))
     }
 }
 
