@@ -73,7 +73,7 @@ struct AuthenticatedVideoPlayer: View {
                 failed = true
                 return
             }
-            let ext = urlString.lowerc().contains(".mov") ? "mov" : "mp4"
+            let ext = urlString.lowercased().contains(".mov") ? "mov" : "mp4"
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString)
                 .appendingPathExtension(ext)

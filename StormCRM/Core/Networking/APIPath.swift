@@ -14,6 +14,7 @@ enum APIPath {
     static func visitChecklists(_ id: String) -> String { "/api/visits/\(id)/checklists" }
     static func visitLineItems(_ id: String) -> String { "/api/visits/\(id)/line-items" }
     static func visitPartsRun(_ id: String) -> String { "/api/visits/\(id)/parts-run" }
+    static func visitMaintenancePlan(_ id: String) -> String { "/api/visits/\(id)/maintenance-plan" }
     static func visitProfit(_ id: String) -> String { "/api/visits/\(id)/profit" }
     static func visitInvoice(_ id: String) -> String { "/api/visits/\(id)/invoice" }
     static func invoice(_ id: String) -> String { "/api/invoices/\(id)" }

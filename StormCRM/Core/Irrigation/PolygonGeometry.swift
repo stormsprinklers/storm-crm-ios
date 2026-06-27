@@ -1,8 +1,12 @@
 import CoreGraphics
 import Foundation
 
-typealias ImagePolygon = [(x: Double, y: Double)]
-typealias ImagePoint = (x: Double, y: Double)
+struct ImagePoint: Equatable {
+    var x: Double
+    var y: Double
+}
+
+typealias ImagePolygon = [ImagePoint]
 
 enum PolygonGeometry {
     static let zoneColors = [
@@ -24,7 +28,7 @@ enum PolygonGeometry {
               coords.count >= 2,
               case .number(let x) = coords[0],
               case .number(let y) = coords[1] else { return nil }
-        return (x: x, y: y)
+        return ImagePoint(x: x, y: y)
     }
 
     static func polygonToGeoJson(_ polygon: ImagePolygon?) -> JSONValue {
@@ -69,10 +73,10 @@ enum PolygonGeometry {
     }
 
     static func centroid(_ polygon: ImagePolygon) -> ImagePoint {
-        let sum = polygon.reduce((x: 0.0, y: 0.0)) { acc, p in
-            (acc.x + p.x, acc.y + p.y)
+        let sum = polygon.reduce(ImagePoint(x: 0, y: 0)) { acc, p in
+            ImagePoint(x: acc.x + p.x, y: acc.y + p.y)
         }
-        return (x: sum.x / Double(polygon.count), y: sum.y / Double(polygon.count))
+        return ImagePoint(x: sum.x / Double(polygon.count), y: sum.y / Double(polygon.count))
     }
 
     static func roundNormalized(_ value: Double) -> Double {
@@ -86,7 +90,7 @@ enum PolygonGeometry {
                   pair.count >= 2,
                   case .number(let x) = pair[0],
                   case .number(let y) = pair[1] else { continue }
-            points.append((x: x, y: y))
+            points.append(ImagePoint(x: x, y: y))
         }
         guard points.count >= 3 else { return nil }
         if let first = points.first, let last = points.last,
@@ -117,7 +121,7 @@ struct MapImageLayout {
         let x = PolygonGeometry.roundNormalized(Double((location.x - rect.minX) / rect.width))
         let y = PolygonGeometry.roundNormalized(Double((location.y - rect.minY) / rect.height))
         guard x >= 0, x <= 1, y >= 0, y <= 1 else { return nil }
-        return (x: x, y: y)
+        return ImagePoint(x: x, y: y)
     }
 
     func cgPoint(from normalized: ImagePoint) -> CGPoint {

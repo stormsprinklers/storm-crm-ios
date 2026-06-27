@@ -159,7 +159,7 @@ struct VisitLineItemsEditSection: View {
 
     private func formatDiscount(_ discount: DiscountDTO) -> String {
         if discount.type == "PERCENT" {
-            return "\(discount.amount, format: .number)%"
+            return discount.amount.formatted(.number.precision(.fractionLength(0))) + "%"
         }
         return discount.amount.formatted(.currency(code: "USD"))
     }
