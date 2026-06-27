@@ -121,7 +121,7 @@ struct MapImageLayout {
         let x = PolygonGeometry.roundNormalized(Double((location.x - rect.minX) / rect.width))
         let y = PolygonGeometry.roundNormalized(Double((location.y - rect.minY) / rect.height))
         guard x >= 0, x <= 1, y >= 0, y <= 1 else { return nil }
-        return (x: x, y: y)
+        return ImagePoint(x: x, y: y)
     }
 
     func cgPoint(from normalized: ImagePoint) -> CGPoint {
