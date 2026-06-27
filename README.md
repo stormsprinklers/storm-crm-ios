@@ -69,7 +69,7 @@ Then **Product → Clean Build Folder** and rebuild.
 
 Also check:
 
-- **Schedule empty** — Shows jobs from the past 7 days through the next 21 days. Field techs only see visits assigned to them; admins see the full company schedule.
+- **Schedule empty** — The schedule loads roughly two weeks before and three weeks after the selected week. Tap another day in the week strip or use the arrows to change weeks. Field techs only see visits assigned to them; admins see the full company schedule.
 - **Customers empty** — Open the **Customers** tab (search loads all active customers; use `status=ALL` to include archived). Pull to refresh.
 - **Inbox empty** — Use the **Customers** or **Team** segment at the top. Customer SMS uses `scope=external`; team SMS uses `scope=internal`. Field techs default to Team.
 - **401 / session errors** — Confirm `API_BASE_URL` points at a server with the mobile auth endpoints deployed (`/api/mobile/auth/login`).
@@ -107,6 +107,25 @@ xcodegen generate   # links TwilioVoice SPM package from project.yml
 
 If the SDK is not linked, the app falls back to opening the native Phone app (`tel:`).
 
+## Dashboard
+
+The **Dashboard** tab (first tab) is the home screen:
+
+- **Shift clock** — clock in/out and today’s hours (`GET/POST /api/time-clock`)
+- **Next job** — preview of your current or next scheduled visit (tap to open visit detail)
+- **This week** — your personal stats for the current calendar week: average job value, 5-star reviews, and total revenue (KPI dashboard API, filtered to your user)
+
+Pull to refresh reloads the clock, schedule preview, and weekly stats.
+
+## More
+
+The **More** tab (last tab) holds account actions and future settings:
+
+- Account name, email, and role
+- **Sign out**
+
+Mobile login is available to **Admin, Manager, CSR, Sales, Tech, and Installer** roles.
+
 ## SMS Inbox
 
 The **Inbox** tab is a full SMS/MMS client wired to the same APIs as the web CRM:
@@ -114,11 +133,9 @@ The **Inbox** tab is a full SMS/MMS client wired to the same APIs as the web CRM
 - **Customers** — external customer conversations (`GET/POST /api/inbox/sms/conversations?scope=external`)
 - **Team** — internal employee SMS (`scope=internal`)
 - Message bubbles show **timestamp**, **sender name** on outbound messages, and **delivery status**
-- **MMS** — inbound images/videos display via authenticated blob URLs; outbound attachments upload through `POST /api/inbox/media/upload?channel=sms`
+- **MMS** — inbound images/videos display via authenticated blob URLs; outbound attachments upload through `POST /api/inbox/media/upload?channel=sms` (camera or photo library)
 - **Compose** — search customers or team members and start a new thread
 - Threads **poll every 5 seconds** while open (same as web)
-
-Mobile login is available to **Admin, Manager, CSR, Sales, Tech, and Installer** roles.
 
 ## Push notifications (new SMS alerts)
 
@@ -147,9 +164,9 @@ Browse and manage customers from the **Customers** tab (between Visits and Repor
 
 - **Search** — name, phone, or address (debounced live search)
 - **List** — phone, city, property/visit counts, Do Not Service and archived badges
-- **Detail** — contact info, Maps link, summary stats, properties (with irrigation map links), visit history (tap to open visit), estimates, and notes
+- **Detail** — contact info, summary stats, and for each property inline: **street view**, map embed, property info (zones, shutoff, controller), **irrigation zone map + program guide**, visit history, estimates, and notes
 - **Actions** — CRM text (opens inbox compose), Twilio voice call, email
-- **Edit** — office roles (CSR, Manager, Admin, Sales) can update contact/address fields; Admin/Manager can set Do Not Service and archive status
+- **Edit** — office roles (CSR, Manager, Admin, Sales) can update contact/address fields; **Tags** and **Do not service** are editable inline on the customer profile for Tech, Installer (tags only), CSR, Sales, Manager, and Admin
 - **Create** — office roles can add customers via **+** in the toolbar
 
 ## Service plans (lite)
@@ -181,11 +198,13 @@ The app uses Storm Sprinklers colors (navy, sky, coral) and loads your company *
 
 ## Visit page parity
 
-The visit detail screen includes time tracking (with GPS for En route), MapKit job map, embedded irrigation zone map + program guide, maintenance plans, checklists, notes, attachments, **editable line items and discounts**, payments, customer history, and more.
+The visit detail screen is laid out top-to-bottom: a thin **street view** header (content scrolls over it), visit title with **Pay** when balance is due, time-tracking actions, **summary of work**, checklist launcher, **customer** block (contact, property map, collapsible programming guide), **schedule** (date, time, window, technician), timestamped **notes** with author photos, then attachments, estimates, line items, and tags. It also includes maintenance plans, customer history, profit (managers), and admin delete where applicable.
+
+**Summary of work:** Saved on the visit (`workSummary` field). Requires running a Prisma migration after pulling backend changes (`npx prisma migrate dev` in `crm/`).
 
 **Line items:** All roles can add items from the price book, edit quantity/price, remove items, and manage discounts (same APIs as web).
 
-**Schedule:** Office roles (CSR, Manager, Admin) can change start/end time and assigned technician. Field techs (TECH, INSTALLER) see schedule read-only.
+**Schedule:** A **week strip** (Sun–Sat) at the top lets you pick one day at a time; the list below shows only that day’s jobs. Use the chevrons to move between weeks, or **Today** when you’re not on the current day. Office roles (CSR, Manager, Admin) can edit start/end time and assigned technician from the **Schedule** tab (swipe or long-press a job) or visit detail. The schedule is **color-coded** by technician, service area, crew, or division (palette menu). Field techs see a read-only color-coded view of their assigned jobs.
 
 **Delete visit:** Admins see a delete button at the bottom of the visit page (`DELETE /api/visits/{id}`).
 

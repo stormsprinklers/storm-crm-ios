@@ -411,7 +411,7 @@ struct ServicePlanEnrollmentDetailView: View {
                                                 .foregroundStyle(.secondary)
                                         }
                                         Spacer()
-                                        StormBadge(text: visit.status)
+                                        StormBadge(text: visit.status.visitDisplayLabel)
                                     }
                                     if visit.id != visits.last?.id { Divider() }
                                 }

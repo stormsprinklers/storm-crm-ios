@@ -9,6 +9,9 @@ struct MainTabView: View {
 
     var body: some View {
         TabView {
+            DashboardView()
+                .tabItem { Label("Dashboard", systemImage: "house") }
+
             ScheduleView()
                 .tabItem { Label("Schedule", systemImage: "calendar") }
 
@@ -26,8 +29,8 @@ struct MainTabView: View {
             InboxHubView()
                 .tabItem { Label("Inbox", systemImage: "message") }
 
-            MeView()
-                .tabItem { Label("Me", systemImage: "person.circle") }
+            MoreView()
+                .tabItem { Label("More", systemImage: "ellipsis.circle") }
         }
         .sheet(item: $env.paymentReturn) { payment in
             PaymentReturnSheet(payment: payment)

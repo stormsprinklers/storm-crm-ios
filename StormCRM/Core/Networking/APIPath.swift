@@ -16,6 +16,7 @@ enum APIPath {
     static func visitPartsRun(_ id: String) -> String { "/api/visits/\(id)/parts-run" }
     static func visitProfit(_ id: String) -> String { "/api/visits/\(id)/profit" }
     static func visitInvoice(_ id: String) -> String { "/api/visits/\(id)/invoice" }
+    static func invoice(_ id: String) -> String { "/api/invoices/\(id)" }
     static func invoiceSend(_ id: String) -> String { "/api/invoices/\(id)/send" }
     static let maintenancePlanTemplates = "/api/maintenance-plans/templates"
     static let maintenancePlanEnrollments = "/api/maintenance-plans/enrollments"
@@ -28,6 +29,11 @@ enum APIPath {
     static func visitDiscounts(_ id: String) -> String { "/api/visits/\(id)/discounts" }
     static let scheduleFilters = "/api/schedule/filters"
     static let priceBookItems = "/api/price-book/items"
+    static let estimates = "/api/estimates"
+    static func estimate(_ id: String) -> String { "/api/estimates/\(id)" }
+    static func estimateSend(_ id: String) -> String { "/api/estimates/\(id)/send" }
+    static func estimateLineItems(_ id: String) -> String { "/api/estimates/\(id)/line-items" }
+    static func estimateCopy(_ id: String) -> String { "/api/estimates/\(id)/copy" }
     static func visitChecklistItem(_ visitId: String, checklistId: String, itemId: String) -> String {
         "/api/visits/\(visitId)/checklists/\(checklistId)/items/\(itemId)"
     }
@@ -41,6 +47,7 @@ enum APIPath {
     static func customerProperties(_ id: String) -> String { "/api/customers/\(id)/properties" }
     static func customerHistory(_ id: String) -> String { "/api/customers/\(id)/history" }
     static func customerNotes(_ id: String) -> String { "/api/customers/\(id)/notes" }
+    static let mapsEmbed = "/api/maps/embed"
     static func irrigationMap(customerId: String, propertyId: String) -> String {
         "/api/customers/\(customerId)/properties/\(propertyId)/irrigation-map"
     }

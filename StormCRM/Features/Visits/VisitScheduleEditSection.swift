@@ -23,6 +23,11 @@ struct VisitScheduleEditSection: View {
                     DatePicker("End", selection: $endDate, displayedComponents: [.date, .hourAndMinute])
 
                     if !employees.isEmpty {
+                        if let selected = selectedEmployee {
+                            LabeledContent("Assigned") {
+                                NamedColorChip(person: selected.namedColor)
+                            }
+                        }
                         Picker("Assigned technician", selection: $assignedUserId) {
                             Text("Unassigned").tag("")
                             ForEach(employeeOptions) { employee in
@@ -41,18 +46,24 @@ struct VisitScheduleEditSection: View {
                     .buttonStyle(StormPrimaryButtonStyle())
                     .disabled(isSaving)
                 } else {
-                    LabeledContent("Start") {
-                        Text(APIDateFormatting.displayString(from: visit.startAt))
+                    LabeledContent("Date") {
+                        Text(scheduleDateLabel)
                     }
-                    LabeledContent("End") {
-                        Text(APIDateFormatting.displayString(from: visit.endAt))
+                    LabeledContent("Time") {
+                        Text(scheduleStartTimeLabel)
+                    }
+                    LabeledContent("Window") {
+                        Text(scheduleWindowLabel)
                     }
                     if let tech = visit.assignedUser {
-                        LabeledContent("Assigned") {
-                            NamedColorChip(person: tech)
+                        LabeledContent("Technician") {
+                            HStack(spacing: 8) {
+                                EmployeeAvatar(person: tech, size: 24)
+                                Text(tech.name)
+                            }
                         }
                     } else {
-                        LabeledContent("Assigned") {
+                        LabeledContent("Technician") {
                             Text("Unassigned").foregroundStyle(.secondary)
                         }
                     }
@@ -87,10 +98,40 @@ struct VisitScheduleEditSection: View {
         return list
     }
 
+    private var selectedEmployee: ScheduleEmployeeDTO? {
+        guard !assignedUserId.isEmpty else { return nil }
+        return employeeOptions.first(where: { $0.id == assignedUserId })
+    }
+
     private func syncFromVisit() {
         startDate = VisitDateEditing.date(from: visit.startAt)
         endDate = VisitDateEditing.date(from: visit.endAt)
         assignedUserId = visit.assignedUser?.id ?? ""
+    }
+
+    private var scheduleDateLabel: String {
+        guard let start = APIDateFormatting.parse(visit.startAt) else {
+            return APIDateFormatting.displayString(from: visit.startAt)
+        }
+        return start.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private var scheduleStartTimeLabel: String {
+        guard let start = APIDateFormatting.parse(visit.startAt) else {
+            return APIDateFormatting.displayString(from: visit.startAt)
+        }
+        return start.formatted(date: .omitted, time: .shortened)
+    }
+
+    private var scheduleWindowLabel: String {
+        guard let start = APIDateFormatting.parse(visit.startAt),
+              let end = APIDateFormatting.parse(visit.endAt)
+        else {
+            return "\(APIDateFormatting.displayString(from: visit.startAt)) – \(APIDateFormatting.displayString(from: visit.endAt))"
+        }
+        let startTime = start.formatted(date: .omitted, time: .shortened)
+        let endTime = end.formatted(date: .omitted, time: .shortened)
+        return "\(startTime) – \(endTime)"
     }
 
     private func save() async {
@@ -121,14 +162,5 @@ struct VisitScheduleEditSection: View {
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
-    }
-}
-
-private extension ScheduleEmployeeDTO {
-    init(id: String, name: String, color: String?, photoUrl: String?) {
-        self.id = id
-        self.name = name
-        self.color = color
-        self.photoUrl = photoUrl
     }
 }

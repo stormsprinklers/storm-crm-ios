@@ -6,6 +6,8 @@ struct VisitAttachmentsSection: View {
     let visitId: String
     @State private var attachments: [AttachmentDTO] = []
     @State private var pickerItem: PhotosPickerItem?
+    @State private var showCamera = false
+    @State private var isUploading = false
     @State private var error: String?
 
     var body: some View {
@@ -16,17 +18,13 @@ struct VisitAttachmentsSection: View {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }
                 ScrollView(.horizontal) {
-                    HStack {
+                    HStack(spacing: 10) {
                         ForEach(attachments) { file in
                             VStack {
-                                if file.mimeType.hasPrefix("image/"), let url = URL(string: file.blobUrl) {
-                                    AsyncImage(url: url) { image in
-                                        image.resizable().scaledToFill()
-                                    } placeholder: {
-                                        ProgressView()
-                                    }
-                                    .frame(width: 80, height: 80)
-                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                if file.mimeType.hasPrefix("image/") {
+                                    AuthenticatedBlobImage(urlString: file.blobUrl, contentMode: .fill)
+                                        .frame(width: 80, height: 80)
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
                                 } else {
                                     Image(systemName: "doc.fill")
                                         .frame(width: 80, height: 80)
@@ -34,20 +32,38 @@ struct VisitAttachmentsSection: View {
                                 Text(file.fileName).font(.caption2).lineLimit(1)
                             }
                         }
+
+                        AttachmentAddTile(title: "Take photo", systemImage: "camera.fill") {
+                            showCamera = true
+                        }
+                        .disabled(isUploading)
+
                         PhotosPicker(selection: $pickerItem, matching: .images) {
-                            Label("Add photo", systemImage: "camera.fill")
+                            AttachmentAddTile(title: "Library", systemImage: "photo.on.rectangle")
+                        }
+                        .disabled(isUploading)
+
+                        if isUploading {
+                            ProgressView()
                                 .frame(width: 80, height: 80)
-                                .background(StormTheme.ice.opacity(0.5))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                     }
                 }
             }
         }
+        .sheet(isPresented: $showCamera) {
+            CameraImagePicker { image in
+                Task { await uploadImageData(image.attachmentJPEGData()) }
+            }
+            .ignoresSafeArea()
+        }
         .task { await load() }
         .onChange(of: pickerItem) { _, item in
             guard let item else { return }
-            Task { await upload(item) }
+            Task {
+                await uploadPickerItem(item)
+                pickerItem = nil
+            }
         }
     }
 
@@ -59,9 +75,24 @@ struct VisitAttachmentsSection: View {
         }
     }
 
-    private func upload(_ item: PhotosPickerItem) async {
+    private func uploadPickerItem(_ item: PhotosPickerItem) async {
         do {
             guard let data = try await item.loadTransferable(type: Data.self) else { return }
+            await uploadImageData(data)
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func uploadImageData(_ data: Data?) async {
+        guard let data, !data.isEmpty else {
+            error = "Could not read photo"
+            return
+        }
+        isUploading = true
+        error = nil
+        defer { isUploading = false }
+        do {
             let fileName = "photo-\(Int(Date().timeIntervalSince1970)).jpg"
             _ = try await env.apiClient.uploadMultipart(
                 path: APIPath.visitAttachments(visitId),

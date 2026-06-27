@@ -106,6 +106,7 @@ struct VisitDetailDTO: Decodable, Identifiable {
     let division: String
     let status: String
     let tags: [String]?
+    let workSummary: String?
     let isCallback: Bool?
     let address: String?
     let city: String?
@@ -224,6 +225,32 @@ struct PropertySummary: Decodable, Hashable {
         aerialImageUrl = try container.decodeIfPresent(String.self, forKey: .aerialImageUrl)
         propertyDiagramUrl = try container.decodeIfPresent(String.self, forKey: .propertyDiagramUrl)
         irrigationMapStatus = try container.decodeIfPresent(String.self, forKey: .irrigationMapStatus)
+    }
+
+    init(
+        id: String,
+        name: String?,
+        address: String?,
+        city: String?,
+        state: String?,
+        zip: String?,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        aerialImageUrl: String? = nil,
+        propertyDiagramUrl: String? = nil,
+        irrigationMapStatus: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.address = address
+        self.city = city
+        self.state = state
+        self.zip = zip
+        self.latitude = latitude
+        self.longitude = longitude
+        self.aerialImageUrl = aerialImageUrl
+        self.propertyDiagramUrl = propertyDiagramUrl
+        self.irrigationMapStatus = irrigationMapStatus
     }
 
     func hash(into hasher: inout Hasher) {
@@ -499,6 +526,32 @@ struct CustomerPropertyDTO: Decodable, Identifiable {
     let irrigationZoneCount: Int?
     let shutoffValveLocation: String?
     let controllerLocation: String?
+
+    var formattedAddress: String {
+        [address, city, state, zip]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+    }
+
+    var propertySummary: PropertySummary {
+        PropertySummary(
+            id: id,
+            name: name,
+            address: address,
+            city: city,
+            state: state,
+            zip: zip,
+            irrigationMapStatus: irrigationMapStatus
+        )
+    }
+}
+
+struct MapsEmbedResponse: Decodable {
+    let configured: Bool
+    let placeEmbed: String?
+    let streetEmbed: String?
+    let formattedAddress: String?
 }
 
 struct VisitMaintenanceContextDTO: Decodable {
@@ -903,6 +956,38 @@ struct CustomerHistoryDTO: Decodable {
     let visits: [CustomerHistoryVisitDTO]
     let estimatesWithoutVisit: [EstimateSummaryDTO]
     let estimatesLinkedToVisits: [CustomerLinkedEstimateDTO]?
+    let invoices: [CustomerHistoryInvoiceDTO]?
+}
+
+struct CustomerHistoryInvoiceDTO: Decodable, Identifiable {
+    let id: String
+    let invoiceNumber: String
+    let status: String
+    let total: Double
+    let createdAt: String
+    let visitId: String?
+    let visitTitle: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, invoiceNumber, status, total, createdAt, visitId, visitTitle
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        invoiceNumber = try container.decode(String.self, forKey: .invoiceNumber)
+        status = try container.decode(String.self, forKey: .status)
+        total = try container.decodeFlexibleDouble(forKey: .total) ?? 0
+        visitId = try container.decodeIfPresent(String.self, forKey: .visitId)
+        visitTitle = try container.decodeIfPresent(String.self, forKey: .visitTitle)
+        if let text = try container.decodeIfPresent(String.self, forKey: .createdAt) {
+            createdAt = text
+        } else if let date = try container.decodeIfPresent(Date.self, forKey: .createdAt) {
+            createdAt = APIDateFormatting.queryString(from: date)
+        } else {
+            createdAt = ""
+        }
+    }
 }
 
 struct CustomerHistoryVisitDTO: Decodable, Identifiable {
@@ -911,4 +996,12 @@ struct CustomerHistoryVisitDTO: Decodable, Identifiable {
     let startAt: String
     let status: String
     let assignedUserName: String?
+}
+
+extension String {
+    /// User-facing label for visit status and time-event types.
+    var visitDisplayLabel: String {
+        if self == "EN_ROUTE" { return "On my way" }
+        return replacingOccurrences(of: "_", with: " ")
+    }
 }

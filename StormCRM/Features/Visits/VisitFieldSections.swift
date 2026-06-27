@@ -2,17 +2,30 @@ import SwiftUI
 
 struct VisitChecklistsSection: View {
     let checklists: [ChecklistDTO]
+    var embedded: Bool = false
     let onSaveItem: (String, String, JSONValue) async -> Void
     let onComplete: (String) async -> Void
 
     var body: some View {
-        StormCard {
-            VStack(alignment: .leading, spacing: 12) {
+        Group {
+            if embedded {
+                checklistContent
+            } else {
+                StormCard { checklistContent }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var checklistContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !embedded {
                 StormSectionHeader(title: "Checklists", systemImage: "checklist")
-                if checklists.isEmpty {
-                    Text("No checklists").foregroundStyle(.secondary)
-                } else {
-                    ForEach(checklists) { checklist in
+            }
+            if checklists.isEmpty {
+                Text("No checklists").foregroundStyle(.secondary)
+            } else {
+                ForEach(checklists) { checklist in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Text(checklist.name).font(.subheadline.bold())
@@ -111,25 +124,57 @@ struct VisitNotesSection: View {
 
     var body: some View {
         StormCard {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 StormSectionHeader(title: "Notes", systemImage: "note.text")
-                ForEach(notes) { note in
-                    VStack(alignment: .leading, spacing: 2) {
-                        if let author = note.author {
-                            Text(author.name)
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(StormTheme.sky)
+
+                if notes.isEmpty {
+                    Text("No notes yet.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(notes) { note in
+                        HStack(alignment: .top, spacing: 10) {
+                            if let author = note.author {
+                                EmployeeAvatar(person: author, size: 34)
+                            } else {
+                                Circle()
+                                    .fill(StormTheme.ice)
+                                    .frame(width: 34, height: 34)
+                                    .overlay {
+                                        Image(systemName: "person.fill")
+                                            .font(.caption)
+                                            .foregroundStyle(StormTheme.navy.opacity(0.5))
+                                    }
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    if let author = note.author {
+                                        Text(author.name)
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(StormTheme.navy)
+                                    }
+                                    Text(APIDateFormatting.displayString(from: note.createdAt))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(note.body)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.primary)
+                            }
                         }
-                        Text(note.body)
-                        Text(APIDateFormatting.displayString(from: note.createdAt))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        .padding(.vertical, 4)
+
+                        if note.id != notes.last?.id {
+                            Divider()
+                        }
                     }
-                    .padding(.vertical, 4)
                 }
-                HStack {
+
+                HStack(alignment: .bottom, spacing: 8) {
                     TextField("Add note…", text: $newNote, axis: .vertical)
                         .lineLimit(2...4)
+                        .textFieldStyle(.roundedBorder)
                     Button("Add") { Task { await onAdd() } }
                         .buttonStyle(StormSecondaryButtonStyle())
                         .disabled(newNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

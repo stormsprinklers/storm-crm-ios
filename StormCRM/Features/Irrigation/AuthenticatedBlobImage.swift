@@ -87,3 +87,82 @@ struct AuthenticatedBlobImage: View {
         }
     }
 }
+
+struct EmployeeAvatar: View {
+    @EnvironmentObject private var env: AppEnvironment
+    let person: NamedColor
+    var size: CGFloat = 32
+
+    @State private var image: UIImage?
+    @State private var isLoading = false
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else if isLoading {
+                initialsCircle
+                    .overlay { ProgressView().scaleEffect(0.55) }
+            } else {
+                initialsCircle
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .task(id: person.photoUrl) { await loadPhoto() }
+    }
+
+    private var initialsCircle: some View {
+        Circle()
+            .fill(Color(hex: person.color) ?? StormTheme.sky)
+            .overlay {
+                Text(person.initials)
+                    .font(.system(size: size * 0.34, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+    }
+
+    private func loadPhoto() async {
+        image = nil
+        guard let photoUrl = person.photoUrl, !photoUrl.isEmpty,
+              let url = BlobImageURL.resolved(photoUrl) else {
+            isLoading = false
+            return
+        }
+
+        isLoading = true
+        defer { isLoading = false }
+
+        var request = URLRequest(url: url)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if BlobImageURL.needsAuthentication(photoUrl),
+           let token = env.tokenStore.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+                  let uiImage = UIImage(data: data) else {
+                return
+            }
+            image = uiImage
+        } catch {
+            return
+        }
+    }
+}
+
+private extension NamedColor {
+    var initials: String {
+        name
+            .split(separator: " ")
+            .prefix(2)
+            .compactMap(\.first)
+            .map { String($0) }
+            .joined()
+            .uppercased()
+    }
+}

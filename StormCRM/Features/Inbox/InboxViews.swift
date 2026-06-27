@@ -140,6 +140,7 @@ struct SmsConversationView: View {
     let scope: InboxScope
     @StateObject private var viewModel = SmsConversationViewModel()
     @State private var photoItems: [PhotosPickerItem] = []
+    @State private var showCamera = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -175,8 +176,17 @@ struct SmsConversationView: View {
             }
 
             HStack(alignment: .bottom, spacing: 8) {
+                Button {
+                    showCamera = true
+                } label: {
+                    Image(systemName: "camera")
+                        .font(.title3)
+                        .padding(8)
+                }
+                .disabled(viewModel.isUploading)
+
                 PhotosPicker(selection: $photoItems, maxSelectionCount: 5, matching: .any(of: [.images, .videos])) {
-                    Image(systemName: "paperclip")
+                    Image(systemName: "photo.on.rectangle")
                         .font(.title3)
                         .padding(8)
                 }
@@ -216,6 +226,20 @@ struct SmsConversationView: View {
             viewModel.startPolling(api: env.apiClient, conversationId: conversationId)
         }
         .onDisappear { viewModel.stopPolling() }
+        .sheet(isPresented: $showCamera) {
+            CameraImagePicker { image in
+                Task {
+                    guard let data = image.attachmentJPEGData() else { return }
+                    await viewModel.uploadAttachment(
+                        api: env.apiClient,
+                        data: data,
+                        fileName: "photo-\(Int(Date().timeIntervalSince1970)).jpg",
+                        mimeType: "image/jpeg"
+                    )
+                }
+            }
+            .ignoresSafeArea()
+        }
         .onChange(of: photoItems) { _, items in
             Task { await importPhotos(items, api: env.apiClient) }
         }
@@ -251,10 +275,17 @@ struct SmsMessageBubble: View {
                     }
                     if let body = message.body, !body.isEmpty, body != "[Media message]" {
                         Text(body)
+                            .foregroundStyle(bubbleForeground)
                     }
                 }
                 .padding(10)
-                .background(message.isOutbound ? StormTheme.coral.opacity(0.18) : Color(.systemGray5))
+                .background(bubbleBackground)
+                .overlay {
+                    if !message.isOutbound {
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(StormTheme.ice, lineWidth: 1)
+                    }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 HStack(spacing: 6) {
                     Text(APIDateFormatting.displayString(from: message.displayDate))
@@ -270,6 +301,14 @@ struct SmsMessageBubble: View {
             if !message.isOutbound { Spacer(minLength: 48) }
         }
     }
+
+    private var bubbleBackground: Color {
+        message.isOutbound ? StormTheme.navy : Color(.systemBackground)
+    }
+
+    private var bubbleForeground: Color {
+        message.isOutbound ? .white : StormTheme.navy
+    }
 }
 
 struct NewSmsConversationView: View {
@@ -281,6 +320,7 @@ struct NewSmsConversationView: View {
     @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel = NewSmsConversationViewModel()
     @State private var photoItems: [PhotosPickerItem] = []
+    @State private var showCamera = false
 
     var body: some View {
         Form {
@@ -357,8 +397,18 @@ struct NewSmsConversationView: View {
                     }
                 }
 
-                PhotosPicker(selection: $photoItems, maxSelectionCount: 5, matching: .any(of: [.images, .videos])) {
-                    Label("Add photo or video", systemImage: "paperclip")
+                HStack(spacing: 16) {
+                    Button {
+                        showCamera = true
+                    } label: {
+                        Label("Take photo", systemImage: "camera")
+                    }
+                    .disabled(viewModel.isUploading)
+
+                    PhotosPicker(selection: $photoItems, maxSelectionCount: 5, matching: .any(of: [.images, .videos])) {
+                        Label("Photo library", systemImage: "photo.on.rectangle")
+                    }
+                    .disabled(viewModel.isUploading)
                 }
             }
 
@@ -394,6 +444,20 @@ struct NewSmsConversationView: View {
         .onChange(of: viewModel.searchText) { _, text in
             guard text.count >= 2 else { return }
             Task { await viewModel.search(api: env.apiClient, scope: scope) }
+        }
+        .sheet(isPresented: $showCamera) {
+            CameraImagePicker { image in
+                Task {
+                    guard let data = image.attachmentJPEGData() else { return }
+                    await viewModel.uploadAttachment(
+                        api: env.apiClient,
+                        data: data,
+                        fileName: "photo-\(Int(Date().timeIntervalSince1970)).jpg",
+                        mimeType: "image/jpeg"
+                    )
+                }
+            }
+            .ignoresSafeArea()
         }
         .onChange(of: photoItems) { _, items in
             Task {

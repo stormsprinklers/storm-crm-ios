@@ -28,7 +28,7 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
         manager.startUpdatingLocation()
     }
 
-    /// Waits for a fresh GPS fix (used for En route ETA).
+    /// Waits for a fresh GPS fix (used for On my way ETA).
     func awaitLocation(timeout: TimeInterval = 10) async -> CLLocation? {
         if let last = lastLocation, abs(last.timestamp.timeIntervalSinceNow) < 30 {
             return last

@@ -33,8 +33,12 @@ enum UserRoles {
         !isFieldRole(role)
     }
 
+    static func canEditCustomerTags(_ role: String) -> Bool {
+        role == "ADMIN" || role == "MANAGER" || role == "CSR" || role == "SALES" || role == "TECH" || role == "INSTALLER"
+    }
+
     static func canFlagDoNotService(_ role: String) -> Bool {
-        role == "ADMIN" || role == "MANAGER"
+        role == "ADMIN" || role == "MANAGER" || role == "CSR" || role == "SALES" || role == "TECH"
     }
 
     static func canManageCustomerStatus(_ role: String) -> Bool {

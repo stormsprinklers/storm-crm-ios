@@ -54,7 +54,7 @@ struct CustomersListView: View {
                     )
                 } else {
                     List(viewModel.customers) { customer in
-                        NavigationLink(value: customer.id) {
+                        NavigationLink(value: CustomerListRoute.detail(id: customer.id)) {
                             CustomerListRow(customer: customer)
                         }
                     }
@@ -74,8 +74,11 @@ struct CustomersListView: View {
                     }
                 }
             }
-            .navigationDestination(for: String.self) { customerId in
-                CustomerDetailView(customerId: customerId)
+            .navigationDestination(for: CustomerListRoute.self) { route in
+                switch route {
+                case .detail(let customerId):
+                    CustomerDetailView(customerId: customerId)
+                }
             }
             .sheet(isPresented: $showCreate) {
                 NavigationStack {

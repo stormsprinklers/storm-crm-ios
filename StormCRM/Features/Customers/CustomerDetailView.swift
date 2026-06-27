@@ -45,6 +45,18 @@ final class CustomerDetailViewModel: ObservableObject {
         customer = updated
         return updated
     }
+
+    func updateTags(api: APIClient, customerId: String, tags: [String]) async throws {
+        var update = CustomerUpdateBody()
+        update.tags = tags
+        customer = try await saveCustomer(api: api, customerId: customerId, update: update)
+    }
+
+    func updateDoNotService(api: APIClient, customerId: String, doNotService: Bool) async throws {
+        var update = CustomerUpdateBody()
+        update.doNotService = doNotService
+        customer = try await saveCustomer(api: api, customerId: customerId, update: update)
+    }
 }
 
 struct CustomerDetailView: View {
@@ -59,6 +71,8 @@ struct CustomerDetailView: View {
 
     private var userRole: String? { env.auth.user?.role }
     private var canEdit: Bool { userRole.map { UserRoles.canEditCustomers($0) } ?? false }
+    private var canEditTags: Bool { userRole.map { UserRoles.canEditCustomerTags($0) } ?? false }
+    private var canFlagDoNotService: Bool { userRole.map { UserRoles.canFlagDoNotService($0) } ?? false }
 
     var body: some View {
         ScrollView {
@@ -74,11 +88,48 @@ struct CustomerDetailView: View {
                         onMessage: { showSmsCompose = true }
                     )
 
-                    if !customer.formattedAddress.isEmpty {
+                    CustomerPropertiesSection(
+                        customerId: customerId,
+                        properties: viewModel.properties
+                    )
+
+                    if viewModel.properties.isEmpty, !customer.formattedAddress.isEmpty {
                         CustomerAddressCard(address: customer.formattedAddress)
                     }
 
                     CustomerStatsCard(customer: customer)
+
+                    if canEditTags || canFlagDoNotService {
+                        CustomerTagsAndFlagsSection(
+                            customer: customer,
+                            canEditTags: canEditTags,
+                            canFlagDoNotService: canFlagDoNotService,
+                            onTagsUpdated: { tags in
+                                try await viewModel.updateTags(
+                                    api: env.apiClient,
+                                    customerId: customerId,
+                                    tags: tags
+                                )
+                            },
+                            onDoNotServiceUpdated: { flagged in
+                                try await viewModel.updateDoNotService(
+                                    api: env.apiClient,
+                                    customerId: customerId,
+                                    doNotService: flagged
+                                )
+                            },
+                            onError: { message in
+                                viewModel.error = message
+                            }
+                        )
+                    } else if let tags = customer.tags, !tags.isEmpty {
+                        StormCard {
+                            VStack(alignment: .leading, spacing: 8) {
+                                StormSectionHeader(title: "Tags", systemImage: "tag")
+                                FlowTagsView(tags: tags)
+                            }
+                        }
+                    }
 
                     if let role = userRole {
                         CustomerServicePlansSection(
@@ -87,11 +138,6 @@ struct CustomerDetailView: View {
                             userRole: role
                         )
                     }
-
-                    CustomerPropertiesSection(
-                        customerId: customerId,
-                        properties: viewModel.properties
-                    )
 
                     CustomerHistorySection(history: viewModel.history)
 
@@ -162,6 +208,7 @@ struct CustomerDetailView: View {
         }
         .refreshable { await viewModel.load(api: env.apiClient, customerId: customerId) }
         .task { await viewModel.load(api: env.apiClient, customerId: customerId) }
+        .customerHistoryDestinations()
     }
 
     private func submitNote() async {
@@ -217,9 +264,6 @@ struct CustomerContactCard: View {
                 if let source = customer.leadSource, !source.isEmpty {
                     LabeledContent("Lead source", value: source)
                         .font(.caption)
-                }
-                if let tags = customer.tags, !tags.isEmpty {
-                    FlowTagsView(tags: tags)
                 }
             }
         }
@@ -281,52 +325,6 @@ struct CustomerStatsCard: View {
     }
 }
 
-struct CustomerPropertiesSection: View {
-    let customerId: String
-    let properties: [CustomerPropertyDTO]
-
-    var body: some View {
-        StormCard {
-            VStack(alignment: .leading, spacing: 10) {
-                StormSectionHeader(title: "Properties", systemImage: "house")
-                if properties.isEmpty {
-                    Text("No properties on file").foregroundStyle(.secondary)
-                } else {
-                    ForEach(properties) { property in
-                        NavigationLink {
-                            PropertyDetailView(customerId: customerId, property: property)
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Text(property.name).font(.subheadline.weight(.medium))
-                                        if property.isPrimary == true {
-                                            StormBadge(text: "Primary", style: .accent)
-                                        }
-                                    }
-                                    if let status = property.irrigationMapStatus {
-                                        Text("Irrigation: \(status.replacingOccurrences(of: "_", with: " "))")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        if property.id != properties.last?.id {
-                            Divider()
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
 struct CustomerHistorySection: View {
     let history: CustomerHistoryDTO?
 
@@ -343,9 +341,7 @@ struct CustomerHistorySection: View {
                         Text("No visits yet").foregroundStyle(.secondary)
                     } else {
                         ForEach(history.visits.prefix(15)) { visit in
-                            NavigationLink {
-                                VisitDetailView(visitId: visit.id)
-                            } label: {
+                            NavigationLink(value: CustomerHistoryDestination.visit(visit.id)) {
                                 HStack(alignment: .top) {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(visit.title)
@@ -359,7 +355,7 @@ struct CustomerHistorySection: View {
                                         }
                                     }
                                     Spacer()
-                                    StormBadge(text: visit.status)
+                                    StormBadge(text: visit.status.visitDisplayLabel)
                                 }
                             }
                             .buttonStyle(.plain)
@@ -374,18 +370,22 @@ struct CustomerHistorySection: View {
                             .font(.caption.weight(.semibold))
                             .padding(.top, 8)
                         ForEach(history.estimatesWithoutVisit.prefix(5)) { estimate in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text(estimate.status.replacingOccurrences(of: "_", with: " "))
-                                        .font(.subheadline)
-                                    Text(APIDateFormatting.displayString(from: estimate.createdAt))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                            NavigationLink(value: CustomerHistoryDestination.estimate(estimate.id)) {
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(estimate.status.replacingOccurrences(of: "_", with: " "))
+                                            .font(.subheadline)
+                                            .foregroundStyle(StormTheme.navy)
+                                        Text(APIDateFormatting.displayString(from: estimate.createdAt))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(estimate.total, format: .currency(code: "USD"))
+                                        .font(.subheadline.weight(.medium))
                                 }
-                                Spacer()
-                                Text(estimate.total, format: .currency(code: "USD"))
-                                    .font(.subheadline.weight(.medium))
                             }
+                            .buttonStyle(.plain)
                         }
                     }
 
@@ -394,18 +394,51 @@ struct CustomerHistorySection: View {
                             .font(.caption.weight(.semibold))
                             .padding(.top, 8)
                         ForEach(linked.prefix(5)) { estimate in
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text(estimate.visitTitle ?? "Visit estimate")
-                                        .font(.subheadline)
-                                    Text(estimate.status.replacingOccurrences(of: "_", with: " "))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                            NavigationLink(value: CustomerHistoryDestination.estimate(estimate.id)) {
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(estimate.visitTitle ?? "Visit estimate")
+                                            .font(.subheadline)
+                                            .foregroundStyle(StormTheme.navy)
+                                        Text(estimate.status.replacingOccurrences(of: "_", with: " "))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text(estimate.total, format: .currency(code: "USD"))
+                                        .font(.subheadline.weight(.medium))
                                 }
-                                Spacer()
-                                Text(estimate.total, format: .currency(code: "USD"))
-                                    .font(.subheadline.weight(.medium))
                             }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    if let invoices = history.invoices, !invoices.isEmpty {
+                        Text("Invoices")
+                            .font(.caption.weight(.semibold))
+                            .padding(.top, 8)
+                        ForEach(invoices.prefix(10)) { invoice in
+                            NavigationLink(value: CustomerHistoryDestination.invoice(invoice.id)) {
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(invoice.invoiceNumber)
+                                            .font(.subheadline)
+                                            .foregroundStyle(StormTheme.navy)
+                                        Text(invoice.status.replacingOccurrences(of: "_", with: " "))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        if let visitTitle = invoice.visitTitle {
+                                            Text(visitTitle)
+                                                .font(.caption2)
+                                                .foregroundStyle(.tertiary)
+                                        }
+                                    }
+                                    Spacer()
+                                    Text(invoice.total, format: .currency(code: "USD"))
+                                        .font(.subheadline.weight(.medium))
+                                }
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 } else {
@@ -527,7 +560,14 @@ struct CustomerEditView: View {
             }
             Section("Other") {
                 TextField("Lead source", text: $leadSource)
-                TextField("Tags (comma-separated)", text: $tagsText)
+            }
+            if UserRoles.canEditCustomerTags(userRole) {
+                Section("Tags") {
+                    TextField("Tags (comma-separated)", text: $tagsText)
+                    Text("You can also add and remove tags on the customer profile.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             if UserRoles.canFlagDoNotService(userRole) {
                 Section("Flags") {
@@ -578,7 +618,9 @@ struct CustomerEditView: View {
         update.state = state.nilIfBlank
         update.zip = zip.nilIfBlank
         update.leadSource = leadSource.nilIfBlank
-        update.tags = tags
+        if UserRoles.canEditCustomerTags(userRole) {
+            update.tags = tags
+        }
         if UserRoles.canFlagDoNotService(userRole) {
             update.doNotService = doNotService
         }
@@ -606,61 +648,6 @@ struct FlowTagsView: View {
                 }
             }
         }
-    }
-}
-
-struct PropertyDetailView: View {
-    let customerId: String
-    let property: CustomerPropertyDTO
-
-    var body: some View {
-        List {
-            Section("Property") {
-                LabeledContent("Name", value: property.name)
-                if let address = propertyAddress {
-                    LabeledContent("Address", value: address)
-                }
-                if let zones = property.irrigationZoneCount {
-                    LabeledContent("Irrigation zones", value: "\(zones)")
-                }
-                if let shutoff = property.shutoffValveLocation {
-                    LabeledContent("Shutoff", value: shutoff)
-                }
-                if let controller = property.controllerLocation {
-                    LabeledContent("Controller", value: controller)
-                }
-            }
-
-            Section {
-                NavigationLink {
-                    IrrigationDetailView(
-                        customerId: customerId,
-                        propertyId: property.id,
-                        propertyName: property.name
-                    )
-                } label: {
-                    Label("Irrigation map & program", systemImage: "drop.fill")
-                }
-                NavigationLink {
-                    IrrigationMapEditorView(
-                        customerId: customerId,
-                        propertyId: property.id,
-                        propertyName: property.name
-                    )
-                } label: {
-                    Label("Edit irrigation map", systemImage: "pencil")
-                }
-            }
-        }
-        .navigationTitle(property.name)
-    }
-
-    private var propertyAddress: String? {
-        [property.address, property.city, property.state, property.zip]
-            .compactMap { $0 }
-            .filter { !$0.isEmpty }
-            .joined(separator: ", ")
-            .nilIfEmpty
     }
 }
 

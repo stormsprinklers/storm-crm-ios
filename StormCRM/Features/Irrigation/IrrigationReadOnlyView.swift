@@ -1,9 +1,12 @@
 import SwiftUI
 
-struct VisitIrrigationSection: View {
+struct PropertyIrrigationInlineSection: View {
     @EnvironmentObject private var env: AppEnvironment
     let customerId: String
-    let property: PropertySummary
+    let propertyId: String
+    let propertyName: String
+    let fallbackAerialUrl: String?
+    var showsEditLink: Bool = false
 
     @State private var mapProperty: IrrigationMapProperty?
     @State private var programGuide: ControllerProgramGuideDTO?
@@ -15,93 +18,100 @@ struct VisitIrrigationSection: View {
     }
 
     var body: some View {
-        StormCard {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    StormSectionHeader(title: "Irrigation map & program", systemImage: "drop.fill")
-                    Spacer()
-                    if mapProperty?.irrigationMapStatus == "PUBLISHED" {
-                        StormBadge(text: "Published", style: .success)
-                    }
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                StormSectionHeader(title: "Irrigation map & program", systemImage: "drop.fill")
+                Spacer()
+                if mapProperty?.irrigationMapStatus == "PUBLISHED" {
+                    StormBadge(text: "Published", style: .success)
+                }
+            }
+
+            if isLoading {
+                ProgressView("Loading irrigation…")
+            } else if let error {
+                Text(error).font(.footnote).foregroundStyle(.red)
+            } else {
+                IrrigationMapCanvas(
+                    imageUrl: mapProperty?.displayImageUrl ?? fallbackAerialUrl,
+                    zones: zones,
+                    markers: mapProperty?.allMarkersForDisplay() ?? []
+                )
+
+                if !zones.isEmpty {
+                    IrrigationZoneLegend(zones: zones)
+                } else {
+                    Text("No zone boundaries drawn yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
-                if isLoading {
-                    ProgressView("Loading irrigation…")
-                } else if let error {
-                    Text(error).font(.footnote).foregroundStyle(.red)
-                } else {
-                    IrrigationMapCanvas(
-                        imageUrl: mapProperty?.displayImageUrl ?? property.aerialImageUrl,
-                        zones: zones,
-                        markers: mapProperty?.allMarkersForDisplay() ?? []
-                    )
+                if let shutoff = mapProperty?.shutoffValveLocation, !shutoff.isEmpty {
+                    LabeledContent("Shutoff") { Text(shutoff).font(.caption) }
+                }
+                if let controller = mapProperty?.controllerLocation, !controller.isEmpty {
+                    LabeledContent("Controller") { Text(controller).font(.caption) }
+                }
+                if let waterSource = mapProperty?.waterSource, !waterSource.isEmpty {
+                    LabeledContent("Water source") { Text(waterSource).font(.caption) }
+                }
 
-                    if !zones.isEmpty {
-                        IrrigationZoneLegend(zones: zones)
-                    } else {
-                        Text("No zone boundaries drawn yet.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                if let guide = programGuide {
+                    Divider()
+                    Text("Controller program guide").font(.subheadline.bold())
+                    IrrigationProgramGuideView(guide: guide)
+                }
 
-                    if let shutoff = mapProperty?.shutoffValveLocation, !shutoff.isEmpty {
-                        LabeledContent("Shutoff") { Text(shutoff).font(.caption) }
-                    }
-                    if let controller = mapProperty?.controllerLocation, !controller.isEmpty {
-                        LabeledContent("Controller") { Text(controller).font(.caption) }
-                    }
-
-                    if let guide = programGuide {
-                        Divider()
-                        Text("Controller program guide").font(.subheadline.bold())
-                        IrrigationProgramGuideView(guide: guide)
-                    }
-
-                    HStack {
-                        NavigationLink {
-                            IrrigationDetailView(
-                                customerId: customerId,
-                                propertyId: property.id,
-                                propertyName: property.name ?? "Property"
-                            )
-                        } label: {
-                            Label("View map", systemImage: "map")
-                                .font(.subheadline)
-                        }
-
-                        NavigationLink {
-                            IrrigationMapEditorView(
-                                customerId: customerId,
-                                propertyId: property.id,
-                                propertyName: property.name ?? "Property"
-                            )
-                        } label: {
-                            Label("Edit map", systemImage: "pencil")
-                                .font(.subheadline)
-                        }
+                if showsEditLink {
+                    NavigationLink {
+                        IrrigationMapEditorView(
+                            customerId: customerId,
+                            propertyId: propertyId,
+                            propertyName: propertyName
+                        )
+                    } label: {
+                        Label("Edit irrigation map", systemImage: "pencil")
+                            .font(.subheadline)
                     }
                     .padding(.top, 4)
                 }
             }
         }
-        .task { await load() }
+        .task(id: propertyId) { await load() }
     }
 
     private func load() async {
-        isLoading = true
+        isLoading = mapProperty == nil
         error = nil
         defer { isLoading = false }
         do {
             let mapResponse: IrrigationMapResponse = try await env.apiClient.get(
-                path: APIPath.irrigationMap(customerId: customerId, propertyId: property.id)
+                path: APIPath.irrigationMap(customerId: customerId, propertyId: propertyId)
             )
             mapProperty = mapResponse.property
             let programResponse: IrrigationProgramResponse = try await env.apiClient.get(
-                path: APIPath.irrigationProgram(customerId: customerId, propertyId: property.id)
+                path: APIPath.irrigationProgram(customerId: customerId, propertyId: propertyId)
             )
             programGuide = programResponse.guide
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+}
+
+struct VisitIrrigationSection: View {
+    let customerId: String
+    let property: PropertySummary
+
+    var body: some View {
+        StormCard {
+            PropertyIrrigationInlineSection(
+                customerId: customerId,
+                propertyId: property.id,
+                propertyName: property.name ?? "Property",
+                fallbackAerialUrl: property.aerialImageUrl,
+                showsEditLink: true
+            )
         }
     }
 }

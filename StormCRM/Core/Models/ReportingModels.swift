@@ -111,6 +111,22 @@ struct ReportDateRange: Equatable {
             ]
         }
     }
+
+    static var currentWeek: ReportDateRange {
+        let calendar = Calendar.current
+        let now = Date()
+        guard let interval = calendar.dateInterval(of: .weekOfYear, for: now) else {
+            return ReportDateRange(selection: .custom(start: calendar.startOfDay(for: now), end: now))
+        }
+        let end = calendar.date(byAdding: .second, value: -1, to: interval.end) ?? now
+        return ReportDateRange(selection: .custom(start: interval.start, end: end))
+    }
+}
+
+extension Array where Element == ReportMetric {
+    func metricValue(label: String) -> String? {
+        first { $0.label == label }?.value
+    }
 }
 
 struct ReportMetric: Decodable, Hashable {

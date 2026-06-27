@@ -122,10 +122,8 @@ struct NamedColorChip: View {
     let person: NamedColor
 
     var body: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(Color(hex: person.color) ?? StormTheme.sky)
-                .frame(width: 10, height: 10)
+        HStack(spacing: 8) {
+            EmployeeAvatar(person: person, size: 32)
             Text(person.name)
                 .font(.subheadline)
         }

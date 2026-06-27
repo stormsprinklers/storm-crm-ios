@@ -56,9 +56,9 @@ final class VisitDetailViewModel: ObservableObject {
             visit = try await api.post(path: APIPath.visitTime(visitId), body: body)
             timeEvents = (try? await api.get(path: APIPath.visitTime(visitId))) ?? timeEvents
             if type == "EN_ROUTE", let eta = visit?.eta?.formatted {
-                actionMessage = "En route — ETA \(eta)"
+                actionMessage = "On my way — ETA \(eta)"
             } else {
-                actionMessage = "Updated: \(type.replacingOccurrences(of: "_", with: " "))"
+                actionMessage = "Updated: \(type.visitDisplayLabel)"
             }
         } catch {
             actionMessage = (error as? APIError)?.message ?? error.localizedDescription
@@ -134,172 +134,227 @@ struct VisitDetailView: View {
 
     var body: some View {
         Group {
-            if viewModel.isLoading && viewModel.visit == nil {
-                ProgressView()
-            } else if let error = viewModel.error {
-                ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
-            } else if let visit = viewModel.visit {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        let subtotal = visitSubtotal(from: visit.lineItems ?? [])
-                        let discountTotal = visitDiscountTotal(subtotal: subtotal, discounts: visit.discounts ?? [])
-                        let total = max(0, subtotal - discountTotal)
-                        let paymentSummary = VisitPaymentSummary.from(visit: visit, computedTotal: total)
+            if let visit = viewModel.visit {
+                ZStack(alignment: .top) {
+                    VisitStreetViewHeader(addressQuery: formattedJobAddress(visit))
 
-                        VisitHeaderSection(visit: visit, paymentSummary: paymentSummary)
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            Color.clear.frame(height: 72)
 
-                        if visit.customer?.doNotService == true {
-                            DoNotServiceBanner()
-                        }
+                            VStack(alignment: .leading, spacing: 16) {
+                                let subtotal = visitSubtotal(from: visit.lineItems ?? [])
+                                let discountTotal = visitDiscountTotal(
+                                    subtotal: subtotal,
+                                    discounts: visit.discounts ?? []
+                                )
+                                let total = max(0, subtotal - discountTotal)
+                                let paymentSummary = VisitPaymentSummary.from(
+                                    visit: visit,
+                                    computedTotal: total
+                                )
+                                let canEditSchedule = env.auth.user.map {
+                                    UserRoles.canEditVisitOfficeFields($0.role)
+                                } ?? false
+                                let canEditTags = canEditSchedule
 
-                        if let message = viewModel.actionMessage {
-                            Text(message).font(.footnote).foregroundStyle(.secondary)
-                        }
+                                if visit.customer?.doNotService == true {
+                                    DoNotServiceBanner()
+                                }
 
-                        TimeTrackingBar(visit: visit, timeEvents: viewModel.timeEvents) { event in
-                            await handleTimeEvent(event, visit: visit, total: total, paymentSummary: paymentSummary)
-                        }
+                                if let message = viewModel.actionMessage {
+                                    Text(message)
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
 
-                        VisitPaymentsSection(
-                            visitId: visitId,
-                            total: total,
-                            hasLineItems: !(visit.lineItems ?? []).isEmpty,
-                            paymentSummary: paymentSummary,
-                            onUpdated: { await reloadVisit() }
-                        )
+                                HStack(alignment: .top, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(visit.title)
+                                            .font(.title2.weight(.semibold))
+                                            .foregroundStyle(StormTheme.navy)
+                                        HStack(spacing: 8) {
+                                            StormBadge(text: visit.status.visitDisplayLabel, style: .accent)
+                                            if visit.isCallback == true {
+                                                StormBadge(text: "Callback", style: .warning)
+                                            }
+                                            if paymentSummary.isPaid {
+                                                StormBadge(text: "Paid", style: .success)
+                                            }
+                                        }
+                                    }
+                                    Spacer(minLength: 0)
+                                    if paymentSummary.hasBalanceDue {
+                                        Button {
+                                            finishBillingAmount = paymentSummary.balanceDue ?? total
+                                            showPayment = true
+                                        } label: {
+                                            Label {
+                                                Text(paymentAmountDue(for: visit), format: .currency(code: "USD"))
+                                            } icon: {
+                                                Image(systemName: "dollarsign.circle.fill")
+                                            }
+                                            .font(.subheadline.weight(.semibold))
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 8)
+                                            .background(StormTheme.coral)
+                                            .foregroundStyle(.white)
+                                            .clipShape(Capsule())
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
 
-                        Button("Parts run") { showPartsRun = true }
-                            .buttonStyle(StormSecondaryButtonStyle())
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        if visit.hasInstallPlan {
-                            VisitInstallPlanSection(visit: visit)
-                        }
-
-                        CustomerVisitCard(visit: visit, voice: env.voice)
-
-                        JobMapView(
-                            title: visit.title,
-                            address: formattedJobAddress(visit),
-                            latitude: mapLatitude(for: visit),
-                            longitude: mapLongitude(for: visit)
-                        )
-
-                        if let property = visit.property, let customerId = visit.customer?.id {
-                            VisitIrrigationSection(customerId: customerId, property: property)
-                        }
-
-                        if let role = env.auth.user?.role, UserRoles.canViewMaintenancePlans(role) {
-                            VisitMaintenanceSection(
-                                visitId: visitId,
-                                userRole: role,
-                                onUpdated: {
-                                    await viewModel.load(
-                                        api: env.apiClient,
-                                        visitId: visitId,
-                                        userRole: role
+                                TimeTrackingBar(visit: visit, timeEvents: viewModel.timeEvents) { event in
+                                    await handleTimeEvent(
+                                        event,
+                                        visit: visit,
+                                        total: total,
+                                        paymentSummary: paymentSummary
                                     )
                                 }
-                            )
-                        }
 
-                        let canEditSchedule = env.auth.user.map { UserRoles.canEditVisitOfficeFields($0.role) } ?? false
-
-                        VisitScheduleEditSection(
-                            visit: visit,
-                            canEdit: canEditSchedule,
-                            onSaved: { await reloadVisit() }
-                        )
-                        VisitTimeEventsSection(events: viewModel.timeEvents)
-                        VisitTotalsSection(
-                            subtotal: subtotal,
-                            discountTotal: discountTotal,
-                            total: total,
-                            paymentSummary: paymentSummary
-                        )
-
-                        VisitLineItemsEditSection(
-                            visitId: visitId,
-                            items: visit.lineItems ?? [],
-                            discounts: visit.discounts ?? [],
-                            onUpdated: { await reloadVisit() }
-                        )
-
-                        VisitChecklistsSection(
-                            checklists: viewModel.checklists,
-                            onSaveItem: { checklistId, itemId, response in
-                                await viewModel.saveChecklistItem(
-                                    api: env.apiClient,
+                                VisitWorkSummarySection(
                                     visitId: visitId,
-                                    checklistId: checklistId,
-                                    itemId: itemId,
-                                    response: response
+                                    initialSummary: visit.workSummary
+                                ) {
+                                    await reloadVisit()
+                                }
+
+                                VisitChecklistLauncherSection(
+                                    checklists: viewModel.checklists,
+                                    onSaveItem: { checklistId, itemId, response in
+                                        await viewModel.saveChecklistItem(
+                                            api: env.apiClient,
+                                            visitId: visitId,
+                                            checklistId: checklistId,
+                                            itemId: itemId,
+                                            response: response
+                                        )
+                                    },
+                                    onComplete: { checklistId in
+                                        await viewModel.completeChecklist(
+                                            api: env.apiClient,
+                                            visitId: visitId,
+                                            checklistId: checklistId
+                                        )
+                                    }
                                 )
-                            },
-                            onComplete: { checklistId in
-                                await viewModel.completeChecklist(
-                                    api: env.apiClient,
+
+                                VisitCustomerInfoSection(visit: visit, voice: env.voice)
+
+                                VisitScheduleEditSection(
+                                    visit: visit,
+                                    canEdit: canEditSchedule,
+                                    onSaved: { await reloadVisit() }
+                                )
+
+                                VisitNotesSection(
+                                    notes: visit.notes ?? [],
+                                    newNote: $newNote,
+                                    onAdd: {
+                                        let text = newNote
+                                        newNote = ""
+                                        await viewModel.addNote(
+                                            api: env.apiClient,
+                                            visitId: visitId,
+                                            body: text,
+                                            userRole: env.auth.user?.role
+                                        )
+                                    }
+                                )
+
+                                VisitAttachmentsSection(visitId: visitId)
+
+                                VisitEstimatesSection(
+                                    visit: visit,
+                                    visitId: visitId
+                                ) {
+                                    await reloadVisit()
+                                }
+
+                                VisitLineItemsEditSection(
                                     visitId: visitId,
-                                    checklistId: checklistId
+                                    items: visit.lineItems ?? [],
+                                    discounts: visit.discounts ?? [],
+                                    onUpdated: { await reloadVisit() }
                                 )
+
+                                VisitTagsSection(
+                                    visitId: visitId,
+                                    tags: visit.tags ?? [],
+                                    canEdit: canEditTags,
+                                    onUpdated: { await reloadVisit() }
+                                )
+
+                                Button("Parts run") { showPartsRun = true }
+                                    .buttonStyle(StormSecondaryButtonStyle())
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                if visit.hasInstallPlan {
+                                    VisitInstallPlanSection(visit: visit)
+                                }
+
+                                if let role = env.auth.user?.role, UserRoles.canViewMaintenancePlans(role) {
+                                    VisitMaintenanceSection(
+                                        visitId: visitId,
+                                        userRole: role,
+                                        onUpdated: {
+                                            await viewModel.load(
+                                                api: env.apiClient,
+                                                visitId: visitId,
+                                                userRole: role
+                                            )
+                                        }
+                                    )
+                                }
+
+                                if let history = viewModel.customerHistory {
+                                    VisitCustomerHistorySection(history: history)
+                                }
+
+                                if let profit = viewModel.profit {
+                                    VisitProfitSectionView(profit: profit)
+                                }
+
+                                if env.auth.user.map({ UserRoles.canDeleteVisit($0.role) }) == true {
+                                    deleteVisitSection(visit: visit)
+                                }
                             }
-                        )
-
-                        VisitNotesSection(
-                            notes: visit.notes ?? [],
-                            newNote: $newNote,
-                            onAdd: {
-                                let text = newNote
-                                newNote = ""
-                                await viewModel.addNote(
-                                    api: env.apiClient,
-                                    visitId: visitId,
-                                    body: text,
-                                    userRole: env.auth.user?.role
-                                )
+                            .padding()
+                            .background {
+                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .fill(StormTheme.page)
+                                    .shadow(color: StormTheme.navy.opacity(0.08), radius: 12, y: -4)
                             }
-                        )
-
-                        VisitAttachmentsSection(visitId: visitId)
-
-                        if let estimates = visit.estimates, !estimates.isEmpty {
-                            VisitEstimatesSection(estimates: estimates)
-                        }
-
-                        if let history = viewModel.customerHistory {
-                            VisitCustomerHistorySection(history: history)
-                        }
-
-                        if let profit = viewModel.profit {
-                            VisitProfitSectionView(profit: profit)
-                        }
-
-                        if env.auth.user.map({ UserRoles.canDeleteVisit($0.role) }) == true {
-                            deleteVisitSection(visit: visit)
                         }
                     }
-                    .padding()
                 }
-                .background(StormTheme.page.ignoresSafeArea())
-                .navigationTitle("Visit")
-                .navigationBarTitleDisplayMode(.inline)
-                .sheet(isPresented: $showPayment) {
-                    PaymentSheet(
-                        visitId: visitId,
-                        amountDue: paymentAmountDue(for: visit)
-                    ) {
-                        Task { await reloadVisit() }
-                    }
-                }
-                .sheet(isPresented: $showPartsRun) {
-                    PartsRunSheet(visitId: visitId) {
-                        await viewModel.load(
-                            api: env.apiClient,
-                            visitId: visitId,
-                            userRole: env.auth.user?.role
-                        )
-                    }
-                }
+                .background(StormTheme.navy.opacity(0.08).ignoresSafeArea())
+            } else if let error = viewModel.error {
+                ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
+            } else {
+                ProgressView("Loading visit…")
+            }
+        }
+        .navigationTitle("Visit")
+        .navigationBarTitleDisplayMode(.inline)
+        .customerHistoryDestinations()
+        .sheet(isPresented: $showPayment) {
+            PaymentSheet(
+                visitId: visitId,
+                amountDue: viewModel.visit.map { paymentAmountDue(for: $0) } ?? finishBillingAmount
+            ) {
+                Task { await reloadVisit() }
+            }
+        }
+        .sheet(isPresented: $showPartsRun) {
+            PartsRunSheet(visitId: visitId) {
+                await viewModel.load(
+                    api: env.apiClient,
+                    visitId: visitId,
+                    userRole: env.auth.user?.role
+                )
             }
         }
         .refreshable {
@@ -390,7 +445,7 @@ struct VisitDetailView: View {
             if let loc = await env.location.awaitLocation(timeout: 12) {
                 location = (loc.coordinate.latitude, loc.coordinate.longitude)
             } else {
-                viewModel.actionMessage = "En route without GPS — ETA may be less accurate"
+                viewModel.actionMessage = "On my way without GPS — ETA may be less accurate"
             }
         }
         await viewModel.postTimeEvent(
@@ -430,14 +485,6 @@ struct VisitDetailView: View {
         }
         return nil
     }
-
-    private func mapLatitude(for visit: VisitDetailDTO) -> Double? {
-        visit.property?.latitude
-    }
-
-    private func mapLongitude(for visit: VisitDetailDTO) -> Double? {
-        visit.property?.longitude
-    }
 }
 
 struct TimeTrackingBar: View {
@@ -446,26 +493,27 @@ struct TimeTrackingBar: View {
     let onAction: (String) async -> Void
 
     var body: some View {
-        StormCard {
-            VStack(alignment: .leading, spacing: 8) {
-                StormSectionHeader(title: "Time tracking", systemImage: "timer")
-                StormBadge(text: visit.status, style: .accent)
-                if let eta = visit.eta?.formatted {
-                    Text("ETA: \(eta)").font(.subheadline).foregroundStyle(StormTheme.sky)
-                }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120))], spacing: 8) {
-                    ForEach(actionsForStatus(visit.status), id: \.type) { action in
-                        Button(action.label) {
-                            Task { await onAction(action.type) }
-                        }
-                        .buttonStyle(StormPrimaryButtonStyle())
+        VStack(alignment: .leading, spacing: 10) {
+            if let eta = visit.eta?.formatted {
+                Text("ETA: \(eta)")
+                    .font(.subheadline)
+                    .foregroundStyle(StormTheme.sky)
+            }
+
+            HStack(spacing: 8) {
+                ForEach(actionsForStatus(visit.status), id: \.type) { action in
+                    Button(action.label) {
+                        Task { await onAction(action.type) }
                     }
+                    .buttonStyle(StormPrimaryButtonStyle())
+                    .frame(maxWidth: .infinity)
                 }
-                if !timeEvents.isEmpty {
-                    Text("Last: \(timeEvents.last?.type.replacingOccurrences(of: "_", with: " ") ?? "")")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+            }
+
+            if !timeEvents.isEmpty, let last = timeEvents.last {
+                Text("Last update: \(last.type.visitDisplayLabel)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -478,79 +526,21 @@ struct TimeTrackingBar: View {
     private func actionsForStatus(_ status: String) -> [Action] {
         switch status {
         case "SCHEDULED", "UNSCHEDULED":
-            return [Action(type: "EN_ROUTE", label: "En route")]
+            return [Action(type: "EN_ROUTE", label: "On my way")]
         case "EN_ROUTE":
-            return [Action(type: "START", label: "Start job")]
+            return [Action(type: "START", label: "Start")]
         case "IN_PROGRESS":
             return [
                 Action(type: "PAUSE", label: "Pause"),
-                Action(type: "FINISH", label: "Finish"),
+                Action(type: "FINISH", label: "Finish visit"),
             ]
         case "PAUSED":
             return [
                 Action(type: "RESUME", label: "Resume"),
-                Action(type: "FINISH", label: "Finish"),
+                Action(type: "FINISH", label: "Finish visit"),
             ]
         default:
             return []
         }
-    }
-}
-
-struct CustomerVisitCard: View {
-    let visit: VisitDetailDTO
-    @ObservedObject var voice: VoiceManager
-
-    var body: some View {
-        StormCard {
-            VStack(alignment: .leading, spacing: 8) {
-                StormSectionHeader(title: "Customer", systemImage: "person.crop.circle")
-                if let customer = visit.customer {
-                    Text(customer.name).font(.title3.weight(.semibold))
-                    if let email = customer.email, !email.isEmpty {
-                        Link(destination: URL(string: "mailto:\(email)")!) {
-                            Label(email, systemImage: "envelope")
-                        }
-                        .font(.subheadline)
-                    }
-                    if let phone = customer.phone, !phone.isEmpty {
-                        HStack(spacing: 12) {
-                            Link(destination: URL(string: "sms:\(phone)")!) {
-                                Label("Text", systemImage: "message")
-                            }
-                            Button {
-                                Task { await voice.call(phone: phone, customerId: customer.id) }
-                            } label: {
-                                Label("Call", systemImage: "phone")
-                            }
-                        }
-                        .font(.subheadline)
-                    }
-                }
-                if let address = formattedAddress(visit) {
-                    Text(address).foregroundStyle(.secondary)
-                    if let url = mapsURL(address) {
-                        Link("Open in Maps", destination: url)
-                            .font(.subheadline)
-                            .foregroundStyle(StormTheme.sky)
-                    }
-                }
-            }
-        }
-    }
-
-    private func formattedAddress(_ visit: VisitDetailDTO) -> String? {
-        let parts = [visit.address, visit.city, visit.state, visit.zip].compactMap { $0 }.filter { !$0.isEmpty }
-        if !parts.isEmpty { return parts.joined(separator: ", ") }
-        if let property = visit.property {
-            let p = [property.address, property.city, property.state, property.zip].compactMap { $0 }.filter { !$0.isEmpty }
-            return p.isEmpty ? nil : p.joined(separator: ", ")
-        }
-        return nil
-    }
-
-    private func mapsURL(_ address: String) -> URL? {
-        let encoded = address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? address
-        return URL(string: "http://maps.apple.com/?q=\(encoded)")
     }
 }
