@@ -187,15 +187,40 @@ struct VisitInstallPlanSection: View {
         StormCard {
             VStack(alignment: .leading, spacing: 8) {
                 StormSectionHeader(title: "Install plan", systemImage: "hammer")
-                Text("Design export attached to this visit.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                if let days = visit.installDurationDays {
-                    Text("Estimated duration: \(days) day(s)")
+                if let hours = estimatedManHours {
+                    Text("\(hours, format: .number.precision(.fractionLength(1))) estimated hours")
                         .font(.subheadline)
+                }
+                if let days = visit.installDurationDays {
+                    Text("Install duration: \(days) day(s)")
+                        .font(.subheadline)
+                }
+                if hasDesignSnapshot {
+                    Text("Design zones and layout are attached to this visit.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Design export attached to this visit.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
+    }
+
+    private var hasDesignSnapshot: Bool {
+        visit.designExportMetadata?["designSnapshot"] != nil
+    }
+
+    private var estimatedManHours: Double? {
+        if case .number(let value) = visit.designExportMetadata?["estimatedManHours"] {
+            return value
+        }
+        if case .object(let obj) = visit.designExportMetadata,
+           case .number(let value) = obj["estimatedManHours"] {
+            return value
+        }
+        return nil
     }
 }
 
@@ -337,23 +362,37 @@ struct VisitPaymentSummary {
     let balanceDue: Double?
     let invoice: InvoiceSummaryDTO?
 
+    var hasBalanceDue: Bool {
+        guard let balanceDue, balanceDue > 0 else { return false }
+        return !isPaid
+    }
+
     static func from(visit: VisitDetailDTO, computedTotal: Double) -> VisitPaymentSummary {
         guard let invoice = visit.invoices?.first else {
-            return VisitPaymentSummary(isPaid: false, balanceDue: nil, invoice: nil)
+            return VisitPaymentSummary(
+                isPaid: computedTotal <= 0,
+                balanceDue: computedTotal > 0 ? computedTotal : nil,
+                invoice: nil
+            )
         }
         let payments = invoice.payments ?? []
         let amountPaid = payments.reduce(0.0) { partial, payment in
             payment.refundedAt == nil ? partial + payment.amount : partial
         }
-        let balanceDue = max(0, invoice.total - amountPaid)
-        let isPaid = balanceDue <= 0 || invoice.status == "PAID"
-        return VisitPaymentSummary(isPaid: isPaid, balanceDue: balanceDue, invoice: invoice)
+        let effectiveTotal = max(invoice.total, computedTotal)
+        let balanceDue = max(0, effectiveTotal - amountPaid)
+        let isPaid = balanceDue <= 0
+        return VisitPaymentSummary(
+            isPaid: isPaid,
+            balanceDue: balanceDue > 0 ? balanceDue : nil,
+            invoice: invoice
+        )
     }
 }
 
 func visitDiscountTotal(subtotal: Double, discounts: [DiscountDTO]) -> Double {
     discounts.reduce(0) { partial, discount in
-        if discount.type == "PERCENT" {
+        if discount.type.uppercased() == "PERCENT" {
             return partial + subtotal * (discount.amount / 100)
         }
         return partial + discount.amount

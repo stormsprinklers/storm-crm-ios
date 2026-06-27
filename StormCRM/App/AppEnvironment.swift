@@ -11,6 +11,7 @@ final class AppEnvironment: ObservableObject {
     let voice: VoiceManager
 
     @Published var paymentReturn: PaymentReturn?
+    @Published var pendingInboxConversationId: String?
 
     init() {
         let tokenStore = TokenStore()
@@ -24,13 +25,17 @@ final class AppEnvironment: ObservableObject {
 
     func handleDeepLink(_ url: URL) {
         guard url.scheme == "stormcrm" else { return }
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         if url.host == "payment-return" {
-            let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
             let visitId = components?.queryItems?.first(where: { $0.name == "visitId" })?.value
             let sessionId = components?.queryItems?.first(where: { $0.name == "session_id" })?.value
             let cancelled = components?.queryItems?.contains(where: { $0.name == "payment" && $0.value == "cancelled" }) == true
             if let visitId {
                 paymentReturn = PaymentReturn(visitId: visitId, sessionId: sessionId, cancelled: cancelled)
+            }
+        } else if url.host == "inbox" {
+            if let conversationId = components?.queryItems?.first(where: { $0.name == "conversationId" })?.value {
+                pendingInboxConversationId = conversationId
             }
         }
     }

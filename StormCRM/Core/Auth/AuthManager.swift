@@ -52,12 +52,15 @@ final class AuthManager: ObservableObject {
             user = response.user
             persistUser(response.user)
             isAuthenticated = true
+            await PushNotificationManager.shared.requestAuthorizationIfNeeded()
+            await PushNotificationManager.shared.syncToken(api: apiClient)
         } catch {
             lastError = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 
     func logout() async {
+        await PushNotificationManager.shared.unregister(api: apiClient)
         if let refresh = tokenStore.tokens?.refreshToken {
             _ = try? await apiClient.post(
                 path: APIPath.mobileLogout,

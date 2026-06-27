@@ -386,14 +386,23 @@ struct TimeEventsResponse: Decodable {
     let events: [TimeEventDTO]?
 }
 
-struct ChecklistDTO: Codable, Identifiable {
+struct ChecklistDTO: Decodable, Identifiable {
     let id: String
     let name: String
     let items: [ChecklistItemDTO]
     let completedAt: String?
+    let status: String?
+    let requiredForCompletion: Bool?
+    let progress: ChecklistProgressDTO?
 }
 
-struct ChecklistItemDTO: Codable, Identifiable {
+struct ChecklistProgressDTO: Decodable {
+    let requiredComplete: Int?
+    let requiredTotal: Int?
+    let itemCount: Int?
+}
+
+struct ChecklistItemDTO: Decodable, Identifiable {
     let id: String
     let label: String
     let type: String?
@@ -416,7 +425,13 @@ enum JSONValue: Codable, Equatable {
     case bool(Bool)
     case number(Double)
     case object([String: JSONValue])
+    case array([JSONValue])
     case null
+
+    subscript(key: String) -> JSONValue? {
+        if case .object(let dict) = self { return dict[key] }
+        return nil
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -428,6 +443,8 @@ enum JSONValue: Codable, Equatable {
             self = .number(value)
         } else if let value = try? container.decode([String: JSONValue].self) {
             self = .object(value)
+        } else if let value = try? container.decode([JSONValue].self) {
+            self = .array(value)
         } else if let value = try? container.decode(String.self) {
             self = .string(value)
         } else {
@@ -442,6 +459,7 @@ enum JSONValue: Codable, Equatable {
         case .bool(let value): try container.encode(value)
         case .number(let value): try container.encode(value)
         case .object(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
         case .null: try container.encodeNil()
         }
     }
@@ -457,7 +475,7 @@ struct PartsRunPostResponse: Decodable {
     let mapsUrl: String?
 }
 
-struct PartsRunOptionDTO: Codable, Identifiable {
+struct PartsRunOptionDTO: Decodable, Identifiable {
     var id: String { supplierId }
     let supplierId: String
     let name: String
@@ -467,27 +485,84 @@ struct PartsRunOptionDTO: Codable, Identifiable {
     let mapsUrl: String?
 }
 
-struct IrrigationMapDTO: Decodable {
-    let imageUrl: String?
-    let zones: [IrrigationZoneDTO]?
-    let status: String?
-}
 
-struct IrrigationZoneDTO: Codable, Identifiable {
+struct CustomerPropertyDTO: Decodable, Identifiable {
     let id: String
-    let label: String?
-    let color: String?
+    let customerId: String
+    let name: String
+    let address: String?
+    let city: String?
+    let state: String?
+    let zip: String?
+    let isPrimary: Bool?
+    let irrigationMapStatus: String?
+    let irrigationZoneCount: Int?
+    let shutoffValveLocation: String?
+    let controllerLocation: String?
 }
 
-struct IrrigationProgramDTO: Decodable {
-    let zones: [ProgramZoneDTO]?
-    let notes: String?
+struct VisitMaintenanceContextDTO: Decodable {
+    let visitId: String
+    let customerId: String?
+    let propertyId: String?
+    let linked: LinkedPlanVisitDTO?
+    let enrollments: [EnrollmentSummaryDTO]?
+    let assignablePlanVisits: [AssignablePlanVisitDTO]?
 }
 
-struct ProgramZoneDTO: Codable, Identifiable {
+struct LinkedPlanVisitDTO: Decodable {
     let id: String
-    let name: String?
-    let runTimes: [String]?
+    let status: String
+    let dueYear: Int
+    let dueMonth: Int
+    let visitTitle: String
+    let season: String?
+    let enrollment: EnrollmentRefDTO?
+}
+
+struct EnrollmentRefDTO: Decodable {
+    let templateName: String?
+    let propertyName: String?
+}
+
+struct EnrollmentSummaryDTO: Decodable, Identifiable {
+    let id: String
+    let status: String
+    let templateName: String
+    let propertyName: String
+    let billingFrequency: String?
+    let basePrice: Double?
+    let nextBillingDate: String?
+    let unscheduledVisitCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, status, templateName, propertyName, billingFrequency, basePrice, nextBillingDate, unscheduledVisitCount
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        status = try container.decode(String.self, forKey: .status)
+        templateName = try container.decode(String.self, forKey: .templateName)
+        propertyName = try container.decode(String.self, forKey: .propertyName)
+        billingFrequency = try container.decodeIfPresent(String.self, forKey: .billingFrequency)
+        basePrice = try container.decodeFlexibleDouble(forKey: .basePrice)
+        nextBillingDate = try container.decodeIfPresent(String.self, forKey: .nextBillingDate)
+        unscheduledVisitCount = try container.decodeIfPresent(Int.self, forKey: .unscheduledVisitCount)
+    }
+
+    var isActivePlan: Bool {
+        ["ACTIVE", "PENDING_RENEWAL", "EXPIRING_SOON"].contains(status)
+    }
+}
+
+struct AssignablePlanVisitDTO: Decodable, Identifiable {
+    let id: String
+    let visitTitle: String
+    let dueYear: Int
+    let dueMonth: Int
+    let planName: String
+    let propertyName: String
 }
 
 struct ConversationDTO: Decodable, Identifiable {
@@ -496,6 +571,15 @@ struct ConversationDTO: Decodable, Identifiable {
     let participantPhone: String?
     let lastMessageAt: String?
     let customer: CustomerSummary?
+    let previewMessages: [MessageDTO]?
+
+    var previewText: String? {
+        previewMessages?.first?.body
+    }
+
+    var displayTitle: String {
+        customer?.name ?? title ?? participantPhone ?? "Conversation"
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -503,6 +587,7 @@ struct ConversationDTO: Decodable, Identifiable {
         title = try container.decodeIfPresent(String.self, forKey: .title)
         participantPhone = try container.decodeIfPresent(String.self, forKey: .participantPhone)
         customer = try container.decodeIfPresent(CustomerSummary.self, forKey: .customer)
+        previewMessages = try container.decodeIfPresent([MessageDTO].self, forKey: .messages)
         if let text = try container.decodeIfPresent(String.self, forKey: .lastMessageAt) {
             lastMessageAt = text
         } else if let date = try container.decodeIfPresent(Date.self, forKey: .lastMessageAt) {
@@ -513,7 +598,7 @@ struct ConversationDTO: Decodable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, participantPhone, lastMessageAt, customer
+        case id, title, participantPhone, lastMessageAt, customer, messages
     }
 }
 
@@ -522,14 +607,99 @@ struct MessagesResponse: Decodable {
     let messages: [MessageDTO]
 }
 
-struct MessageDTO: Codable, Identifiable {
+struct MessageSenderDTO: Decodable {
+    let id: String?
+    let name: String?
+    let email: String?
+}
+
+struct MessageMediaDTO: Decodable, Identifiable {
+    let id: String
+    let blobUrl: String
+    let fileName: String?
+    let mimeType: String
+    let sizeBytes: Int?
+
+    var isVideo: Bool { mimeType.lowercased().hasPrefix("video/") }
+    var isImage: Bool { mimeType.lowercased().hasPrefix("image/") }
+}
+
+struct MessageDTO: Decodable, Identifiable {
     let id: String
     let body: String?
-    let direction: String?
+    let direction: String
     let sentAt: String?
     let createdAt: String?
+    let sender: MessageSenderDTO?
+    let media: [MessageMediaDTO]?
+    let deliveryStatus: String?
 
     var displayDate: String { sentAt ?? createdAt ?? "" }
+    var isOutbound: Bool { direction.uppercased() == "OUTBOUND" }
+
+    enum CodingKeys: String, CodingKey {
+        case id, body, direction, sentAt, createdAt, sender, media, deliveryStatus
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        body = try container.decodeIfPresent(String.self, forKey: .body)
+        direction = try container.decodeIfPresent(String.self, forKey: .direction) ?? "INBOUND"
+        sender = try container.decodeIfPresent(MessageSenderDTO.self, forKey: .sender)
+        media = try container.decodeIfPresent([MessageMediaDTO].self, forKey: .media)
+        deliveryStatus = try container.decodeIfPresent(String.self, forKey: .deliveryStatus)
+        if let text = try container.decodeIfPresent(String.self, forKey: .sentAt) {
+            sentAt = text
+        } else if let date = try container.decodeIfPresent(Date.self, forKey: .sentAt) {
+            sentAt = APIDateFormatting.queryString(from: date)
+        } else {
+            sentAt = nil
+        }
+        if let text = try container.decodeIfPresent(String.self, forKey: .createdAt) {
+            createdAt = text
+        } else if let date = try container.decodeIfPresent(Date.self, forKey: .createdAt) {
+            createdAt = APIDateFormatting.queryString(from: date)
+        } else {
+            createdAt = nil
+        }
+    }
+}
+
+struct SendSmsResponse: Decodable {
+    let conversation: ConversationDTO
+    let message: MessageDTO
+}
+
+struct InboxMediaUploadResponse: Decodable {
+    let blobUrl: String
+    let publicUrl: String?
+    let fileName: String
+    let mimeType: String
+    let sizeBytes: Int
+}
+
+struct InboxContactDTO: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let phone: String?
+    let email: String?
+}
+
+struct InboxEmployeeContactDTO: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let phone: String?
+    let email: String?
+    let role: String?
+}
+
+struct InboxCustomerContactsResponse: Decodable {
+    let customers: [InboxContactDTO]
+}
+
+struct InboxEmployeeContactsResponse: Decodable {
+    let employees: [InboxEmployeeContactDTO]
 }
 
 struct TimeClockResponse: Decodable {
@@ -548,9 +718,25 @@ struct ClockEntryDTO: Codable, Identifiable {
 struct CheckoutResponse: Decodable {
     let url: String?
     let payLink: String?
+    let balanceDue: Double?
 }
 
-struct CustomerDTO: Codable, Identifiable {
+struct VisitInvoiceResponse: Decodable {
+    let invoice: InvoiceSummaryDTO
+    let payLink: String?
+    let balanceDue: Double?
+    let emailSent: Bool?
+    let smsSent: Bool?
+}
+
+struct PaymentConfirmResponse: Decodable {
+    let confirmed: Bool?
+    let invoiceId: String?
+    let reason: String?
+    let invoiceStatus: String?
+}
+
+struct CustomerDTO: Decodable, Identifiable {
     let id: String
     let name: String
     let phone: String?
@@ -561,6 +747,116 @@ struct CustomerDTO: Codable, Identifiable {
     let zip: String?
     let companyName: String?
     let status: String?
+    let doNotService: Bool?
+    let leadSource: String?
+    let tags: [String]?
+    let createdAt: String?
+    let updatedAt: String?
+    let propertyCount: Int?
+    let visitCount: Int?
+    let estimateCount: Int?
+    let invoiceCount: Int?
+
+    var isArchived: Bool { status == "ARCHIVED" }
+
+    var formattedAddress: String {
+        [address, city, state, zip]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+    }
+
+    var subtitleLine: String {
+        [phone, city].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+struct CustomerUpdateBody: Encodable {
+    var name: String?
+    var phone: String?
+    var email: String?
+    var companyName: String?
+    var address: String?
+    var city: String?
+    var state: String?
+    var zip: String?
+    var leadSource: String?
+    var doNotService: Bool?
+    var tags: [String]?
+    var status: String?
+}
+
+struct CustomerCreateBody: Encodable {
+    let name: String
+    var phone: String?
+    var email: String?
+    var companyName: String?
+    var address: String?
+    var city: String?
+    var state: String?
+    var zip: String?
+    var leadSource: String?
+}
+
+struct CustomerNoteDTO: Decodable, Identifiable {
+    let id: String
+    let body: String
+    let createdAt: String
+    let author: CustomerNoteAuthorDTO
+
+    enum CodingKeys: String, CodingKey {
+        case id, body, createdAt, author
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        body = try container.decode(String.self, forKey: .body)
+        author = try container.decode(CustomerNoteAuthorDTO.self, forKey: .author)
+        if let text = try container.decodeIfPresent(String.self, forKey: .createdAt) {
+            createdAt = text
+        } else if let date = try container.decodeIfPresent(Date.self, forKey: .createdAt) {
+            createdAt = APIDateFormatting.queryString(from: date)
+        } else {
+            createdAt = ""
+        }
+    }
+}
+
+struct CustomerNoteAuthorDTO: Decodable {
+    let id: String
+    let name: String
+    let photoUrl: String?
+    let color: String?
+}
+
+struct CustomerLinkedEstimateDTO: Decodable, Identifiable {
+    let id: String
+    let status: String
+    let total: Double
+    let createdAt: String
+    let visitId: String?
+    let visitTitle: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, status, total, createdAt, visitId, visitTitle
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        status = try container.decode(String.self, forKey: .status)
+        total = try container.decodeFlexibleDouble(forKey: .total) ?? 0
+        visitId = try container.decodeIfPresent(String.self, forKey: .visitId)
+        visitTitle = try container.decodeIfPresent(String.self, forKey: .visitTitle)
+        if let text = try container.decodeIfPresent(String.self, forKey: .createdAt) {
+            createdAt = text
+        } else if let date = try container.decodeIfPresent(Date.self, forKey: .createdAt) {
+            createdAt = APIDateFormatting.queryString(from: date)
+        } else {
+            createdAt = ""
+        }
+    }
 }
 
 struct VisitProfitDTO: Decodable {
@@ -606,6 +902,7 @@ struct CustomerHistoryDTO: Decodable {
     let pastVisitCount: Int
     let visits: [CustomerHistoryVisitDTO]
     let estimatesWithoutVisit: [EstimateSummaryDTO]
+    let estimatesLinkedToVisits: [CustomerLinkedEstimateDTO]?
 }
 
 struct CustomerHistoryVisitDTO: Decodable, Identifiable {

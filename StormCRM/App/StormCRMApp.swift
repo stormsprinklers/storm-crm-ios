@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct StormCRMApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var appEnvironment = AppEnvironment()
 
     var body: some Scene {
@@ -30,6 +31,11 @@ struct RootView: View {
                         .task {
                             await env.branding.load(api: env.apiClient)
                             await env.voice.prepare()
+                            await PushNotificationManager.shared.requestAuthorizationIfNeeded()
+                            await PushNotificationManager.shared.syncToken(api: env.apiClient)
+                        }
+                        .onReceive(NotificationCenter.default.publisher(for: .pushDeviceTokenUpdated)) { _ in
+                            Task { await PushNotificationManager.shared.syncToken(api: env.apiClient) }
                         }
                 } else {
                     LoginView()

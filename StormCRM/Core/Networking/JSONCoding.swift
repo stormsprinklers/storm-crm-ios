@@ -59,6 +59,16 @@ enum APIDateFormatting {
         return formatter.string(from: date)
     }
 
+    /// `yyyy-MM-dd` for reporting API custom ranges (matches web CRM).
+    static func dateOnlyString(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar.current
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
     static func displayString(from iso: String) -> String {
         guard let date = parse(iso) else { return iso }
         return date.formatted(date: .abbreviated, time: .shortened)

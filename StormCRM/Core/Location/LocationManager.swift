@@ -20,13 +20,39 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
     }
 
     func refreshLocation() {
+        guard authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways else {
+            requestPermission()
+            return
+        }
         manager.requestLocation()
+        manager.startUpdatingLocation()
+    }
+
+    /// Waits for a fresh GPS fix (used for En route ETA).
+    func awaitLocation(timeout: TimeInterval = 10) async -> CLLocation? {
+        if let last = lastLocation, abs(last.timestamp.timeIntervalSinceNow) < 30 {
+            return last
+        }
+
+        requestPermission()
+        refreshLocation()
+
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let location = lastLocation { return location }
+            if authorizationStatus == .denied || authorizationStatus == .restricted {
+                return nil
+            }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        manager.stopUpdatingLocation()
+        return lastLocation
     }
 
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         Task { @MainActor in
             authorizationStatus = manager.authorizationStatus
-            if manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways {
+            if authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways {
                 manager.requestLocation()
             }
         }

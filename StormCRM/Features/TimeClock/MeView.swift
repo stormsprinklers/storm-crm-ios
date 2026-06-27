@@ -53,12 +53,6 @@ struct MeView: View {
                 }
 
                 Section {
-                    NavigationLink("Search customers") {
-                        CustomerSearchView()
-                    }
-                }
-
-                Section {
                     Button("Sign out", role: .destructive) {
                         Task { await auth.logout() }
                     }
@@ -67,109 +61,6 @@ struct MeView: View {
             .navigationTitle("Me")
             .refreshable { await clock.load(api: env.apiClient) }
             .task { await clock.load(api: env.apiClient) }
-        }
-    }
-}
-
-struct CustomerSearchView: View {
-    @EnvironmentObject private var env: AppEnvironment
-    @State private var search = ""
-    @State private var customers: [CustomerDTO] = []
-    @State private var isLoading = false
-    @State private var error: String?
-
-    var body: some View {
-        Group {
-            if isLoading && customers.isEmpty {
-                ProgressView("Loading customers…")
-            } else if customers.isEmpty {
-                ContentUnavailableView(
-                    "No customers found",
-                    systemImage: "person.2",
-                    description: Text(error ?? "Try a different search.")
-                )
-            } else {
-                List(customers) { customer in
-                    NavigationLink(value: customer.id) {
-                        VStack(alignment: .leading) {
-                            Text(customer.name)
-                            if let phone = customer.phone {
-                                Text(phone).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .navigationTitle("Customers")
-        .searchable(text: $search, prompt: "Name or phone")
-        .onSubmit(of: .search) { Task { await load() } }
-        .navigationDestination(for: String.self) { customerId in
-            CustomerDetailView(customerId: customerId)
-        }
-        .refreshable { await load() }
-        .task { await load() }
-    }
-
-    private func load() async {
-        isLoading = true
-        error = nil
-        defer { isLoading = false }
-
-        var query: [URLQueryItem] = []
-        let trimmed = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            query.append(URLQueryItem(name: "search", value: trimmed))
-        }
-
-        do {
-            let response: CustomersListResponse = try await env.apiClient.get(
-                path: APIPath.customers,
-                query: query
-            )
-            customers = response.customers
-        } catch {
-            self.error = (error as? APIError)?.message
-            customers = []
-        }
-    }
-}
-
-struct CustomerDetailView: View {
-    @EnvironmentObject private var env: AppEnvironment
-    let customerId: String
-    @State private var customer: CustomerDTO?
-    @State private var error: String?
-
-    var body: some View {
-        Form {
-            if let customer {
-                Section("Contact") {
-                    LabeledContent("Name", value: customer.name)
-                    if let phone = customer.phone { LabeledContent("Phone", value: phone) }
-                    if let email = customer.email { LabeledContent("Email", value: email) }
-                }
-                Section("Address") {
-                    Text([customer.address, customer.city, customer.state, customer.zip]
-                        .compactMap { $0 }
-                        .filter { !$0.isEmpty }
-                        .joined(separator: ", "))
-                }
-            } else if let error {
-                Text(error).foregroundStyle(.red)
-            } else {
-                ProgressView()
-            }
-        }
-        .navigationTitle(customer?.name ?? "Customer")
-        .task { await load() }
-    }
-
-    private func load() async {
-        do {
-            customer = try await env.apiClient.get(path: APIPath.customer(customerId))
-        } catch {
-            self.error = (error as? APIError)?.message
         }
     }
 }

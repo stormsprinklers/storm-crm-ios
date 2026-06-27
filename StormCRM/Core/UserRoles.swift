@@ -10,6 +10,34 @@ enum UserRoles {
     }
 
     static func canViewMaintenancePlans(_ role: String) -> Bool {
+        role == "CSR" || role == "MANAGER" || role == "ADMIN" || role == "TECH" || role == "INSTALLER" || role == "SALES"
+    }
+
+    static func canManageEnrollments(_ role: String) -> Bool {
+        role == "CSR" || role == "MANAGER" || role == "ADMIN" || role == "TECH" || role == "SALES"
+    }
+
+    static func canEditVisitOfficeFields(_ role: String) -> Bool {
         !isFieldRole(role)
+    }
+
+    static func canDeleteVisit(_ role: String) -> Bool {
+        role == "ADMIN"
+    }
+
+    static func canViewReporting(_ role: String) -> Bool {
+        role == "ADMIN" || role == "MANAGER" || role == "CSR" || role == "SALES" || role == "TECH"
+    }
+
+    static func canEditCustomers(_ role: String) -> Bool {
+        !isFieldRole(role)
+    }
+
+    static func canFlagDoNotService(_ role: String) -> Bool {
+        role == "ADMIN" || role == "MANAGER"
+    }
+
+    static func canManageCustomerStatus(_ role: String) -> Bool {
+        role == "ADMIN" || role == "MANAGER"
     }
 }

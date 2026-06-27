@@ -80,6 +80,7 @@ struct PartsRunSheet: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     let visitId: String
+    var onComplete: (() async -> Void)?
     @State private var suppliers: [PartsRunOptionDTO] = []
     @State private var error: String?
     @State private var mapsUrl: String?
@@ -139,6 +140,9 @@ struct PartsRunSheet: View {
                 body: Body(supplierId: supplierId)
             )
             mapsUrl = response.mapsUrl
+            if response.paused == true {
+                await onComplete?()
+            }
             if let url = mapsUrl, let maps = URL(string: url) {
                 #if canImport(UIKit)
                 await UIApplication.shared.open(maps)

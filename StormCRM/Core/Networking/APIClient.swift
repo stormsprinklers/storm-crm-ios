@@ -52,6 +52,25 @@ final class APIClient {
         return try await perform(request)
     }
 
+    func put<T: Decodable, B: Encodable>(
+        path: String,
+        body: B,
+        authenticated: Bool = true
+    ) async throws -> T {
+        var request = try await buildRequest(path: path, method: "PUT", authenticated: authenticated)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+        return try await perform(request)
+    }
+
+    func put<T: Decodable>(
+        path: String,
+        authenticated: Bool = true
+    ) async throws -> T {
+        let request = try await buildRequest(path: path, method: "PUT", authenticated: authenticated)
+        return try await perform(request)
+    }
+
     func delete(path: String, query: [URLQueryItem] = [], authenticated: Bool = true) async throws {
         let request = try await buildRequest(path: path, method: "DELETE", query: query, authenticated: authenticated)
         let (_, response) = try await session.data(for: request)
@@ -60,15 +79,68 @@ final class APIClient {
         }
     }
 
+    func deleteReturningVisit(
+        path: String,
+        query: [URLQueryItem] = [],
+        authenticated: Bool = true
+    ) async throws -> VisitDetailDTO {
+        let request = try await buildRequest(path: path, method: "DELETE", query: query, authenticated: authenticated)
+        return try await perform(request)
+    }
+
+    func uploadMultipart<T: Decodable>(
+        path: String,
+        query: [URLQueryItem] = [],
+        fileData: Data,
+        fileName: String,
+        mimeType: String,
+        fieldName: String = "file"
+    ) async throws -> T {
+        let data = try await uploadMultipartRaw(
+            path: path,
+            query: query,
+            fileData: fileData,
+            fileName: fileName,
+            mimeType: mimeType,
+            fieldName: fieldName
+        )
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch let decodingError as DecodingError {
+            throw APIError.decoding(decodingError)
+        } catch {
+            throw APIError.decoding(error)
+        }
+    }
+
     func uploadMultipart(
         path: String,
+        query: [URLQueryItem] = [],
+        fileData: Data,
+        fileName: String,
+        mimeType: String,
+        fieldName: String = "file"
+    ) async throws -> Data {
+        try await uploadMultipartRaw(
+            path: path,
+            query: query,
+            fileData: fileData,
+            fileName: fileName,
+            mimeType: mimeType,
+            fieldName: fieldName
+        )
+    }
+
+    private func uploadMultipartRaw(
+        path: String,
+        query: [URLQueryItem] = [],
         fileData: Data,
         fileName: String,
         mimeType: String,
         fieldName: String = "file"
     ) async throws -> Data {
         let boundary = UUID().uuidString
-        var request = try await buildRequest(path: path, method: "POST", authenticated: true)
+        var request = try await buildRequest(path: path, method: "POST", query: query, authenticated: true)
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()

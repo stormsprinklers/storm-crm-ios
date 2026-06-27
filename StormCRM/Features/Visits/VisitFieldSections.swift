@@ -3,6 +3,7 @@ import SwiftUI
 struct VisitChecklistsSection: View {
     let checklists: [ChecklistDTO]
     let onSaveItem: (String, String, JSONValue) async -> Void
+    let onComplete: (String) async -> Void
 
     var body: some View {
         StormCard {
@@ -19,11 +20,24 @@ struct VisitChecklistsSection: View {
                                     Image(systemName: "checkmark.seal.fill")
                                         .foregroundStyle(StormTheme.success)
                                 }
+                                Spacer()
+                                if let progress = checklist.progress {
+                                    Text("\(progress.requiredComplete ?? 0)/\(progress.requiredTotal ?? 0) required")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             ForEach(checklist.items) { item in
                                 ChecklistItemRow(item: item) { response in
                                     await onSaveItem(checklist.id, item.id, response)
                                 }
+                            }
+                            if checklist.completedAt == nil {
+                                Button("Mark checklist complete") {
+                                    Task { await onComplete(checklist.id) }
+                                }
+                                .font(.caption)
+                                .buttonStyle(StormSecondaryButtonStyle())
                             }
                         }
                         .padding(.vertical, 4)

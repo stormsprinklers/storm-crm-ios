@@ -8,6 +8,7 @@ final class VisitDetailViewModel: ObservableObject {
     @Published var profit: VisitProfitDTO?
     @Published var customerHistory: CustomerHistoryDTO?
     @Published var isLoading = false
+    @Published var isDeleting = false
     @Published var error: String?
     @Published var actionMessage: String?
 
@@ -54,7 +55,11 @@ final class VisitDetailViewModel: ObservableObject {
             )
             visit = try await api.post(path: APIPath.visitTime(visitId), body: body)
             timeEvents = (try? await api.get(path: APIPath.visitTime(visitId))) ?? timeEvents
-            actionMessage = "Updated: \(type.replacingOccurrences(of: "_", with: " "))"
+            if type == "EN_ROUTE", let eta = visit?.eta?.formatted {
+                actionMessage = "En route — ETA \(eta)"
+            } else {
+                actionMessage = "Updated: \(type.replacingOccurrences(of: "_", with: " "))"
+            }
         } catch {
             actionMessage = (error as? APIError)?.message ?? error.localizedDescription
         }
@@ -88,14 +93,43 @@ final class VisitDetailViewModel: ObservableObject {
             actionMessage = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
+
+    func completeChecklist(api: APIClient, visitId: String, checklistId: String) async {
+        do {
+            let _: EmptyResponse = try await api.post(
+                path: APIPath.visitChecklistComplete(visitId, checklistId: checklistId)
+            )
+            checklists = (try? await api.get(path: APIPath.visitChecklists(visitId))) ?? checklists
+            actionMessage = "Checklist completed"
+        } catch {
+            actionMessage = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    func deleteVisit(api: APIClient, visitId: String) async -> Bool {
+        isDeleting = true
+        actionMessage = nil
+        defer { isDeleting = false }
+        do {
+            try await api.delete(path: APIPath.visit(visitId))
+            return true
+        } catch {
+            actionMessage = (error as? APIError)?.message ?? error.localizedDescription
+            return false
+        }
+    }
 }
 
 struct VisitDetailView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @Environment(\.dismiss) private var dismiss
     let visitId: String
     @StateObject private var viewModel = VisitDetailViewModel()
     @State private var showPayment = false
+    @State private var showFinishBillingPrompt = false
+    @State private var finishBillingAmount: Double = 0
     @State private var showPartsRun = false
+    @State private var showDeleteConfirm = false
     @State private var newNote = ""
 
     var body: some View {
@@ -123,16 +157,20 @@ struct VisitDetailView: View {
                         }
 
                         TimeTrackingBar(visit: visit, timeEvents: viewModel.timeEvents) { event in
-                            await handleTimeEvent(event)
+                            await handleTimeEvent(event, visit: visit, total: total, paymentSummary: paymentSummary)
                         }
 
-                        HStack {
-                            Button("Parts run") { showPartsRun = true }
-                                .buttonStyle(StormSecondaryButtonStyle())
-                            Button("Collect payment") { showPayment = true }
-                                .buttonStyle(StormPrimaryButtonStyle())
-                                .disabled(paymentSummary.isPaid || total <= 0)
-                        }
+                        VisitPaymentsSection(
+                            visitId: visitId,
+                            total: total,
+                            hasLineItems: !(visit.lineItems ?? []).isEmpty,
+                            paymentSummary: paymentSummary,
+                            onUpdated: { await reloadVisit() }
+                        )
+
+                        Button("Parts run") { showPartsRun = true }
+                            .buttonStyle(StormSecondaryButtonStyle())
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
                         if visit.hasInstallPlan {
                             VisitInstallPlanSection(visit: visit)
@@ -140,24 +178,38 @@ struct VisitDetailView: View {
 
                         CustomerVisitCard(visit: visit, voice: env.voice)
 
-                        if let property = visit.property {
-                            VisitPropertyImagesSection(property: property)
-                        }
+                        JobMapView(
+                            title: visit.title,
+                            address: formattedJobAddress(visit),
+                            latitude: mapLatitude(for: visit),
+                            longitude: mapLongitude(for: visit)
+                        )
 
                         if let property = visit.property, let customerId = visit.customer?.id {
-                            NavigationLink {
-                                IrrigationReadOnlyView(
-                                    customerId: customerId,
-                                    propertyId: property.id,
-                                    propertyName: property.name ?? "Property"
-                                )
-                            } label: {
-                                Label("Irrigation map & program", systemImage: "drop.fill")
-                                    .foregroundStyle(StormTheme.sky)
-                            }
+                            VisitIrrigationSection(customerId: customerId, property: property)
                         }
 
-                        VisitScheduleInfoSection(visit: visit)
+                        if let role = env.auth.user?.role, UserRoles.canViewMaintenancePlans(role) {
+                            VisitMaintenanceSection(
+                                visitId: visitId,
+                                userRole: role,
+                                onUpdated: {
+                                    await viewModel.load(
+                                        api: env.apiClient,
+                                        visitId: visitId,
+                                        userRole: role
+                                    )
+                                }
+                            )
+                        }
+
+                        let canEditSchedule = env.auth.user.map { UserRoles.canEditVisitOfficeFields($0.role) } ?? false
+
+                        VisitScheduleEditSection(
+                            visit: visit,
+                            canEdit: canEditSchedule,
+                            onSaved: { await reloadVisit() }
+                        )
                         VisitTimeEventsSection(events: viewModel.timeEvents)
                         VisitTotalsSection(
                             subtotal: subtotal,
@@ -166,23 +218,32 @@ struct VisitDetailView: View {
                             paymentSummary: paymentSummary
                         )
 
-                        LineItemsSection(
+                        VisitLineItemsEditSection(
+                            visitId: visitId,
                             items: visit.lineItems ?? [],
                             discounts: visit.discounts ?? [],
-                            subtotal: subtotal,
-                            discountTotal: discountTotal,
-                            total: total
+                            onUpdated: { await reloadVisit() }
                         )
 
-                        VisitChecklistsSection(checklists: viewModel.checklists) { checklistId, itemId, response in
-                            await viewModel.saveChecklistItem(
-                                api: env.apiClient,
-                                visitId: visitId,
-                                checklistId: checklistId,
-                                itemId: itemId,
-                                response: response
-                            )
-                        }
+                        VisitChecklistsSection(
+                            checklists: viewModel.checklists,
+                            onSaveItem: { checklistId, itemId, response in
+                                await viewModel.saveChecklistItem(
+                                    api: env.apiClient,
+                                    visitId: visitId,
+                                    checklistId: checklistId,
+                                    itemId: itemId,
+                                    response: response
+                                )
+                            },
+                            onComplete: { checklistId in
+                                await viewModel.completeChecklist(
+                                    api: env.apiClient,
+                                    visitId: visitId,
+                                    checklistId: checklistId
+                                )
+                            }
+                        )
 
                         VisitNotesSection(
                             notes: visit.notes ?? [],
@@ -212,6 +273,10 @@ struct VisitDetailView: View {
                         if let profit = viewModel.profit {
                             VisitProfitSectionView(profit: profit)
                         }
+
+                        if env.auth.user.map({ UserRoles.canDeleteVisit($0.role) }) == true {
+                            deleteVisitSection(visit: visit)
+                        }
                     }
                     .padding()
                 }
@@ -219,10 +284,21 @@ struct VisitDetailView: View {
                 .navigationTitle("Visit")
                 .navigationBarTitleDisplayMode(.inline)
                 .sheet(isPresented: $showPayment) {
-                    PaymentSheet(visitId: visitId)
+                    PaymentSheet(
+                        visitId: visitId,
+                        amountDue: paymentAmountDue(for: visit)
+                    ) {
+                        Task { await reloadVisit() }
+                    }
                 }
                 .sheet(isPresented: $showPartsRun) {
-                    PartsRunSheet(visitId: visitId)
+                    PartsRunSheet(visitId: visitId) {
+                        await viewModel.load(
+                            api: env.apiClient,
+                            visitId: visitId,
+                            userRole: env.auth.user?.role
+                        )
+                    }
                 }
             }
         }
@@ -232,21 +308,135 @@ struct VisitDetailView: View {
         .task {
             await viewModel.load(api: env.apiClient, visitId: visitId, userRole: env.auth.user?.role)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .visitPaymentCompleted)) { notification in
+            guard let visitId = notification.userInfo?["visitId"] as? String, visitId == self.visitId else { return }
+            Task { await reloadVisit() }
+        }
+        .confirmationDialog(
+            "Collect payment?",
+            isPresented: $showFinishBillingPrompt,
+            titleVisibility: .visible
+        ) {
+            Button("Collect payment now") { showPayment = true }
+            Button("Send invoice to customer") {
+                Task { await sendInvoiceAfterFinish() }
+            }
+            Button("Later", role: .cancel) {}
+        } message: {
+            Text("This job has \(finishBillingAmount.formatted(.currency(code: "USD"))) outstanding. Collect now or send an invoice?")
+        }
+        .confirmationDialog(
+            "Delete visit?",
+            isPresented: $showDeleteConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete visit", role: .destructive) {
+                Task {
+                    if await viewModel.deleteVisit(api: env.apiClient, visitId: visitId) {
+                        dismiss()
+                    }
+                }
+            }
+        } message: {
+            if let visit = viewModel.visit {
+                Text("This will permanently delete “\(visit.title)” and its line items, notes, and attachments. This cannot be undone.")
+            }
+        }
     }
 
-    private func handleTimeEvent(_ type: String) async {
-        if type == "EN_ROUTE" {
-            env.location.requestPermission()
-            env.location.refreshLocation()
-            try? await Task.sleep(nanoseconds: 500_000_000)
+    @ViewBuilder
+    private func deleteVisitSection(visit: VisitDetailDTO) -> some View {
+        StormCard {
+            VStack(alignment: .leading, spacing: 8) {
+                StormSectionHeader(title: "Danger zone", systemImage: "exclamationmark.triangle")
+                Text("Permanently remove this visit and all associated data.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(viewModel.isDeleting ? "Deleting…" : "Delete visit") {
+                    showDeleteConfirm = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .disabled(viewModel.isDeleting)
+            }
         }
-        let loc = env.location.lastLocation
+    }
+
+    private func paymentAmountDue(for visit: VisitDetailDTO) -> Double {
+        if finishBillingAmount > 0 { return finishBillingAmount }
+        let subtotal = visitSubtotal(from: visit.lineItems ?? [])
+        let discountTotal = visitDiscountTotal(subtotal: subtotal, discounts: visit.discounts ?? [])
+        let total = max(0, subtotal - discountTotal)
+        let summary = VisitPaymentSummary.from(visit: visit, computedTotal: total)
+        return summary.balanceDue ?? total
+    }
+
+    private func reloadVisit() async {
+        await viewModel.load(
+            api: env.apiClient,
+            visitId: visitId,
+            userRole: env.auth.user?.role
+        )
+    }
+
+    private func handleTimeEvent(
+        _ type: String,
+        visit: VisitDetailDTO,
+        total: Double,
+        paymentSummary: VisitPaymentSummary
+    ) async {
+        var location: (lat: Double, lng: Double)?
+        if type == "EN_ROUTE" {
+            if let loc = await env.location.awaitLocation(timeout: 12) {
+                location = (loc.coordinate.latitude, loc.coordinate.longitude)
+            } else {
+                viewModel.actionMessage = "En route without GPS — ETA may be less accurate"
+            }
+        }
         await viewModel.postTimeEvent(
             api: env.apiClient,
             visitId: visitId,
             type: type,
-            location: loc.map { ($0.coordinate.latitude, $0.coordinate.longitude) }
+            location: location
         )
+        if type == "FINISH",
+           !(visit.lineItems ?? []).isEmpty,
+           paymentSummary.hasBalanceDue {
+            finishBillingAmount = paymentSummary.balanceDue ?? total
+            showFinishBillingPrompt = true
+        }
+    }
+
+    private func sendInvoiceAfterFinish() async {
+        struct Body: Encodable { let send: Bool }
+        do {
+            let _: VisitInvoiceResponse = try await env.apiClient.post(
+                path: APIPath.visitInvoice(visitId),
+                body: Body(send: true)
+            )
+            viewModel.actionMessage = "Invoice sent to customer"
+            await reloadVisit()
+        } catch {
+            viewModel.actionMessage = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func formattedJobAddress(_ visit: VisitDetailDTO) -> String? {
+        let parts = [visit.address, visit.city, visit.state, visit.zip].compactMap { $0 }.filter { !$0.isEmpty }
+        if !parts.isEmpty { return parts.joined(separator: ", ") }
+        if let property = visit.property {
+            let p = [property.address, property.city, property.state, property.zip].compactMap { $0 }.filter { !$0.isEmpty }
+            return p.isEmpty ? nil : p.joined(separator: ", ")
+        }
+        return nil
+    }
+
+    private func mapLatitude(for visit: VisitDetailDTO) -> Double? {
+        visit.property?.latitude
+    }
+
+    private func mapLongitude(for visit: VisitDetailDTO) -> Double? {
+        visit.property?.longitude
     }
 }
 
