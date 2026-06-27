@@ -123,12 +123,3 @@ struct VisitScheduleEditSection: View {
         }
     }
 }
-
-private extension ScheduleEmployeeDTO {
-    init(id: String, name: String, color: String?, photoUrl: String?) {
-        self.id = id
-        self.name = name
-        self.color = color
-        self.photoUrl = photoUrl
-    }
-}
