@@ -152,7 +152,7 @@ struct VisitMaintenanceSection: View {
     }
 
     private func load() async {
-        guard let role = userRole, canView else { return }
+        guard canView else { return }
         do {
             context = try await env.apiClient.get(path: APIPath.visitMaintenancePlan(visitId))
             if selectedPlanVisitId.isEmpty {
