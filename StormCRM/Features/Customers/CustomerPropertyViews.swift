@@ -1,5 +1,4 @@
 import SwiftUI
-import WebKit
 
 struct CustomerPropertiesSection: View {
     let customerId: String
@@ -202,25 +201,6 @@ struct PropertyLocationEmbedsView: View {
             )
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
-        }
-    }
-}
-
-struct GoogleMapsEmbedWebView: UIViewRepresentable {
-    let url: URL
-
-    func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView()
-        webView.scrollView.isScrollEnabled = false
-        webView.isOpaque = false
-        webView.backgroundColor = .clear
-        webView.scrollView.backgroundColor = .clear
-        return webView
-    }
-
-    func updateUIView(_ webView: WKWebView, context: Context) {
-        if webView.url != url {
-            webView.load(URLRequest(url: url))
         }
     }
 }
