@@ -148,7 +148,6 @@ struct EstimateDetailView: View {
     @State private var isSaving = false
     @State private var error: String?
     @State private var actionMessage: String?
-    @State private var showPicker = false
     @State private var showCopyNewVisitConfirm = false
 
     var body: some View {
@@ -169,7 +168,14 @@ struct EstimateDetailView: View {
                             Text(error).font(.caption).foregroundStyle(.red)
                         }
 
-                        lineItemsSection(for: estimate)
+                        EstimateLineItemsEditSection(
+                            estimateId: estimateId,
+                            items: estimate.lineItems,
+                            canEdit: estimate.status != "CONVERTED"
+                        ) {
+                            await load()
+                            await onUpdated()
+                        }
                         totalsSection(for: estimate)
                         actionsSection(for: estimate)
                     }
@@ -188,11 +194,6 @@ struct EstimateDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
-        .sheet(isPresented: $showPicker) {
-            PriceBookPickerSheet { item in
-                await addLineItem(from: item)
-            }
-        }
         .confirmationDialog(
             "Schedule a new visit with these line items?",
             isPresented: $showCopyNewVisitConfirm,
@@ -232,55 +233,6 @@ struct EstimateDetailView: View {
                     Text("Customer signed")
                         .font(.caption)
                         .foregroundStyle(StormTheme.success)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func lineItemsSection(for estimate: EstimateDetailDTO) -> some View {
-        StormCard {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    StormSectionHeader(title: "Line items", systemImage: "list.bullet")
-                    Spacer()
-                    if estimate.status != "CONVERTED" {
-                        Button("Add item") { showPicker = true }
-                            .buttonStyle(StormSecondaryButtonStyle())
-                            .disabled(isSaving)
-                    }
-                }
-
-                if estimate.lineItems.isEmpty {
-                    Text("Add items from the price book.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(estimate.lineItems) { item in
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(item.name).font(.subheadline.weight(.medium))
-                                Text("\(item.quantity.formatted()) × \(item.unitPrice.formatted(.currency(code: "USD")))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 4) {
-                                Text(item.total, format: .currency(code: "USD"))
-                                    .font(.subheadline.weight(.semibold))
-                                if estimate.status != "CONVERTED" {
-                                    Button("Remove", role: .destructive) {
-                                        Task { await removeLineItem(item.id) }
-                                    }
-                                    .font(.caption)
-                                    .disabled(isSaving)
-                                }
-                            }
-                        }
-                        if item.id != estimate.lineItems.last?.id {
-                            Divider()
-                        }
-                    }
                 }
             }
         }
@@ -393,58 +345,6 @@ struct EstimateDetailView: View {
         }
     }
 
-    private func addLineItem(from item: PriceBookItemDTO) async {
-        let expectedUnitPrice = item.resolvedUnitPrice
-        isSaving = true
-        error = nil
-        defer { isSaving = false }
-        struct PatchBody: Encodable {
-            let lineItemId: String
-            let quantity: Double
-            let unitPrice: Double
-        }
-        do {
-            var updated = try await env.apiClient.post(
-                path: APIPath.estimateLineItems(estimateId),
-                body: AddEstimateLineItemBody(
-                    priceBookItemId: item.id,
-                    quantity: 1,
-                    unitPrice: expectedUnitPrice
-                )
-            )
-            if let added = PriceBookLineItemAdding.matchingLineItem(in: updated.lineItems, for: item),
-               PriceBookLineItemAdding.needsPriceCorrection(lineItem: added, expectedUnitPrice: expectedUnitPrice) {
-                updated = try await env.apiClient.patch(
-                    path: APIPath.estimateLineItems(estimateId),
-                    body: PatchBody(
-                        lineItemId: added.id,
-                        quantity: added.quantity,
-                        unitPrice: expectedUnitPrice
-                    )
-                )
-            }
-            estimate = updated
-            await onUpdated()
-        } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
-        }
-    }
-
-    private func removeLineItem(_ lineItemId: String) async {
-        isSaving = true
-        error = nil
-        defer { isSaving = false }
-        do {
-            try await env.apiClient.delete(
-                path: APIPath.estimateLineItems(estimateId),
-                query: [URLQueryItem(name: "lineItemId", value: lineItemId)]
-            )
-            await load()
-            await onUpdated()
-        } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
-        }
-    }
 
     private func sendEstimate() async {
         isSaving = true

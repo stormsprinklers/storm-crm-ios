@@ -8,8 +8,7 @@ struct VisitLineItemsEditSection: View {
     var onUpdated: () async -> Void
 
     @State private var showPicker = false
-    @State private var draftQuantities: [String: String] = [:]
-    @State private var draftPrices: [String: String] = [:]
+    @State private var drafts = LineItemDraftFields()
     @State private var discountLabel = ""
     @State private var discountAmount = ""
     @State private var discountType = "FIXED"
@@ -34,7 +33,15 @@ struct VisitLineItemsEditSection: View {
                     Text("No line items yet.").foregroundStyle(.secondary)
                 } else {
                     ForEach(items) { item in
-                        lineItemRow(item)
+                        LineItemEditRow(
+                            name: drafts.bindingName(for: item),
+                            description: drafts.bindingDescription(for: item),
+                            quantity: drafts.bindingQuantity(for: item),
+                            unitPrice: drafts.bindingPrice(for: item),
+                            isSaving: savingItemId == item.id,
+                            onSave: { Task { await saveItem(item) } },
+                            onDelete: { Task { await deleteItem(item.id) } }
+                        )
                     }
                 }
 
@@ -42,60 +49,15 @@ struct VisitLineItemsEditSection: View {
                 discountEditor
             }
         }
-        .onAppear { syncDrafts() }
-        .onChange(of: items.map { "\($0.id):\($0.quantity):\($0.unitPrice)" }) { _, _ in syncDrafts() }
+        .onAppear { drafts.sync(from: items) }
+        .onChange(of: items.map { "\($0.id):\($0.name):\($0.description ?? ""):\($0.quantity):\($0.unitPrice)" }) { _, _ in
+            drafts.sync(from: items)
+        }
         .sheet(isPresented: $showPicker) {
             PriceBookPickerSheet { item in
                 await addFromPriceBook(item)
             }
         }
-    }
-
-    @ViewBuilder
-    private func lineItemRow(_ item: LineItemDTO) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.name).font(.subheadline.weight(.medium))
-                    if let description = item.description, !description.isEmpty {
-                        Text(description).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                Text(item.total, format: .currency(code: "USD"))
-                    .font(.subheadline.weight(.semibold))
-            }
-
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Qty").font(.caption2).foregroundStyle(.secondary)
-                    TextField("Qty", text: bindingQuantity(for: item))
-                        .keyboardType(.decimalPad)
-                        .textFieldStyle(.roundedBorder)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Unit price").font(.caption2).foregroundStyle(.secondary)
-                    TextField("Price", text: bindingPrice(for: item))
-                        .keyboardType(.decimalPad)
-                        .textFieldStyle(.roundedBorder)
-                }
-                Button {
-                    Task { await saveItem(item) }
-                } label: {
-                    Image(systemName: "checkmark.circle.fill")
-                }
-                .disabled(savingItemId == item.id)
-
-                Button(role: .destructive) {
-                    Task { await deleteItem(item.id) }
-                } label: {
-                    Image(systemName: "trash")
-                }
-            }
-        }
-        .padding(10)
-        .background(StormTheme.ice.opacity(0.2))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     private var discountEditor: some View {
@@ -132,33 +94,6 @@ struct VisitLineItemsEditSection: View {
         }
     }
 
-    private func bindingQuantity(for item: LineItemDTO) -> Binding<String> {
-        Binding(
-            get: { draftQuantities[item.id] ?? String(item.quantity) },
-            set: { draftQuantities[item.id] = $0 }
-        )
-    }
-
-    private func bindingPrice(for item: LineItemDTO) -> Binding<String> {
-        Binding(
-            get: { draftPrices[item.id] ?? String(item.unitPrice) },
-            set: { draftPrices[item.id] = $0 }
-        )
-    }
-
-    private func syncDrafts() {
-        for item in items {
-            draftQuantities[item.id] = formatEditableDecimal(item.quantity)
-            draftPrices[item.id] = formatEditableDecimal(item.unitPrice)
-        }
-    }
-
-    private func formatEditableDecimal(_ value: Double) -> String {
-        if value == floor(value), value < 1_000_000 {
-            return String(format: "%.0f", value)
-        }
-        return String(value)
-    }
 
     private func formatDiscount(_ discount: DiscountDTO) -> String {
         if discount.type == "PERCENT" {
@@ -210,22 +145,38 @@ struct VisitLineItemsEditSection: View {
     }
 
     private func saveItem(_ item: LineItemDTO) async {
-        guard let qty = Double(draftQuantities[item.id] ?? ""),
-              let price = Double(draftPrices[item.id] ?? "") else {
+        let trimmedName = (drafts.names[item.id] ?? item.name)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            error = "Name is required"
+            return
+        }
+        guard let qty = Double(drafts.quantities[item.id] ?? ""),
+              let price = Double(drafts.prices[item.id] ?? "") else {
             error = "Enter valid quantity and price"
             return
         }
+
+        let description = drafts.descriptions[item.id]?.trimmingCharacters(in: .whitespacesAndNewlines)
         savingItemId = item.id
         defer { savingItemId = nil }
         struct Body: Encodable {
             let lineItemId: String
+            let name: String
+            let description: String?
             let quantity: Double
             let unitPrice: Double
         }
         do {
             let _: VisitDetailDTO = try await env.apiClient.patch(
                 path: APIPath.visitLineItems(visitId),
-                body: Body(lineItemId: item.id, quantity: qty, unitPrice: price)
+                body: Body(
+                    lineItemId: item.id,
+                    name: trimmedName,
+                    description: description?.isEmpty == true ? nil : description,
+                    quantity: qty,
+                    unitPrice: price
+                )
             )
             await onUpdated()
         } catch {
@@ -239,8 +190,7 @@ struct VisitLineItemsEditSection: View {
                 path: APIPath.visitLineItems(visitId),
                 query: [URLQueryItem(name: "lineItemId", value: lineItemId)]
             )
-            draftQuantities.removeValue(forKey: lineItemId)
-            draftPrices.removeValue(forKey: lineItemId)
+            drafts.removeDrafts(for: lineItemId)
             await onUpdated()
         } catch {
             self.error = (error as? APIError)?.message
