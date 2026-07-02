@@ -43,7 +43,7 @@ struct VisitLineItemsEditSection: View {
             }
         }
         .onAppear { syncDrafts() }
-        .onChange(of: items.map(\.id)) { _, _ in syncDrafts() }
+        .onChange(of: items.map { "\($0.id):\($0.quantity):\($0.unitPrice)" }) { _, _ in syncDrafts() }
         .sheet(isPresented: $showPicker) {
             PriceBookPickerSheet { item in
                 await addFromPriceBook(item)
@@ -148,13 +148,16 @@ struct VisitLineItemsEditSection: View {
 
     private func syncDrafts() {
         for item in items {
-            if draftQuantities[item.id] == nil {
-                draftQuantities[item.id] = String(item.quantity)
-            }
-            if draftPrices[item.id] == nil {
-                draftPrices[item.id] = String(item.unitPrice)
-            }
+            draftQuantities[item.id] = formatEditableDecimal(item.quantity)
+            draftPrices[item.id] = formatEditableDecimal(item.unitPrice)
         }
+    }
+
+    private func formatEditableDecimal(_ value: Double) -> String {
+        if value == floor(value), value < 1_000_000 {
+            return String(format: "%.0f", value)
+        }
+        return String(value)
     }
 
     private func formatDiscount(_ discount: DiscountDTO) -> String {
@@ -165,6 +168,7 @@ struct VisitLineItemsEditSection: View {
     }
 
     private func addFromPriceBook(_ item: PriceBookItemDTO) async {
+        let expectedUnitPrice = item.resolvedUnitPrice
         struct Body: Encodable {
             let priceBookItemId: String
             let name: String
@@ -172,17 +176,33 @@ struct VisitLineItemsEditSection: View {
             let unitPrice: Double
             let quantity: Double
         }
+        struct PatchBody: Encodable {
+            let lineItemId: String
+            let quantity: Double
+            let unitPrice: Double
+        }
         do {
-            let _: VisitDetailDTO = try await env.apiClient.post(
+            let visit: VisitDetailDTO = try await env.apiClient.post(
                 path: APIPath.visitLineItems(visitId),
                 body: Body(
                     priceBookItemId: item.id,
                     name: item.name,
                     description: item.description,
-                    unitPrice: item.unitPrice,
+                    unitPrice: expectedUnitPrice,
                     quantity: 1
                 )
             )
+            if let added = PriceBookLineItemAdding.matchingLineItem(in: visit.lineItems ?? [], for: item),
+               PriceBookLineItemAdding.needsPriceCorrection(lineItem: added, expectedUnitPrice: expectedUnitPrice) {
+                let _: VisitDetailDTO = try await env.apiClient.patch(
+                    path: APIPath.visitLineItems(visitId),
+                    body: PatchBody(
+                        lineItemId: added.id,
+                        quantity: added.quantity,
+                        unitPrice: expectedUnitPrice
+                    )
+                )
+            }
             await onUpdated()
         } catch {
             self.error = (error as? APIError)?.message

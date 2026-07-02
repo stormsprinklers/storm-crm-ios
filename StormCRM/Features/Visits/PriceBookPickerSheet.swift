@@ -269,7 +269,6 @@ private struct PriceBookCategoryBrowseView: View {
         let loadedItems = await itemsRequest
 
         if let loadedCategory {
-            category = loadedCategory
             childCategories = loadedCategory.children ?? []
         } else {
             error = "Category could not be loaded"
@@ -348,7 +347,7 @@ private struct PriceBookPickerRow: View {
 
                     Spacer(minLength: 8)
 
-                    Text(item.unitPrice, format: .currency(code: "USD"))
+                    Text(item.resolvedUnitPrice, format: .currency(code: "USD"))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }

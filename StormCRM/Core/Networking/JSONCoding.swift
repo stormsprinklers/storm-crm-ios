@@ -47,7 +47,15 @@ extension KeyedDecodingContainer {
     func decodeFlexibleDouble(forKey key: Key) throws -> Double? {
         if (try? decodeNil(forKey: key)) == true { return nil }
         if let value = try? decode(Double.self, forKey: key) { return value }
-        if let text = try? decode(String.self, forKey: key) { return Double(text) }
+        if let value = try? decode(Int.self, forKey: key) { return Double(value) }
+        if let text = try? decode(String.self, forKey: key) {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return Double(trimmed)
+        }
+        if let nested = try? decode(FlexibleDouble.self, forKey: key) {
+            return nested.value
+        }
         return nil
     }
 }
