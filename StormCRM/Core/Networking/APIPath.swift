@@ -67,6 +67,10 @@ enum APIPath {
     static func rachioStop(customerId: String, propertyId: String) -> String {
         "/api/customers/\(customerId)/properties/\(propertyId)/rachio/stop"
     }
+    static func rachioLink(customerId: String, propertyId: String) -> String {
+        "/api/customers/\(customerId)/properties/\(propertyId)/rachio/link"
+    }
+    static let settingsRachioDevices = "/api/settings/rachio/devices"
 
     static let timeClock = "/api/time-clock"
     static let timesheets = "/api/timesheets"

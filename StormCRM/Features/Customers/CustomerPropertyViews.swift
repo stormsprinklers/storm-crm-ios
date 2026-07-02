@@ -66,6 +66,12 @@ struct CustomerPropertyInlineSection: View {
                     fallbackAerialUrl: nil,
                     showsEditLink: true
                 )
+
+                RachioPropertySection(
+                    customerId: customerId,
+                    propertyId: property.id,
+                    embedded: true
+                )
             }
         }
     }
