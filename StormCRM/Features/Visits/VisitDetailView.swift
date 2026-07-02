@@ -477,13 +477,7 @@ struct VisitDetailView: View {
     }
 
     private func formattedJobAddress(_ visit: VisitDetailDTO) -> String? {
-        let parts = [visit.address, visit.city, visit.state, visit.zip].compactMap { $0 }.filter { !$0.isEmpty }
-        if !parts.isEmpty { return parts.joined(separator: ", ") }
-        if let property = visit.property {
-            let p = [property.address, property.city, property.state, property.zip].compactMap { $0 }.filter { !$0.isEmpty }
-            return p.isEmpty ? nil : p.joined(separator: ", ")
-        }
-        return nil
+        AppleMapsURL.formattedAddress(for: visit)
     }
 }
 

@@ -636,11 +636,15 @@ struct VisitCustomerInfoSection: View {
                     }
                 }
 
-                if let address = formattedAddress(visit) {
+                if let address = AppleMapsURL.formattedAddress(for: visit) {
                     Text(address)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    if let url = mapsURL(address) {
+                    if let url = AppleMapsURL.directionsURL(
+                        latitude: visit.property?.latitude,
+                        longitude: visit.property?.longitude,
+                        address: address
+                    ) {
                         Link("Open in Maps", destination: url)
                             .font(.subheadline)
                             .foregroundStyle(StormTheme.sky)
@@ -649,7 +653,7 @@ struct VisitCustomerInfoSection: View {
 
                 VisitPropertyMapPreview(
                     title: visit.title,
-                    address: formattedAddress(visit),
+                    address: AppleMapsURL.formattedAddress(for: visit),
                     latitude: visit.property?.latitude,
                     longitude: visit.property?.longitude
                 )
@@ -710,20 +714,6 @@ struct VisitCustomerInfoSection: View {
         }
     }
 
-    private func formattedAddress(_ visit: VisitDetailDTO) -> String? {
-        let parts = [visit.address, visit.city, visit.state, visit.zip].compactMap { $0 }.filter { !$0.isEmpty }
-        if !parts.isEmpty { return parts.joined(separator: ", ") }
-        if let property = visit.property {
-            let p = [property.address, property.city, property.state, property.zip].compactMap { $0 }.filter { !$0.isEmpty }
-            return p.isEmpty ? nil : p.joined(separator: ", ")
-        }
-        return nil
-    }
-
-    private func mapsURL(_ address: String) -> URL? {
-        let encoded = address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? address
-        return URL(string: "http://maps.apple.com/?q=\(encoded)")
-    }
 }
 
 struct VisitPropertyMapPreview: View {

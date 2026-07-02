@@ -48,13 +48,6 @@ struct JobMapView: View {
     }
 
     private var directionsURL: URL? {
-        if let coordinate {
-            return URL(string: "http://maps.apple.com/?daddr=\(coordinate.latitude),\(coordinate.longitude)")
-        }
-        if let address, !address.isEmpty {
-            let encoded = address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? address
-            return URL(string: "http://maps.apple.com/?daddr=\(encoded)")
-        }
-        return nil
+        AppleMapsURL.directionsURL(latitude: latitude, longitude: longitude, address: address)
     }
 }
