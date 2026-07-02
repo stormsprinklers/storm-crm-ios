@@ -36,7 +36,7 @@ struct VisitAttachmentsSection: View {
                         AttachmentAddTile(title: "Take photo", systemImage: "camera.fill") {
                             showCamera = true
                         }
-                        .disabled(isUploading)
+                        .disabled(isUploading || !CameraImagePicker.isCameraAvailable)
 
                         PhotosPicker(selection: $pickerItem, matching: .images) {
                             AttachmentAddTile(title: "Library", systemImage: "photo.on.rectangle")
