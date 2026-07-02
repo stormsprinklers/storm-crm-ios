@@ -413,8 +413,17 @@ struct TimeEventsResponse: Decodable {
     let events: [TimeEventDTO]?
 }
 
+struct ChecklistTemplateDTO: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let description: String?
+    let active: Bool?
+    let requiredForCompletion: Bool?
+}
+
 struct ChecklistDTO: Decodable, Identifiable {
     let id: String
+    let templateId: String?
     let name: String
     let items: [ChecklistItemDTO]
     let completedAt: String?

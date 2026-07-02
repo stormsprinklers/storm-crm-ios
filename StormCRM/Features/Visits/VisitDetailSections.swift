@@ -513,20 +513,30 @@ struct VisitWorkSummarySection: View {
 }
 
 struct VisitChecklistLauncherSection: View {
+    @EnvironmentObject private var env: AppEnvironment
     let checklists: [ChecklistDTO]
     let onSaveItem: (String, String, JSONValue) async -> Void
     let onComplete: (String) async -> Void
+    let onAssignTemplate: (String) async -> Void
 
     @State private var showChecklist = false
+    @State private var showTemplatePicker = false
 
-    private var primaryChecklist: ChecklistDTO? {
-        checklists.first
+    private var assignedTemplateIds: Set<String> {
+        Set(checklists.compactMap(\.templateId))
     }
 
     private var statusLabel: String {
-        guard let checklist = primaryChecklist else {
-            return "No checklist selected"
+        guard !checklists.isEmpty else {
+            return "No checklist on this visit"
         }
+        if checklists.count > 1 {
+            let completed = checklists.filter {
+                $0.completedAt != nil || $0.status == "COMPLETED"
+            }.count
+            return "\(checklists.count) checklists · \(completed) complete"
+        }
+        let checklist = checklists[0]
         if checklist.completedAt != nil || checklist.status == "COMPLETED" {
             return "\(checklist.name) · Complete"
         }
@@ -542,22 +552,42 @@ struct VisitChecklistLauncherSection: View {
     var body: some View {
         StormCard {
             VStack(alignment: .leading, spacing: 10) {
-                StormSectionHeader(title: "Checklist", systemImage: "checklist")
+                HStack(alignment: .center) {
+                    StormSectionHeader(title: "Checklist", systemImage: "checklist")
+                    Spacer(minLength: 8)
+                    Button {
+                        showTemplatePicker = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(StormTheme.sky)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Add checklist")
+                }
 
                 Text(statusLabel)
                     .font(.subheadline)
-                    .foregroundStyle(primaryChecklist == nil ? .secondary : StormTheme.navy)
+                    .foregroundStyle(checklists.isEmpty ? .secondary : StormTheme.navy)
 
-                if primaryChecklist != nil {
+                if checklists.isEmpty {
+                    Text("Tap + to add a checklist from your templates.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
                     Button("Open checklist") {
                         showChecklist = true
                     }
                     .buttonStyle(StormPrimaryButtonStyle())
-                } else {
-                    Text("Add line items that match a checklist template, or assign one from the office.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
+            }
+        }
+        .sheet(isPresented: $showTemplatePicker) {
+            ChecklistTemplatePickerSheet(
+                assignedTemplateIds: assignedTemplateIds,
+                userRole: env.auth.user?.role
+            ) { template in
+                await onAssignTemplate(template.id)
             }
         }
         .sheet(isPresented: $showChecklist) {
