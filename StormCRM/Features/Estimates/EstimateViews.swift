@@ -374,7 +374,7 @@ struct EstimateDetailView: View {
                             Label("Copy to new visit", systemImage: "calendar.badge.plus")
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(sourceVisitId == nil ? StormPrimaryButtonStyle() : StormSecondaryButtonStyle())
+                        .stormButtonStyle(primary: sourceVisitId == nil)
                         .disabled(isSaving)
                     }
                 }

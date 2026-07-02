@@ -81,6 +81,17 @@ struct StormSecondaryButtonStyle: ButtonStyle {
     }
 }
 
+extension View {
+    @ViewBuilder
+    func stormButtonStyle(primary: Bool) -> some View {
+        if primary {
+            buttonStyle(StormPrimaryButtonStyle())
+        } else {
+            buttonStyle(StormSecondaryButtonStyle())
+        }
+    }
+}
+
 struct StormBadge: View {
     let text: String
     var style: Style = .neutral
