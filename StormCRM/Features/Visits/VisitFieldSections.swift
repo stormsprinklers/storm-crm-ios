@@ -56,7 +56,6 @@ struct VisitChecklistsSection: View {
                         .padding(.vertical, 4)
                     }
                 }
-            }
         }
     }
 }
