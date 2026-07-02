@@ -278,18 +278,13 @@ struct CustomerAddressCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 StormSectionHeader(title: "Address", systemImage: "mappin.and.ellipse")
                 Text(address)
-                if let url = mapsURL(address) {
+                if let url = AppleMapsURL.directionsURL(latitude: nil, longitude: nil, address: address) {
                     Link("Open in Maps", destination: url)
                         .font(.subheadline)
                         .foregroundStyle(StormTheme.sky)
                 }
             }
         }
-    }
-
-    private func mapsURL(_ address: String) -> URL? {
-        let encoded = address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? address
-        return URL(string: "http://maps.apple.com/?q=\(encoded)")
     }
 }
 

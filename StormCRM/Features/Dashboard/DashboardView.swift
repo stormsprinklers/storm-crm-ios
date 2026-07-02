@@ -292,8 +292,23 @@ struct DashboardView: View {
     }
 
     private func formattedAddress(_ job: VisitDTO) -> String? {
-        let parts = [job.address, job.city, job.state].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+        if let address = AppleMapsURL.formattedAddress(
+            street: job.address,
+            city: job.city,
+            state: job.state,
+            zip: job.zip
+        ) {
+            return address
+        }
+        if let property = job.property {
+            return AppleMapsURL.formattedAddress(
+                street: property.address,
+                city: property.city,
+                state: property.state,
+                zip: property.zip
+            )
+        }
+        return nil
     }
 }
 

@@ -115,20 +115,37 @@ struct PartsRunSheet: View {
     @State private var suppliers: [PartsRunOptionDTO] = []
     @State private var error: String?
     @State private var mapsUrl: String?
+    @State private var isLoading = false
+    @State private var locationNote: String?
 
     var body: some View {
         NavigationStack {
-            List(suppliers) { supplier in
-                Button {
-                    Task { await selectSupplier(supplier.id) }
-                } label: {
-                    VStack(alignment: .leading) {
-                        Text(supplier.name).font(.headline)
-                        if let address = supplier.address {
-                            Text(address).font(.caption).foregroundStyle(.secondary)
+            Group {
+                if isLoading && suppliers.isEmpty {
+                    VStack(spacing: 12) {
+                        ProgressView("Finding nearby suppliers…")
+                        if let locationNote {
+                            Text(locationNote)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
                         }
-                        if let miles = supplier.driveDistanceMiles {
-                            Text(String(format: "%.1f mi", miles)).font(.caption2)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    List(suppliers) { supplier in
+                        Button {
+                            Task { await selectSupplier(supplier.id) }
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text(supplier.name).font(.headline)
+                                if let address = supplier.address {
+                                    Text(address).font(.caption).foregroundStyle(.secondary)
+                                }
+                                if let miles = supplier.driveDistanceMiles {
+                                    Text(String(format: "%.1f mi", miles)).font(.caption2)
+                                }
+                            }
                         }
                     }
                 }
@@ -148,12 +165,42 @@ struct PartsRunSheet: View {
             if let error {
                 Text(error).foregroundStyle(.red).padding()
             }
+            if let locationNote, !suppliers.isEmpty {
+                Text(locationNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+            }
         }
     }
 
     private func load() async {
+        isLoading = true
+        defer { isLoading = false }
+
+        let location = await env.location.awaitLocation(timeout: 12)
+        if let location {
+            locationNote = nil
+        } else {
+            switch env.location.authorizationStatus {
+            case .denied, .restricted:
+                locationNote = "Location access is off — distances use the job site instead of your current position."
+            default:
+                locationNote = "Couldn't get GPS — distances may be less accurate."
+            }
+        }
+
+        var query: [URLQueryItem] = []
+        if let location {
+            query.append(URLQueryItem(name: "originLat", value: String(location.coordinate.latitude)))
+            query.append(URLQueryItem(name: "originLng", value: String(location.coordinate.longitude)))
+        }
+
         do {
-            let response: PartsRunGetResponse = try await env.apiClient.get(path: APIPath.visitPartsRun(visitId))
+            let response: PartsRunGetResponse = try await env.apiClient.get(
+                path: APIPath.visitPartsRun(visitId),
+                query: query
+            )
             suppliers = response.options ?? []
             if suppliers.isEmpty, let message = response.message {
                 error = message
@@ -164,11 +211,23 @@ struct PartsRunSheet: View {
     }
 
     private func selectSupplier(_ supplierId: String) async {
-        struct Body: Encodable { let supplierId: String }
+        struct Body: Encodable {
+            let supplierId: String
+            let originLat: Double?
+            let originLng: Double?
+        }
+
+        let location = env.location.lastLocation
+            ?? await env.location.awaitLocation(timeout: 8)
+
         do {
             let response: PartsRunPostResponse = try await env.apiClient.post(
                 path: APIPath.visitPartsRun(visitId),
-                body: Body(supplierId: supplierId)
+                body: Body(
+                    supplierId: supplierId,
+                    originLat: location?.coordinate.latitude,
+                    originLng: location?.coordinate.longitude
+                )
             )
             mapsUrl = response.mapsUrl
             if response.paused == true {

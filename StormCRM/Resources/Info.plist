@@ -41,7 +41,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Attach job photos to visits.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Share your location when heading to a job for accurate ETA.</string>
+	<string>Share your location for accurate driving directions, ETA when heading to a job, and nearby parts suppliers.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Place and receive calls through Storm CRM.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

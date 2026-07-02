@@ -187,8 +187,7 @@ struct PropertyLocationEmbedsView: View {
     }
 
     private var mapsDirectionsURL: URL? {
-        let encoded = addressQuery.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? addressQuery
-        return URL(string: "http://maps.apple.com/?q=\(encoded)")
+        AppleMapsURL.directionsURL(latitude: nil, longitude: nil, address: addressQuery)
     }
 
     private func load() async {
