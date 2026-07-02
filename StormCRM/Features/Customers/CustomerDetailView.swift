@@ -242,7 +242,7 @@ struct CustomerContactCard: View {
                 if let phone = customer.phone, !phone.isEmpty {
                     HStack(spacing: 16) {
                         Button(action: onMessage) {
-                            Label("CRM text", systemImage: "message.fill")
+                            Label("Text", systemImage: "message.fill")
                         }
                         Button {
                             Task { await voice.call(phone: phone, customerId: customer.id) }
