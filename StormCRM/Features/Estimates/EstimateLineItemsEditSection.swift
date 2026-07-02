@@ -8,6 +8,7 @@ struct EstimateLineItemsEditSection: View {
     var onUpdated: () async -> Void
 
     @State private var showPicker = false
+    @State private var showCustomItem = false
     @State private var drafts = LineItemDraftFields()
     @State private var error: String?
     @State private var savingItemId: String?
@@ -20,9 +21,11 @@ struct EstimateLineItemsEditSection: View {
                     StormSectionHeader(title: "Line items", systemImage: "list.bullet")
                     Spacer()
                     if canEdit {
-                        Button("Add item") { showPicker = true }
-                            .buttonStyle(StormSecondaryButtonStyle())
-                            .disabled(isSaving)
+                        LineItemAddButtons(
+                            onPriceBook: { showPicker = true },
+                            onCustom: { showCustomItem = true },
+                            isDisabled: isSaving
+                        )
                     }
                 }
 
@@ -31,7 +34,7 @@ struct EstimateLineItemsEditSection: View {
                 }
 
                 if items.isEmpty {
-                    Text("Add items from the price book.")
+                    Text("Add items from the price book or create a custom line item.")
                         .foregroundStyle(.secondary)
                 } else if canEdit {
                     ForEach(items) { item in
@@ -64,6 +67,11 @@ struct EstimateLineItemsEditSection: View {
                 await addFromPriceBook(item)
             }
         }
+        .sheet(isPresented: $showCustomItem) {
+            CustomLineItemSheet { input in
+                await addCustomItem(input)
+            }
+        }
     }
 
     @ViewBuilder
@@ -85,6 +93,7 @@ struct EstimateLineItemsEditSection: View {
     }
 
     private func addFromPriceBook(_ item: PriceBookItemDTO) async {
+        let expectedUnitPrice = item.resolvedUnitPrice
         isSaving = true
         error = nil
         defer { isSaving = false }
@@ -95,15 +104,51 @@ struct EstimateLineItemsEditSection: View {
             let unitPrice: Double
             let quantity: Double
         }
+        struct PatchBody: Encodable {
+            let lineItemId: String
+            let quantity: Double
+            let unitPrice: Double
+        }
         do {
-            let _: EstimateDetailDTO = try await env.apiClient.post(
+            var updated: EstimateDetailDTO = try await env.apiClient.post(
                 path: APIPath.estimateLineItems(estimateId),
                 body: Body(
                     priceBookItemId: item.id,
                     name: item.name,
                     description: item.description,
-                    unitPrice: item.unitPrice,
+                    unitPrice: expectedUnitPrice,
                     quantity: 1
+                )
+            )
+            if let added = PriceBookLineItemAdding.matchingLineItem(in: updated.lineItems, for: item),
+               PriceBookLineItemAdding.needsPriceCorrection(lineItem: added, expectedUnitPrice: expectedUnitPrice) {
+                updated = try await env.apiClient.patch(
+                    path: APIPath.estimateLineItems(estimateId),
+                    body: PatchBody(
+                        lineItemId: added.id,
+                        quantity: added.quantity,
+                        unitPrice: expectedUnitPrice
+                    )
+                )
+            }
+            await onUpdated()
+        } catch {
+            self.error = (error as? APIError)?.message
+        }
+    }
+
+    private func addCustomItem(_ input: CustomLineItemInput) async {
+        isSaving = true
+        error = nil
+        defer { isSaving = false }
+        do {
+            let _: EstimateDetailDTO = try await env.apiClient.post(
+                path: APIPath.estimateLineItems(estimateId),
+                body: CreateLineItemBody(
+                    name: input.name,
+                    description: input.description,
+                    unitPrice: input.unitPrice,
+                    quantity: input.quantity
                 )
             )
             await onUpdated()

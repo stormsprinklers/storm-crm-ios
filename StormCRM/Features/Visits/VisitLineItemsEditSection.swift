@@ -8,6 +8,7 @@ struct VisitLineItemsEditSection: View {
     var onUpdated: () async -> Void
 
     @State private var showPicker = false
+    @State private var showCustomItem = false
     @State private var drafts = LineItemDraftFields()
     @State private var discountLabel = ""
     @State private var discountAmount = ""
@@ -21,8 +22,10 @@ struct VisitLineItemsEditSection: View {
                 HStack {
                     StormSectionHeader(title: "Line items", systemImage: "list.bullet")
                     Spacer()
-                    Button("Add item") { showPicker = true }
-                        .buttonStyle(StormSecondaryButtonStyle())
+                    LineItemAddButtons(
+                        onPriceBook: { showPicker = true },
+                        onCustom: { showCustomItem = true }
+                    )
                 }
 
                 if let error {
@@ -30,7 +33,8 @@ struct VisitLineItemsEditSection: View {
                 }
 
                 if items.isEmpty {
-                    Text("No line items yet.").foregroundStyle(.secondary)
+                    Text("Add items from the price book or create a custom line item.")
+                        .foregroundStyle(.secondary)
                 } else {
                     ForEach(items) { item in
                         LineItemEditRow(
@@ -56,6 +60,11 @@ struct VisitLineItemsEditSection: View {
         .sheet(isPresented: $showPicker) {
             PriceBookPickerSheet { item in
                 await addFromPriceBook(item)
+            }
+        }
+        .sheet(isPresented: $showCustomItem) {
+            CustomLineItemSheet { input in
+                await addCustomItem(input)
             }
         }
     }
@@ -100,6 +109,23 @@ struct VisitLineItemsEditSection: View {
             return discount.amount.formatted(.number.precision(.fractionLength(0))) + "%"
         }
         return discount.amount.formatted(.currency(code: "USD"))
+    }
+
+    private func addCustomItem(_ input: CustomLineItemInput) async {
+        do {
+            let _: VisitDetailDTO = try await env.apiClient.post(
+                path: APIPath.visitLineItems(visitId),
+                body: CreateLineItemBody(
+                    name: input.name,
+                    description: input.description,
+                    unitPrice: input.unitPrice,
+                    quantity: input.quantity
+                )
+            )
+            await onUpdated()
+        } catch {
+            self.error = (error as? APIError)?.message
+        }
     }
 
     private func addFromPriceBook(_ item: PriceBookItemDTO) async {
