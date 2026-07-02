@@ -243,6 +243,20 @@ struct VisitDetailView: View {
 
                                 VisitCustomerInfoSection(visit: visit, voice: env.voice)
 
+                                if let role = env.auth.user?.role, UserRoles.canViewMaintenancePlans(role) {
+                                    VisitMaintenanceSection(
+                                        visitId: visitId,
+                                        userRole: role,
+                                        onUpdated: {
+                                            await viewModel.load(
+                                                api: env.apiClient,
+                                                visitId: visitId,
+                                                userRole: role
+                                            )
+                                        }
+                                    )
+                                }
+
                                 VisitScheduleEditSection(
                                     visit: visit,
                                     canEdit: canEditSchedule,
@@ -293,20 +307,6 @@ struct VisitDetailView: View {
 
                                 if visit.hasInstallPlan {
                                     VisitInstallPlanSection(visit: visit)
-                                }
-
-                                if let role = env.auth.user?.role, UserRoles.canViewMaintenancePlans(role) {
-                                    VisitMaintenanceSection(
-                                        visitId: visitId,
-                                        userRole: role,
-                                        onUpdated: {
-                                            await viewModel.load(
-                                                api: env.apiClient,
-                                                visitId: visitId,
-                                                userRole: role
-                                            )
-                                        }
-                                    )
                                 }
 
                                 if let history = viewModel.customerHistory {

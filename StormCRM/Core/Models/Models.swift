@@ -574,6 +574,8 @@ struct LinkedPlanVisitDTO: Decodable {
 }
 
 struct EnrollmentRefDTO: Decodable {
+    let id: String?
+    let status: String?
     let templateName: String?
     let propertyName: String?
 }
