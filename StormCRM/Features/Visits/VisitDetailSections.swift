@@ -1,4 +1,3 @@
-import MapKit
 import SwiftUI
 
 // MARK: - Header & metadata
@@ -647,14 +646,9 @@ struct VisitCustomerInfoSection: View {
                     }
                 }
 
-                VisitPropertyMapPreview(
-                    title: visit.title,
-                    address: formattedAddress(visit),
-                    latitude: visit.property?.latitude,
-                    longitude: visit.property?.longitude
-                )
-
                 if let customerId = visit.customer?.id, let property = visit.property {
+                    VisitPropertyIrrigationPreview(customerId: customerId, property: property)
+
                     DisclosureGroup {
                         if isLoadingGuide {
                             ProgressView("Loading program guide…")
@@ -723,50 +717,6 @@ struct VisitCustomerInfoSection: View {
     private func mapsURL(_ address: String) -> URL? {
         let encoded = address.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? address
         return URL(string: "http://maps.apple.com/?q=\(encoded)")
-    }
-}
-
-struct VisitPropertyMapPreview: View {
-    let title: String
-    let address: String?
-    let latitude: Double?
-    let longitude: Double?
-
-    @State private var position: MapCameraPosition = .automatic
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Property map")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            if let coordinate = coordinate {
-                Map(position: $position) {
-                    Marker(title, coordinate: coordinate)
-                }
-                .frame(height: 140)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .onAppear {
-                    position = .region(MKCoordinateRegion(
-                        center: coordinate,
-                        span: MKCoordinateSpan(latitudeDelta: 0.015, longitudeDelta: 0.015)
-                    ))
-                }
-            } else if let address, !address.isEmpty {
-                Text(address)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("No map location on file")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
-        }
-    }
-
-    private var coordinate: CLLocationCoordinate2D? {
-        guard let lat = latitude, let lng = longitude else { return nil }
-        return CLLocationCoordinate2D(latitude: lat, longitude: lng)
     }
 }
 
