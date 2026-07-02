@@ -599,8 +599,18 @@ struct VisitCustomerInfoSection: View {
                 StormSectionHeader(title: "Customer", systemImage: "person.crop.circle")
 
                 if let customer = visit.customer {
-                    Text(customer.name)
-                        .font(.title3.weight(.semibold))
+                    NavigationLink(value: CustomerListRoute.detail(id: customer.id)) {
+                        HStack(spacing: 6) {
+                            Text(customer.name)
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(StormTheme.navy)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("View customer profile")
 
                     if let phone = customer.phone, !phone.isEmpty {
                         HStack(spacing: 16) {
