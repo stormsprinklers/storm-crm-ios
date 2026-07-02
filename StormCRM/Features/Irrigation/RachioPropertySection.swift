@@ -5,6 +5,7 @@ struct RachioPropertySection: View {
     @EnvironmentObject private var auth: AuthManager
     let customerId: String
     let propertyId: String
+    var embedded: Bool = false
 
     @State private var linked = false
     @State private var deviceName: String?
@@ -13,15 +14,36 @@ struct RachioPropertySection: View {
     @State private var message: String?
     @State private var error: String?
 
-    private var canControl: Bool {
+    @State private var devices: [RachioDeviceSummaryDTO] = []
+    @State private var selectedDeviceId = ""
+    @State private var devicesLoading = false
+    @State private var devicesError: String?
+    @State private var linking = false
+    @State private var unlinking = false
+
+    private var canManage: Bool {
         guard let role = auth.user?.role else { return false }
         return UserRoles.canEditVisitOfficeFields(role)
     }
 
     var body: some View {
-        StormCard {
-            VStack(alignment: .leading, spacing: 10) {
-                StormSectionHeader(title: "Rachio controller", systemImage: "drop.circle")
+        Group {
+            if embedded {
+                sectionContent
+            } else {
+                StormCard { sectionContent }
+            }
+        }
+        .task(id: propertyId) { await load() }
+        .task(id: linked) {
+            guard !linked, canManage else { return }
+            await loadDevices()
+        }
+    }
+
+    private var sectionContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+                StormSectionHeader(title: "Rachio", systemImage: "drop.circle")
 
                 if let error {
                     Text(error).font(.caption).foregroundStyle(.red)
@@ -29,6 +51,10 @@ struct RachioPropertySection: View {
                     Text("No Rachio device linked to this property.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    if canManage {
+                        rachioLinker
+                    }
                 } else {
                     if let deviceName {
                         Text(deviceName).font(.subheadline.weight(.medium))
@@ -46,7 +72,7 @@ struct RachioPropertySection: View {
                                 }
                             }
                             Spacer()
-                            if canControl {
+                            if canManage {
                                 Button("Run 3m") {
                                     Task { await runZone(zone.id, minutes: 3) }
                                 }
@@ -55,19 +81,59 @@ struct RachioPropertySection: View {
                             }
                         }
                     }
-                    if canControl {
-                        Button("Stop all watering") {
-                            Task { await stopAll() }
+                    if canManage {
+                        HStack(spacing: 10) {
+                            Button("Stop all watering") {
+                                Task { await stopAll() }
+                            }
+                            .buttonStyle(StormSecondaryButtonStyle())
+
+                            Button("Unlink") {
+                                Task { await unlinkDevice() }
+                            }
+                            .buttonStyle(StormSecondaryButtonStyle())
+                            .disabled(unlinking)
                         }
-                        .buttonStyle(StormSecondaryButtonStyle())
                     }
                 }
+        }
+    }
+
+    @ViewBuilder
+    private var rachioLinker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if devicesLoading {
+                ProgressView("Loading Rachio devices…")
+                    .font(.caption)
+            } else if let devicesError {
+                Text(devicesError)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else if devices.isEmpty {
+                Text("No Rachio devices found on your company account.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Picker("Rachio device", selection: $selectedDeviceId) {
+                    Text("Select a device").tag("")
+                    ForEach(devices) { device in
+                        Text(device.pickerLabel).tag(device.id)
+                    }
+                }
+                .pickerStyle(.menu)
+
+                Button(linking ? "Linking…" : "Link device") {
+                    Task { await linkDevice() }
+                }
+                .buttonStyle(StormPrimaryButtonStyle())
+                .disabled(linking || selectedDeviceId.isEmpty)
             }
         }
-        .task { await load() }
+        .padding(.top, 4)
     }
 
     private func load() async {
+        error = nil
         do {
             let response: RachioStatusResponse = try await env.apiClient.get(
                 path: APIPath.rachio(customerId: customerId, propertyId: propertyId)
@@ -75,6 +141,76 @@ struct RachioPropertySection: View {
             linked = response.linked
             deviceName = response.device?.name
             zones = response.device?.zones ?? []
+            if linked {
+                selectedDeviceId = ""
+            }
+        } catch {
+            self.error = (error as? APIError)?.message
+        }
+    }
+
+    private func loadDevices() async {
+        devicesLoading = devices.isEmpty
+        devicesError = nil
+        defer { devicesLoading = false }
+        do {
+            let response: RachioDevicesResponse = try await env.apiClient.get(
+                path: APIPath.settingsRachioDevices
+            )
+            devices = response.devices ?? []
+            if selectedDeviceId.isEmpty, devices.count == 1 {
+                selectedDeviceId = devices[0].id
+            }
+        } catch {
+            devicesError = (error as? APIError)?.message
+                ?? "Failed to load Rachio devices. Configure your Rachio API key in CRM settings."
+            devices = []
+        }
+    }
+
+    private func linkDevice() async {
+        guard !selectedDeviceId.isEmpty else { return }
+        linking = true
+        defer { linking = false }
+        error = nil
+        message = nil
+
+        let selected = devices.first { $0.id == selectedDeviceId }
+        struct Body: Encodable {
+            let deviceId: String
+            let deviceKind: String?
+        }
+        let body = Body(
+            deviceId: selectedDeviceId,
+            deviceKind: selected?.deviceKind
+        )
+
+        do {
+            let _: RachioLinkResponse = try await env.apiClient.post(
+                path: APIPath.rachioLink(customerId: customerId, propertyId: propertyId),
+                body: body
+            )
+            message = "Rachio device linked"
+            await load()
+        } catch {
+            self.error = (error as? APIError)?.message
+        }
+    }
+
+    private func unlinkDevice() async {
+        unlinking = true
+        defer { unlinking = false }
+        error = nil
+        message = nil
+        do {
+            try await env.apiClient.delete(
+                path: APIPath.rachioLink(customerId: customerId, propertyId: propertyId)
+            )
+            zones = []
+            deviceName = nil
+            linked = false
+            message = "Rachio device unlinked"
+            await loadDevices()
         } catch {
             self.error = (error as? APIError)?.message
         }
@@ -107,9 +243,50 @@ struct RachioPropertySection: View {
     }
 }
 
+struct RachioDevicesResponse: Decodable {
+    let devices: [RachioDeviceSummaryDTO]?
+}
+
+struct RachioDeviceSummaryDTO: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let serialNumber: String?
+    let model: String?
+    let status: String?
+    let zoneCount: Int?
+    let kind: String?
+
+    var deviceKind: String? {
+        guard let kind, kind == "hose_timer" else { return nil }
+        return "hose_timer"
+    }
+
+    var pickerLabel: String {
+        var parts = [name]
+        if let serialNumber, !serialNumber.isEmpty {
+            parts.append(serialNumber)
+        }
+        if let status, !status.isEmpty {
+            parts.append("(\(status))")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
 struct RachioStatusResponse: Decodable {
     let linked: Bool
     let device: RachioDeviceDTO?
+}
+
+struct RachioLinkResponse: Decodable {
+    let link: RachioLinkDTO?
+    let device: RachioDeviceDTO?
+}
+
+struct RachioLinkDTO: Decodable {
+    let id: String?
+    let externalDeviceId: String?
+    let status: String?
 }
 
 struct RachioDeviceDTO: Decodable {
