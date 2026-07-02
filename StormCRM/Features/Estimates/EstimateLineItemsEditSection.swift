@@ -1,19 +1,17 @@
 import SwiftUI
 
-struct VisitLineItemsEditSection: View {
+struct EstimateLineItemsEditSection: View {
     @EnvironmentObject private var env: AppEnvironment
-    let visitId: String
+    let estimateId: String
     let items: [LineItemDTO]
-    let discounts: [DiscountDTO]
+    let canEdit: Bool
     var onUpdated: () async -> Void
 
     @State private var showPicker = false
     @State private var drafts = LineItemDraftFields()
-    @State private var discountLabel = ""
-    @State private var discountAmount = ""
-    @State private var discountType = "FIXED"
     @State private var error: String?
     @State private var savingItemId: String?
+    @State private var isSaving = false
 
     var body: some View {
         StormCard {
@@ -21,8 +19,11 @@ struct VisitLineItemsEditSection: View {
                 HStack {
                     StormSectionHeader(title: "Line items", systemImage: "list.bullet")
                     Spacer()
-                    Button("Add item") { showPicker = true }
-                        .buttonStyle(StormSecondaryButtonStyle())
+                    if canEdit {
+                        Button("Add item") { showPicker = true }
+                            .buttonStyle(StormSecondaryButtonStyle())
+                            .disabled(isSaving)
+                    }
                 }
 
                 if let error {
@@ -30,8 +31,9 @@ struct VisitLineItemsEditSection: View {
                 }
 
                 if items.isEmpty {
-                    Text("No line items yet.").foregroundStyle(.secondary)
-                } else {
+                    Text("Add items from the price book.")
+                        .foregroundStyle(.secondary)
+                } else if canEdit {
                     ForEach(items) { item in
                         LineItemEditRow(
                             name: drafts.bindingName(for: item),
@@ -43,10 +45,14 @@ struct VisitLineItemsEditSection: View {
                             onDelete: { Task { await deleteItem(item.id) } }
                         )
                     }
+                } else {
+                    ForEach(items) { item in
+                        readOnlyRow(item)
+                        if item.id != items.last?.id {
+                            Divider()
+                        }
+                    }
                 }
-
-                Divider()
-                discountEditor
             }
         }
         .onAppear { drafts.sync(from: items) }
@@ -60,48 +66,28 @@ struct VisitLineItemsEditSection: View {
         }
     }
 
-    private var discountEditor: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Discounts").font(.subheadline.bold())
-            HStack {
-                TextField("Label", text: $discountLabel)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Amount", text: $discountAmount)
-                    .keyboardType(.decimalPad)
-                    .textFieldStyle(.roundedBorder)
-                Picker("Type", selection: $discountType) {
-                    Text("$").tag("FIXED")
-                    Text("%").tag("PERCENT")
+    @ViewBuilder
+    private func readOnlyRow(_ item: LineItemDTO) -> some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.name).font(.subheadline.weight(.medium))
+                if let description = item.description, !description.isEmpty {
+                    Text(description).font(.caption).foregroundStyle(.secondary)
                 }
-                .pickerStyle(.segmented)
-                .frame(maxWidth: 100)
-                Button("Add") { Task { await addDiscount() } }
-                    .buttonStyle(StormSecondaryButtonStyle())
-                    .disabled(discountAmount.isEmpty)
+                Text("\(item.quantity.formatted()) × \(item.unitPrice.formatted(.currency(code: "USD")))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            ForEach(discounts) { discount in
-                HStack {
-                    Text("\(discount.name) — \(formatDiscount(discount))")
-                        .font(.caption)
-                    Spacer()
-                    Button(role: .destructive) {
-                        Task { await deleteDiscount(discount.id) }
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                }
-            }
+            Spacer()
+            Text(item.total, format: .currency(code: "USD"))
+                .font(.subheadline.weight(.semibold))
         }
-    }
-
-    private func formatDiscount(_ discount: DiscountDTO) -> String {
-        if discount.type == "PERCENT" {
-            return discount.amount.formatted(.number.precision(.fractionLength(0))) + "%"
-        }
-        return discount.amount.formatted(.currency(code: "USD"))
     }
 
     private func addFromPriceBook(_ item: PriceBookItemDTO) async {
+        isSaving = true
+        error = nil
+        defer { isSaving = false }
         struct Body: Encodable {
             let priceBookItemId: String
             let name: String
@@ -110,8 +96,8 @@ struct VisitLineItemsEditSection: View {
             let quantity: Double
         }
         do {
-            let _: VisitDetailDTO = try await env.apiClient.post(
-                path: APIPath.visitLineItems(visitId),
+            let _: EstimateDetailDTO = try await env.apiClient.post(
+                path: APIPath.estimateLineItems(estimateId),
                 body: Body(
                     priceBookItemId: item.id,
                     name: item.name,
@@ -150,8 +136,8 @@ struct VisitLineItemsEditSection: View {
             let unitPrice: Double
         }
         do {
-            let _: VisitDetailDTO = try await env.apiClient.patch(
-                path: APIPath.visitLineItems(visitId),
+            let _: EstimateDetailDTO = try await env.apiClient.patch(
+                path: APIPath.estimateLineItems(estimateId),
                 body: Body(
                     lineItemId: item.id,
                     name: trimmedName,
@@ -167,48 +153,14 @@ struct VisitLineItemsEditSection: View {
     }
 
     private func deleteItem(_ lineItemId: String) async {
+        isSaving = true
+        defer { isSaving = false }
         do {
-            let _: VisitDetailDTO = try await env.apiClient.deleteReturningVisit(
-                path: APIPath.visitLineItems(visitId),
+            try await env.apiClient.delete(
+                path: APIPath.estimateLineItems(estimateId),
                 query: [URLQueryItem(name: "lineItemId", value: lineItemId)]
             )
             drafts.removeDrafts(for: lineItemId)
-            await onUpdated()
-        } catch {
-            self.error = (error as? APIError)?.message
-        }
-    }
-
-    private func addDiscount() async {
-        guard let amount = Double(discountAmount) else { return }
-        struct Body: Encodable {
-            let label: String?
-            let type: String
-            let amount: Double
-        }
-        do {
-            let _: VisitDetailDTO = try await env.apiClient.post(
-                path: APIPath.visitDiscounts(visitId),
-                body: Body(
-                    label: discountLabel.isEmpty ? nil : discountLabel,
-                    type: discountType,
-                    amount: amount
-                )
-            )
-            discountLabel = ""
-            discountAmount = ""
-            await onUpdated()
-        } catch {
-            self.error = (error as? APIError)?.message
-        }
-    }
-
-    private func deleteDiscount(_ discountId: String) async {
-        do {
-            let _: VisitDetailDTO = try await env.apiClient.deleteReturningVisit(
-                path: APIPath.visitDiscounts(visitId),
-                query: [URLQueryItem(name: "discountId", value: discountId)]
-            )
             await onUpdated()
         } catch {
             self.error = (error as? APIError)?.message
