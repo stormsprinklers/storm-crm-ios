@@ -40,6 +40,20 @@ struct InboxHubView: View {
                 .navigationDestination(for: String.self) { conversationId in
                     SmsConversationView(conversationId: conversationId, scope: scope)
                 }
+                .navigationDestination(for: InboxCustomerNavigation.self) { customer in
+                    NewSmsConversationView(
+                        scope: .customers,
+                        initialContact: InboxContactDTO(
+                            id: customer.customerId,
+                            name: customer.name,
+                            phone: customer.phone,
+                            email: nil
+                        )
+                    ) { conversationId in
+                        navigationPath = NavigationPath()
+                        navigationPath.append(conversationId)
+                    }
+                }
                 .sheet(isPresented: $showCompose) {
                     NavigationStack {
                         NewSmsConversationView(scope: scope) { conversationId in
@@ -50,13 +64,21 @@ struct InboxHubView: View {
                 }
                 .onChange(of: push.pendingConversationId) { _, conversationId in
                     guard let conversationId else { return }
+                    scope = .customers
                     navigationPath.append(conversationId)
                     push.pendingConversationId = nil
                 }
                 .onChange(of: env.pendingInboxConversationId) { _, conversationId in
                     guard let conversationId else { return }
+                    scope = .customers
                     navigationPath.append(conversationId)
                     env.pendingInboxConversationId = nil
+                }
+                .onChange(of: env.pendingInboxCustomer) { _, customer in
+                    guard let customer else { return }
+                    scope = .customers
+                    navigationPath.append(customer)
+                    env.pendingInboxCustomer = nil
                 }
         }
     }

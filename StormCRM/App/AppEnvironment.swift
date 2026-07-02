@@ -1,6 +1,24 @@
 import Foundation
 import SwiftUI
 
+enum MainTab: Hashable {
+    case dashboard
+    case schedule
+    case visits
+    case customers
+    case reporting
+    case inbox
+    case more
+}
+
+struct InboxCustomerNavigation: Hashable, Identifiable {
+    let customerId: String
+    let name: String
+    let phone: String?
+
+    var id: String { customerId }
+}
+
 @MainActor
 final class AppEnvironment: ObservableObject {
     let tokenStore: TokenStore
@@ -11,8 +29,10 @@ final class AppEnvironment: ObservableObject {
     let voice: VoiceManager
     let priceBookPins = PriceBookPinStore()
 
+    @Published var selectedTab: MainTab = .dashboard
     @Published var paymentReturn: PaymentReturn?
     @Published var pendingInboxConversationId: String?
+    @Published var pendingInboxCustomer: InboxCustomerNavigation?
 
     init() {
         let tokenStore = TokenStore()
@@ -35,8 +55,32 @@ final class AppEnvironment: ObservableObject {
                 paymentReturn = PaymentReturn(visitId: visitId, sessionId: sessionId, cancelled: cancelled)
             }
         } else if url.host == "inbox" {
+            selectedTab = .inbox
             if let conversationId = components?.queryItems?.first(where: { $0.name == "conversationId" })?.value {
                 pendingInboxConversationId = conversationId
+            }
+        }
+    }
+
+    func openCustomerSmsInbox(customerId: String, name: String, phone: String?) {
+        selectedTab = .inbox
+        Task {
+            var query: [URLQueryItem] = [URLQueryItem(name: "customerId", value: customerId)]
+            if let phone, !phone.isEmpty {
+                query.append(URLQueryItem(name: "phone", value: phone))
+            }
+
+            if let response: ResolveConversationResponse = try? await apiClient.get(
+                path: APIPath.smsConversationResolve,
+                query: query
+            ), let conversationId = response.conversation?.id {
+                pendingInboxConversationId = conversationId
+            } else {
+                pendingInboxCustomer = InboxCustomerNavigation(
+                    customerId: customerId,
+                    name: name,
+                    phone: phone
+                )
             }
         }
     }
@@ -47,4 +91,8 @@ struct PaymentReturn: Identifiable {
     let visitId: String
     let sessionId: String?
     let cancelled: Bool
+}
+
+struct ResolveConversationResponse: Decodable {
+    let conversation: ConversationDTO?
 }

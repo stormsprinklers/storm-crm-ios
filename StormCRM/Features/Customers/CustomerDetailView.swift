@@ -65,7 +65,6 @@ struct CustomerDetailView: View {
 
     @StateObject private var viewModel = CustomerDetailViewModel()
     @State private var showEdit = false
-    @State private var showSmsCompose = false
     @State private var noteDraft = ""
     @State private var isAddingNote = false
 
@@ -85,7 +84,13 @@ struct CustomerDetailView: View {
                     CustomerContactCard(
                         customer: customer,
                         voice: env.voice,
-                        onMessage: { showSmsCompose = true }
+                        onMessage: {
+                            env.openCustomerSmsInbox(
+                                customerId: customer.id,
+                                name: customer.name,
+                                phone: customer.phone
+                            )
+                        }
                     )
 
                     CustomerPropertiesSection(
@@ -185,23 +190,6 @@ struct CustomerDetailView: View {
                             update: update
                         )
                         showEdit = false
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showSmsCompose) {
-            if let customer = viewModel.customer {
-                NavigationStack {
-                    NewSmsConversationView(
-                        scope: .customers,
-                        initialContact: InboxContactDTO(
-                            id: customer.id,
-                            name: customer.name,
-                            phone: customer.phone,
-                            email: customer.email
-                        )
-                    ) { _ in
-                        showSmsCompose = false
                     }
                 }
             }

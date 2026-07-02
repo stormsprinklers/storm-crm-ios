@@ -79,6 +79,7 @@ enum APIPath {
     static let timeClock = "/api/time-clock"
     static let timesheets = "/api/timesheets"
     static let smsConversations = "/api/inbox/sms/conversations"
+    static let smsConversationResolve = "/api/inbox/sms/conversations/resolve"
     static func smsMessages(_ conversationId: String) -> String {
         "/api/inbox/sms/conversations/\(conversationId)/messages"
     }
