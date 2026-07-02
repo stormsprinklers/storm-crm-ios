@@ -589,7 +589,6 @@ struct VisitCustomerInfoSection: View {
     let visit: VisitDetailDTO
     @ObservedObject var voice: VoiceManager
 
-    @State private var showSmsCompose = false
     @State private var programGuide: ControllerProgramGuideDTO?
     @State private var isLoadingGuide = false
 
@@ -604,7 +603,13 @@ struct VisitCustomerInfoSection: View {
 
                     if let phone = customer.phone, !phone.isEmpty {
                         HStack(spacing: 16) {
-                            Button { showSmsCompose = true } label: {
+                            Button {
+                                env.openCustomerSmsInbox(
+                                    customerId: customer.id,
+                                    name: customer.name,
+                                    phone: phone
+                                )
+                            } label: {
                                 Image(systemName: "message.fill")
                                     .font(.title3)
                             }
@@ -674,23 +679,6 @@ struct VisitCustomerInfoSection: View {
                     }
                     .task(id: property.id) {
                         await loadProgramGuide(customerId: customerId, propertyId: property.id)
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showSmsCompose) {
-            if let customer = visit.customer {
-                NavigationStack {
-                    NewSmsConversationView(
-                        scope: .customers,
-                        initialContact: InboxContactDTO(
-                            id: customer.id,
-                            name: customer.name,
-                            phone: customer.phone,
-                            email: customer.email
-                        )
-                    ) { _ in
-                        showSmsCompose = false
                     }
                 }
             }

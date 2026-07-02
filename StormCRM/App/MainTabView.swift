@@ -8,29 +8,36 @@ struct MainTabView: View {
     }
 
     var body: some View {
-        TabView {
+        TabView(selection: $env.selectedTab) {
             DashboardView()
                 .tabItem { Label("Dashboard", systemImage: "house") }
+                .tag(MainTab.dashboard)
 
             ScheduleView()
                 .tabItem { Label("Schedule", systemImage: "calendar") }
+                .tag(MainTab.schedule)
 
             VisitsListView()
                 .tabItem { Label("Visits", systemImage: "wrench.and.screwdriver") }
+                .tag(MainTab.visits)
 
             CustomersListView()
                 .tabItem { Label("Customers", systemImage: "person.2") }
+                .tag(MainTab.customers)
 
             if showReporting {
                 ReportingHubView()
                     .tabItem { Label("Reports", systemImage: "chart.bar") }
+                    .tag(MainTab.reporting)
             }
 
             InboxHubView()
                 .tabItem { Label("Inbox", systemImage: "message") }
+                .tag(MainTab.inbox)
 
             MoreView()
                 .tabItem { Label("More", systemImage: "ellipsis.circle") }
+                .tag(MainTab.more)
         }
         .sheet(item: $env.paymentReturn) { payment in
             PaymentReturnSheet(payment: payment)
