@@ -213,7 +213,7 @@ struct SmsConversationView: View {
                         .font(.title3)
                         .padding(8)
                 }
-                .disabled(viewModel.isUploading)
+                .disabled(viewModel.isUploading || !CameraImagePicker.isCameraAvailable)
 
                 PhotosPicker(selection: $photoItems, maxSelectionCount: 5, matching: .any(of: [.images, .videos])) {
                     Image(systemName: "photo.on.rectangle")
@@ -410,7 +410,7 @@ struct NewSmsConversationView: View {
                     } label: {
                         Label("Take photo", systemImage: "camera")
                     }
-                    .disabled(viewModel.isUploading)
+                    .disabled(viewModel.isUploading || !CameraImagePicker.isCameraAvailable)
 
                     PhotosPicker(selection: $photoItems, maxSelectionCount: 5, matching: .any(of: [.images, .videos])) {
                         Label("Photo library", systemImage: "photo.on.rectangle")

@@ -2,15 +2,22 @@ import SwiftUI
 import UIKit
 
 struct CameraImagePicker: UIViewControllerRepresentable {
+    static var isCameraAvailable: Bool {
+        UIImagePickerController.isSourceTypeAvailable(.camera)
+    }
+
     @Environment(\.dismiss) private var dismiss
     var onImage: (UIImage) -> Void
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
-        picker.sourceType = UIImagePickerController.isSourceTypeAvailable(.camera) ? .camera : .photoLibrary
+        let useCamera = Self.isCameraAvailable
+        picker.sourceType = useCamera ? .camera : .photoLibrary
         picker.delegate = context.coordinator
         picker.allowsEditing = false
-        picker.cameraCaptureMode = .photo
+        if useCamera {
+            picker.cameraCaptureMode = .photo
+        }
         return picker
     }
 
