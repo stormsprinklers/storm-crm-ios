@@ -298,7 +298,7 @@ struct ScheduleView: View {
     }
 }
 
-private struct ScheduleRow: View {
+struct ScheduleRow: View {
     let job: VisitDTO
     var colorMode: ScheduleColorMode = .technician
 
