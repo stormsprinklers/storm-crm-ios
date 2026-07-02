@@ -29,6 +29,7 @@ struct RootView: View {
                 if auth.isAuthenticated {
                     MainTabView()
                         .task {
+                            try? await auth.ensureUserLoaded()
                             env.priceBookPins.setUserId(auth.user?.id)
                             await env.branding.load(api: env.apiClient)
                             await env.voice.prepare()

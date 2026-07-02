@@ -21,6 +21,10 @@ final class VoiceManager: ObservableObject {
         #endif
     }
 
+    func clearError() {
+        lastError = nil
+    }
+
     func prepare() async {
         do {
             struct TokenResponse: Decodable {
@@ -45,8 +49,20 @@ final class VoiceManager: ObservableObject {
             return
         }
 
-        guard let user = auth.user else {
+        guard auth.isAuthenticated else {
             lastError = "Sign in required"
+            return
+        }
+
+        do {
+            try await auth.ensureUserLoaded()
+        } catch {
+            lastError = (error as? APIError)?.message ?? "Unable to load account"
+            return
+        }
+
+        guard let user = auth.user else {
+            lastError = "Unable to load account"
             return
         }
 
@@ -92,6 +108,7 @@ final class VoiceManager: ObservableObject {
         isInCall = false
         isMuted = false
         activePhone = nil
+        lastError = nil
         status = cachedToken == nil ? "Ready" : "Voice ready"
     }
 
