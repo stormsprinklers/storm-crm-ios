@@ -22,5 +22,11 @@ extension View {
                 InvoiceDetailView(invoiceId: invoiceId)
             }
         }
+        .navigationDestination(for: CustomerListRoute.self) { route in
+            switch route {
+            case .detail(let customerId):
+                CustomerDetailView(customerId: customerId)
+            }
+        }
     }
 }
