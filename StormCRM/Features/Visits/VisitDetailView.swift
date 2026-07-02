@@ -249,6 +249,20 @@ struct VisitDetailView: View {
                                     onSaved: { await reloadVisit() }
                                 )
 
+                                VisitEstimatesSection(
+                                    visit: visit,
+                                    visitId: visitId
+                                ) {
+                                    await reloadVisit()
+                                }
+
+                                VisitLineItemsEditSection(
+                                    visitId: visitId,
+                                    items: visit.lineItems ?? [],
+                                    discounts: visit.discounts ?? [],
+                                    onUpdated: { await reloadVisit() }
+                                )
+
                                 VisitNotesSection(
                                     notes: visit.notes ?? [],
                                     newNote: $newNote,
@@ -265,20 +279,6 @@ struct VisitDetailView: View {
                                 )
 
                                 VisitAttachmentsSection(visitId: visitId)
-
-                                VisitEstimatesSection(
-                                    visit: visit,
-                                    visitId: visitId
-                                ) {
-                                    await reloadVisit()
-                                }
-
-                                VisitLineItemsEditSection(
-                                    visitId: visitId,
-                                    items: visit.lineItems ?? [],
-                                    discounts: visit.discounts ?? [],
-                                    onUpdated: { await reloadVisit() }
-                                )
 
                                 VisitTagsSection(
                                     visitId: visitId,
