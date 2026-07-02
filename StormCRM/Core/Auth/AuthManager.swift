@@ -76,6 +76,19 @@ final class AuthManager: ObservableObject {
 
     func refreshIfNeeded() async throws {
         guard tokenStore.isAccessTokenExpiringSoon() else { return }
+        try await refreshSession()
+    }
+
+    /// Restores the signed-in user profile when tokens exist but user was not persisted (e.g. after relaunch).
+    func ensureUserLoaded() async throws {
+        if user != nil { return }
+        guard tokenStore.tokens != nil else {
+            throw APIError.unauthorized
+        }
+        try await refreshSession()
+    }
+
+    private func refreshSession() async throws {
         guard let refreshToken = tokenStore.tokens?.refreshToken else {
             throw APIError.unauthorized
         }
