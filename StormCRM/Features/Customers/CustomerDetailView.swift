@@ -179,7 +179,7 @@ struct CustomerDetailView: View {
                         customer: customer,
                         userRole: role
                     ) { update in
-                        try await viewModel.saveCustomer(
+                        _ = try await viewModel.saveCustomer(
                             api: env.apiClient,
                             customerId: customerId,
                             update: update

@@ -792,7 +792,7 @@ struct VisitTagsSection: View {
                         .foregroundStyle(.secondary)
                 } else {
                     FlowLayoutTags(tags: tags, canEdit: canEdit) { tag in
-                        Task { await saveTags(tags.filter { $0 != tag })) }
+                        Task { await saveTags(tags.filter { $0 != tag }) }
                     }
                 }
 
