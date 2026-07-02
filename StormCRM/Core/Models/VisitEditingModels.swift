@@ -12,13 +12,6 @@ struct ScheduleEmployeeDTO: Decodable, Identifiable, Hashable {
 }
 
 extension ScheduleEmployeeDTO {
-    init(id: String, name: String, color: String?, photoUrl: String?) {
-        self.id = id
-        self.name = name
-        self.color = color
-        self.photoUrl = photoUrl
-    }
-
     var namedColor: NamedColor {
         NamedColor(id: id, name: name, color: color, photoUrl: photoUrl)
     }
