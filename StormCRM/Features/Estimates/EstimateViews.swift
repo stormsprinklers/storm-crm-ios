@@ -149,6 +149,7 @@ struct EstimateDetailView: View {
     @State private var error: String?
     @State private var actionMessage: String?
     @State private var showPicker = false
+    @State private var showCustomItem = false
     @State private var showCopyNewVisitConfirm = false
 
     var body: some View {
@@ -191,6 +192,11 @@ struct EstimateDetailView: View {
         .sheet(isPresented: $showPicker) {
             PriceBookPickerSheet { item in
                 await addLineItem(from: item)
+            }
+        }
+        .sheet(isPresented: $showCustomItem) {
+            CustomLineItemSheet { input in
+                await addCustomLineItem(input)
             }
         }
         .confirmationDialog(
@@ -245,14 +251,16 @@ struct EstimateDetailView: View {
                     StormSectionHeader(title: "Line items", systemImage: "list.bullet")
                     Spacer()
                     if estimate.status != "CONVERTED" {
-                        Button("Add item") { showPicker = true }
-                            .buttonStyle(StormSecondaryButtonStyle())
-                            .disabled(isSaving)
+                        LineItemAddButtons(
+                            onPriceBook: { showPicker = true },
+                            onCustom: { showCustomItem = true },
+                            isDisabled: isSaving
+                        )
                     }
                 }
 
                 if estimate.lineItems.isEmpty {
-                    Text("Add items from the price book.")
+                    Text("Add items from the price book or create a custom line item.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
@@ -388,6 +396,26 @@ struct EstimateDetailView: View {
         defer { isLoading = false }
         do {
             estimate = try await env.apiClient.get(path: APIPath.estimate(estimateId))
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func addCustomLineItem(_ input: CustomLineItemInput) async {
+        isSaving = true
+        error = nil
+        defer { isSaving = false }
+        do {
+            estimate = try await env.apiClient.post(
+                path: APIPath.estimateLineItems(estimateId),
+                body: CreateLineItemBody(
+                    name: input.name,
+                    description: input.description,
+                    unitPrice: input.unitPrice,
+                    quantity: input.quantity
+                )
+            )
+            await onUpdated()
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
