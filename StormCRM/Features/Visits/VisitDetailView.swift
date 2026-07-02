@@ -106,6 +106,24 @@ final class VisitDetailViewModel: ObservableObject {
         }
     }
 
+    func assignChecklistTemplate(
+        api: APIClient,
+        visitId: String,
+        templateId: String
+    ) async {
+        struct Body: Encodable { let templateId: String }
+        do {
+            let _: ChecklistDTO = try await api.post(
+                path: APIPath.visitChecklists(visitId),
+                body: Body(templateId: templateId)
+            )
+            checklists = (try? await api.get(path: APIPath.visitChecklists(visitId))) ?? checklists
+            actionMessage = "Checklist added"
+        } catch {
+            actionMessage = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
     func deleteVisit(api: APIClient, visitId: String) async -> Bool {
         isDeleting = true
         actionMessage = nil
@@ -237,6 +255,13 @@ struct VisitDetailView: View {
                                             api: env.apiClient,
                                             visitId: visitId,
                                             checklistId: checklistId
+                                        )
+                                    },
+                                    onAssignTemplate: { templateId in
+                                        await viewModel.assignChecklistTemplate(
+                                            api: env.apiClient,
+                                            visitId: visitId,
+                                            templateId: templateId
                                         )
                                     }
                                 )

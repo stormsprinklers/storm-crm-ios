@@ -44,4 +44,8 @@ enum UserRoles {
     static func canManageCustomerStatus(_ role: String) -> Bool {
         role == "ADMIN" || role == "MANAGER"
     }
+
+    static func canManageChecklists(_ role: String) -> Bool {
+        role == "ADMIN" || role == "MANAGER"
+    }
 }
