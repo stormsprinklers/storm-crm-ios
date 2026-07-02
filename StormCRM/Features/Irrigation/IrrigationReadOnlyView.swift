@@ -35,8 +35,13 @@ struct PropertyIrrigationInlineSection: View {
                 IrrigationMapCanvas(
                     imageUrl: mapProperty?.displayImageUrl ?? fallbackAerialUrl,
                     zones: zones,
-                    markers: mapProperty?.allMarkersForDisplay() ?? []
+                    markers: mapProperty?.allMarkersForDisplay() ?? [],
+                    allowsZoom: true
                 )
+
+                Text("Pinch to zoom the map. Double-tap to reset.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
 
                 if !zones.isEmpty {
                     IrrigationZoneLegend(zones: zones)
@@ -93,6 +98,79 @@ struct PropertyIrrigationInlineSection: View {
                 path: APIPath.irrigationProgram(customerId: customerId, propertyId: propertyId)
             )
             programGuide = programResponse.guide
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+}
+
+struct VisitPropertyIrrigationPreview: View {
+    @EnvironmentObject private var env: AppEnvironment
+    let customerId: String
+    let property: PropertySummary
+
+    @State private var mapProperty: IrrigationMapProperty?
+    @State private var isLoading = true
+    @State private var error: String?
+
+    private var zones: [IrrigationMapZoneDTO] {
+        mapProperty?.irrigationMapZones ?? []
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Irrigation map")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if mapProperty?.irrigationMapStatus == "PUBLISHED" {
+                    StormBadge(text: "Published", style: .success)
+                }
+            }
+
+            if isLoading {
+                ProgressView("Loading map…")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 24)
+            } else if let error {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            } else {
+                IrrigationMapCanvas(
+                    imageUrl: mapProperty?.displayImageUrl ?? property.aerialImageUrl,
+                    zones: zones,
+                    markers: mapProperty?.allMarkersForDisplay() ?? [],
+                    maxHeight: 220,
+                    allowsZoom: true
+                )
+
+                if !zones.isEmpty {
+                    IrrigationZoneLegend(zones: zones)
+                } else {
+                    Text("No zone boundaries drawn yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("Pinch to zoom the map. Double-tap to reset.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .task(id: property.id) { await load() }
+    }
+
+    private func load() async {
+        isLoading = mapProperty == nil
+        error = nil
+        defer { isLoading = false }
+        do {
+            let mapResponse: IrrigationMapResponse = try await env.apiClient.get(
+                path: APIPath.irrigationMap(customerId: customerId, propertyId: property.id)
+            )
+            mapProperty = mapResponse.property
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
@@ -157,7 +235,8 @@ struct IrrigationDetailView: View {
                         imageUrl: property.displayImageUrl,
                         zones: property.irrigationMapZones ?? [],
                         markers: property.allMarkersForDisplay(),
-                        maxHeight: 420
+                        maxHeight: 420,
+                        allowsZoom: true
                     )
 
                     if let zones = property.irrigationMapZones, !zones.isEmpty {
