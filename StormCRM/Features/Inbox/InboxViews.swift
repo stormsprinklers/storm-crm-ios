@@ -143,24 +143,54 @@ struct SmsConversationView: View {
     @State private var showCamera = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(viewModel.messages) { message in
-                            SmsMessageBubble(message: message)
-                                .id(message.id)
-                        }
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(viewModel.messages) { message in
+                        SmsMessageBubble(message: message)
+                            .id(message.id)
                     }
-                    .padding()
                 }
-                .onChange(of: viewModel.messages.count) { _, _ in
-                    if let last = viewModel.messages.last {
-                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                    }
+                .padding()
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .onChange(of: viewModel.messages.count) { _, _ in
+                if let last = viewModel.messages.last {
+                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            messageComposer
+        }
+        .navigationTitle(viewModel.conversation?.displayTitle ?? "Messages")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await viewModel.load(api: env.apiClient, conversationId: conversationId)
+            viewModel.startPolling(api: env.apiClient, conversationId: conversationId)
+        }
+        .onDisappear { viewModel.stopPolling() }
+        .sheet(isPresented: $showCamera) {
+            CameraImagePicker { image in
+                Task {
+                    guard let data = image.attachmentJPEGData() else { return }
+                    await viewModel.uploadAttachment(
+                        api: env.apiClient,
+                        data: data,
+                        fileName: "photo-\(Int(Date().timeIntervalSince1970)).jpg",
+                        mimeType: "image/jpeg"
+                    )
+                }
+            }
+            .ignoresSafeArea()
+        }
+        .onChange(of: photoItems) { _, items in
+            Task { await importPhotos(items, api: env.apiClient) }
+        }
+    }
 
+    private var messageComposer: some View {
+        VStack(spacing: 0) {
             if !viewModel.attachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -219,30 +249,7 @@ struct SmsConversationView: View {
                     .padding(.bottom, 8)
             }
         }
-        .navigationTitle(viewModel.conversation?.displayTitle ?? "Messages")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await viewModel.load(api: env.apiClient, conversationId: conversationId)
-            viewModel.startPolling(api: env.apiClient, conversationId: conversationId)
-        }
-        .onDisappear { viewModel.stopPolling() }
-        .sheet(isPresented: $showCamera) {
-            CameraImagePicker { image in
-                Task {
-                    guard let data = image.attachmentJPEGData() else { return }
-                    await viewModel.uploadAttachment(
-                        api: env.apiClient,
-                        data: data,
-                        fileName: "photo-\(Int(Date().timeIntervalSince1970)).jpg",
-                        mimeType: "image/jpeg"
-                    )
-                }
-            }
-            .ignoresSafeArea()
-        }
-        .onChange(of: photoItems) { _, items in
-            Task { await importPhotos(items, api: env.apiClient) }
-        }
+        .background(StormTheme.page)
     }
 
     private func importPhotos(_ items: [PhotosPickerItem], api: APIClient) async {
