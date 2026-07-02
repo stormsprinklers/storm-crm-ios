@@ -29,10 +29,14 @@ struct RootView: View {
                 if auth.isAuthenticated {
                     MainTabView()
                         .task {
+                            env.priceBookPins.setUserId(auth.user?.id)
                             await env.branding.load(api: env.apiClient)
                             await env.voice.prepare()
                             await PushNotificationManager.shared.requestAuthorizationIfNeeded()
                             await PushNotificationManager.shared.syncToken(api: env.apiClient)
+                        }
+                        .onChange(of: auth.user?.id) { _, userId in
+                            env.priceBookPins.setUserId(userId)
                         }
                         .onReceive(NotificationCenter.default.publisher(for: .pushDeviceTokenUpdated)) { _ in
                             Task { await PushNotificationManager.shared.syncToken(api: env.apiClient) }

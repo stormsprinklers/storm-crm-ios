@@ -9,6 +9,7 @@ final class AppEnvironment: ObservableObject {
     let branding: CompanyBranding
     let location = LocationManager()
     let voice: VoiceManager
+    let priceBookPins = PriceBookPinStore()
 
     @Published var paymentReturn: PaymentReturn?
     @Published var pendingInboxConversationId: String?
