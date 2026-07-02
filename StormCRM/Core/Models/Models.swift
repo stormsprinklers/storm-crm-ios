@@ -271,6 +271,7 @@ struct NamedColor: Codable, Hashable {
 
 struct LineItemDTO: Decodable, Identifiable {
     let id: String
+    let priceBookItemId: String?
     let name: String
     let description: String?
     let quantity: Double
@@ -278,12 +279,13 @@ struct LineItemDTO: Decodable, Identifiable {
     let total: Double
 
     enum CodingKeys: String, CodingKey {
-        case id, name, description, quantity, unitPrice, total
+        case id, priceBookItemId, name, description, quantity, unitPrice, total
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
+        priceBookItemId = try container.decodeIfPresent(String.self, forKey: .priceBookItemId)
         name = try container.decode(String.self, forKey: .name)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         quantity = try container.decodeFlexibleDouble(forKey: .quantity) ?? 0

@@ -87,6 +87,7 @@ struct EstimateStatusBody: Encodable {
 struct AddEstimateLineItemBody: Encodable {
     let priceBookItemId: String
     let quantity: Double
+    let unitPrice: Double
 }
 
 struct EstimateCopyBody: Encodable {

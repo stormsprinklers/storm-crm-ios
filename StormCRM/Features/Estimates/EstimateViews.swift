@@ -394,14 +394,36 @@ struct EstimateDetailView: View {
     }
 
     private func addLineItem(from item: PriceBookItemDTO) async {
+        let expectedUnitPrice = item.resolvedUnitPrice
         isSaving = true
         error = nil
         defer { isSaving = false }
+        struct PatchBody: Encodable {
+            let lineItemId: String
+            let quantity: Double
+            let unitPrice: Double
+        }
         do {
-            estimate = try await env.apiClient.post(
+            var updated = try await env.apiClient.post(
                 path: APIPath.estimateLineItems(estimateId),
-                body: AddEstimateLineItemBody(priceBookItemId: item.id, quantity: 1)
+                body: AddEstimateLineItemBody(
+                    priceBookItemId: item.id,
+                    quantity: 1,
+                    unitPrice: expectedUnitPrice
+                )
             )
+            if let added = PriceBookLineItemAdding.matchingLineItem(in: updated.lineItems, for: item),
+               PriceBookLineItemAdding.needsPriceCorrection(lineItem: added, expectedUnitPrice: expectedUnitPrice) {
+                updated = try await env.apiClient.patch(
+                    path: APIPath.estimateLineItems(estimateId),
+                    body: PatchBody(
+                        lineItemId: added.id,
+                        quantity: added.quantity,
+                        unitPrice: expectedUnitPrice
+                    )
+                )
+            }
+            estimate = updated
             await onUpdated()
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription

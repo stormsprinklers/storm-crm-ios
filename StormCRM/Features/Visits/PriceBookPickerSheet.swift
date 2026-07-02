@@ -31,7 +31,7 @@ struct PriceBookPickerSheet: View {
                                 }
                             }
                             Spacer()
-                            Text(item.unitPrice, format: .currency(code: "USD"))
+                            Text(item.resolvedUnitPrice, format: .currency(code: "USD"))
                                 .foregroundStyle(.secondary)
                         }
                     }
