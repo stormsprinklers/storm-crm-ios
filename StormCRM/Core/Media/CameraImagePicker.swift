@@ -7,10 +7,13 @@ struct CameraImagePicker: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
-        picker.sourceType = UIImagePickerController.isSourceTypeAvailable(.camera) ? .camera : .photoLibrary
+        let useCamera = UIImagePickerController.isSourceTypeAvailable(.camera)
+        picker.sourceType = useCamera ? .camera : .photoLibrary
         picker.delegate = context.coordinator
         picker.allowsEditing = false
-        picker.cameraCaptureMode = .photo
+        if useCamera {
+            picker.cameraCaptureMode = .photo
+        }
         return picker
     }
 
