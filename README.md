@@ -74,6 +74,19 @@ Also check:
 - **Inbox empty** — Use the **Customers** or **Team** segment at the top. Customer SMS uses `scope=external`; team SMS uses `scope=internal`. Field techs default to Team.
 - **401 / session errors** — Confirm `API_BASE_URL` points at a server with the mobile auth endpoints deployed (`/api/mobile/auth/login`).
 
+**"Build input file cannot be found" (e.g. `MeView.swift`)**
+
+Your `.xcodeproj` is stale. Recent updates removed `MeView.swift` (replaced by **More** tab → `MoreView.swift`) and added many new files. Regenerate the project:
+
+```bash
+git pull origin main
+rm -rf StormCRM.xcodeproj
+xcodegen generate
+open StormCRM.xcodeproj
+```
+
+Then **Product → Clean Build Folder** and build again.
+
 **"Project file is damaged"**
 
 Do not use an old committed `.xcodeproj`. Remove it and regenerate:
