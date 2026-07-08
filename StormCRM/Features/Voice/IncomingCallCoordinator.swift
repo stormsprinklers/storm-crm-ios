@@ -42,9 +42,13 @@ final class IncomingCallCoordinator: NSObject {
     var onCallAccepted: ((_ label: String?, _ isIncoming: Bool) -> Void)?
     /// Called (on the main thread) when the active call/invite ends for any reason.
     var onCallEnded: (() -> Void)?
+    /// Called (on the main thread) when a call fails before or during connection.
+    var onCallFailed: ((String) -> Void)?
+    /// Called (on the main thread) after Twilio VoIP registration succeeds or fails.
+    var onVoIPRegistrationUpdated: ((_ succeeded: Bool, _ message: String?) -> Void)?
 
     override init() {
-        let configuration = CXProviderConfiguration()
+        let configuration = CXProviderConfiguration(localizedName: "Storm CRM")
         configuration.supportsVideo = false
         configuration.maximumCallGroups = 1
         configuration.maximumCallsPerCallGroup = 1
@@ -91,10 +95,26 @@ final class IncomingCallCoordinator: NSObject {
     // MARK: - Twilio registration
 
     private func registerWithTwilio() async {
-        guard let voipDeviceToken, let token = await accessTokenProvider?() else { return }
-        TwilioVoiceSDK.register(accessToken: token, deviceToken: voipDeviceToken) { error in
-            if let error {
-                print("Twilio VoIP register failed:", error.localizedDescription)
+        guard let voipDeviceToken else {
+            DispatchQueue.main.async { [weak self] in
+                self?.onVoIPRegistrationUpdated?(false, "Waiting for VoIP push token from iOS")
+            }
+            return
+        }
+        guard let token = await accessTokenProvider?() else {
+            DispatchQueue.main.async { [weak self] in
+                self?.onVoIPRegistrationUpdated?(false, "Voice token unavailable for registration")
+            }
+            return
+        }
+        TwilioVoiceSDK.register(accessToken: token, deviceToken: voipDeviceToken) { [weak self] error in
+            DispatchQueue.main.async {
+                if let error {
+                    print("Twilio VoIP register failed:", error.localizedDescription)
+                    self?.onVoIPRegistrationUpdated?(false, error.localizedDescription)
+                } else {
+                    self?.onVoIPRegistrationUpdated?(true, nil)
+                }
             }
         }
     }
@@ -119,6 +139,7 @@ final class IncomingCallCoordinator: NSObject {
         callKitProvider.reportNewIncomingCall(with: uuid, update: update) { [weak self] error in
             if let error {
                 print("CallKit reportNewIncomingCall failed:", error.localizedDescription)
+                self?.onCallFailed?(error.localizedDescription)
                 self?.clearActiveCallState()
             }
         }
@@ -162,6 +183,7 @@ final class IncomingCallCoordinator: NSObject {
         callKitController.request(CXTransaction(action: startAction)) { [weak self] error in
             if let error {
                 print("CallKit start call failed:", error.localizedDescription)
+                self?.onCallFailed?(error.localizedDescription)
                 self?.clearActiveCallState()
             }
         }
@@ -259,7 +281,8 @@ extension IncomingCallCoordinator: CallDelegate {
     }
 
     func callDidFailToConnect(call: Call, error: Error) {
-        print("Incoming call failed to connect:", error.localizedDescription)
+        print("Call failed to connect:", error.localizedDescription)
+        onCallFailed?(error.localizedDescription)
         if let uuid = activeCallUUID {
             callKitProvider.reportCall(with: uuid, endedAt: Date(), reason: .failed)
         }
@@ -288,6 +311,7 @@ extension IncomingCallCoordinator: CXProviderDelegate {
 
     func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
         guard let pending = pendingOutgoingConnect else {
+            onCallFailed?("Outgoing call was not ready to connect")
             action.fail()
             return
         }

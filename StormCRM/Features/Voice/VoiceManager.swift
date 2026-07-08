@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(AVFoundation)
+import AVFoundation
+#endif
 
 /// In-app calling via Twilio Voice iOS SDK (VoIP through CRM).
 @MainActor
@@ -35,12 +38,20 @@ final class VoiceManager: ObservableObject {
 
     /// Report agent presence so the server routes inbound calls to this device. Inbound calls are
     /// only dialed to agents marked AVAILABLE, so this must be set once voice is ready.
-    private func markPresence(_ status: String) {
-        Task { [apiClient] in
-            _ = try? await apiClient.patch(
-                path: APIPath.voicePresence,
-                body: PresenceBody(status: status)
-            ) as EmptyResponse
+    private func markPresence(_ status: String, surfaceErrors: Bool = false) {
+        Task { [apiClient, weak self] in
+            do {
+                _ = try await apiClient.patch(
+                    path: APIPath.voicePresence,
+                    body: PresenceBody(status: status)
+                ) as EmptyResponse
+            } catch {
+                guard surfaceErrors else { return }
+                await MainActor.run {
+                    self?.lastError = (error as? APIError)?.message
+                        ?? "Voice presence update failed (\(status))"
+                }
+            }
         }
     }
 
@@ -61,13 +72,17 @@ final class VoiceManager: ObservableObject {
     func prepare() async {
         do {
             cachedToken = try await fetchToken()
+            #if targetEnvironment(simulator)
+            status = "Voice ready (simulator — use a real device to call)"
+            #else
             status = "Voice ready"
+            #endif
             lastError = nil
             #if canImport(TwilioVoice)
             startIncomingCalls()
             #endif
             // Advertise availability so inbound calls ring on this device.
-            markPresence("AVAILABLE")
+            markPresence("AVAILABLE", surfaceErrors: true)
         } catch {
             lastError = (error as? APIError)?.message ?? error.localizedDescription
             status = "Voice unavailable"
@@ -93,11 +108,19 @@ final class VoiceManager: ObservableObject {
 
     func call(phone: String, customerId: String? = nil) async {
         lastError = nil
-        let normalized = phone.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        #if targetEnvironment(simulator)
+        lastError = "Voice calls require a physical iPhone or iPad. The Simulator cannot place VoIP calls."
+        return
+        #endif
+
+        let normalized = PhoneDialing.normalize(phone)
         guard !normalized.isEmpty else {
             lastError = "No phone number"
             return
         }
+
+        guard await ensureMicrophoneAccess() else { return }
 
         guard auth.isAuthenticated else {
             lastError = "Sign in required"
@@ -196,6 +219,28 @@ final class VoiceManager: ObservableObject {
         #endif
     }
 
+    #if canImport(AVFoundation)
+    private func ensureMicrophoneAccess() async -> Bool {
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            return true
+        case .denied:
+            lastError = "Microphone access is required for calls. Enable it in Settings → Storm CRM."
+            return false
+        case .undetermined:
+            let granted = await AVAudioApplication.requestRecordPermission()
+            if !granted {
+                lastError = "Microphone access is required for calls."
+            }
+            return granted
+        @unknown default:
+            return true
+        }
+    }
+    #else
+    private func ensureMicrophoneAccess() async -> Bool { true }
+    #endif
+
     #if canImport(TwilioVoice)
     private func bindBridgeCallbacks() {
         let bridge = TwilioVoiceBridge.shared
@@ -247,6 +292,26 @@ final class VoiceManager: ObservableObject {
                 self.activePhone = nil
                 self.status = self.cachedToken == nil ? "Ready" : "Voice ready"
                 self.markPresence("AVAILABLE")
+            }
+        }
+        coordinator.onCallFailed = { [weak self] message in
+            Task { @MainActor in
+                self?.lastError = message
+            }
+        }
+        coordinator.onVoIPRegistrationUpdated = { [weak self] succeeded, message in
+            Task { @MainActor in
+                guard let self else { return }
+                if succeeded {
+                    if !self.isInCall {
+                        self.status = "Voice ready · listening"
+                    }
+                    if self.lastError?.contains("VoIP") == true || self.lastError?.contains("registration") == true {
+                        self.lastError = nil
+                    }
+                } else if let message, !message.hasPrefix("Waiting for VoIP") {
+                    self.lastError = "Incoming call registration failed: \(message)"
+                }
             }
         }
         #endif
