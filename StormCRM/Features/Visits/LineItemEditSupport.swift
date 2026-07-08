@@ -25,28 +25,28 @@ struct LineItemDraftFields {
 
 extension Binding where Value == LineItemDraftFields {
     func bindingName(for item: LineItemDTO) -> Binding<String> {
-        Binding(
+        Binding<String>(
             get: { wrappedValue.names[item.id] ?? item.name },
             set: { wrappedValue.names[item.id] = $0 }
         )
     }
 
     func bindingDescription(for item: LineItemDTO) -> Binding<String> {
-        Binding(
+        Binding<String>(
             get: { wrappedValue.descriptions[item.id] ?? (item.description ?? "") },
             set: { wrappedValue.descriptions[item.id] = $0 }
         )
     }
 
     func bindingQuantity(for item: LineItemDTO) -> Binding<String> {
-        Binding(
+        Binding<String>(
             get: { wrappedValue.quantities[item.id] ?? formatEditableDecimal(item.quantity) },
             set: { wrappedValue.quantities[item.id] = $0 }
         )
     }
 
     func bindingPrice(for item: LineItemDTO) -> Binding<String> {
-        Binding(
+        Binding<String>(
             get: { wrappedValue.prices[item.id] ?? formatEditableDecimal(item.unitPrice) },
             set: { wrappedValue.prices[item.id] = $0 }
         )
