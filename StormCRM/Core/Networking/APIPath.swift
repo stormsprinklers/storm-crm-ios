@@ -92,6 +92,7 @@ enum APIPath {
         "/api/inbox/voice/token?platform=\(platform)"
     }
     static let voiceCall = "/api/inbox/voice/call"
+    static let voicePresence = "/api/voice/presence"
     static let companySettings = "/api/settings/company"
     static func reporting(_ type: String) -> String { "/api/reporting/\(type)" }
     static let paymentsCheckout = "/api/payments/checkout"

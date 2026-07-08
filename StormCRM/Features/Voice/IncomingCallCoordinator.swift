@@ -31,8 +31,15 @@ final class IncomingCallCoordinator: NSObject {
     private var activeCallUUID: UUID?
     private var userInitiatedEnd = false
 
-    /// Called (on the main thread) when a call is answered and connected, with the caller label.
-    var onCallAccepted: ((String?) -> Void)?
+    // Outbound-call state (calls the tech places from the app, routed through CallKit so the
+    // audio session activates the same way it does for incoming calls).
+    private var isOutgoingCall = false
+    private var outgoingHandleLabel: String?
+    private var pendingOutgoingConnect: (accessToken: String, params: [String: String])?
+
+    /// Called (on the main thread) when a call connects, with the remote label and whether it was
+    /// an incoming call.
+    var onCallAccepted: ((_ label: String?, _ isIncoming: Bool) -> Void)?
     /// Called (on the main thread) when the active call/invite ends for any reason.
     var onCallEnded: (() -> Void)?
 
@@ -133,6 +140,33 @@ final class IncomingCallCoordinator: NSObject {
         }
     }
 
+    // MARK: - Outbound calls
+
+    /// Place an outbound call through CallKit. Routing outbound calls through the same CallKit +
+    /// audio-device pipeline as incoming calls is what activates the audio session (via
+    /// `provider(_:didActivate:)`), so the Twilio call can reach the connected state instead of
+    /// hanging in "Connecting…", and the End/Mute controls stay in sync.
+    func startOutgoingCall(handleLabel: String, accessToken: String, params: [String: String]) {
+        guard activeCall == nil, activeCallInvite == nil else { return }
+        configure()
+
+        let uuid = UUID()
+        activeCallUUID = uuid
+        isOutgoingCall = true
+        outgoingHandleLabel = handleLabel
+        pendingOutgoingConnect = (accessToken, params)
+
+        let handle = CXHandle(type: .generic, value: handleLabel)
+        let startAction = CXStartCallAction(call: uuid, handle: handle)
+        startAction.isVideo = false
+        callKitController.request(CXTransaction(action: startAction)) { [weak self] error in
+            if let error {
+                print("CallKit start call failed:", error.localizedDescription)
+                self?.clearActiveCallState()
+            }
+        }
+    }
+
     /// Whether an incoming call is currently ringing or connected.
     var hasActiveCall: Bool { activeCall != nil || activeCallInvite != nil }
 
@@ -147,6 +181,9 @@ final class IncomingCallCoordinator: NSObject {
         activeCall = nil
         activeCallUUID = nil
         userInitiatedEnd = false
+        isOutgoingCall = false
+        outgoingHandleLabel = nil
+        pendingOutgoingConnect = nil
         onCallEnded?()
     }
 }
@@ -214,7 +251,11 @@ extension IncomingCallCoordinator: NotificationDelegate {
 
 extension IncomingCallCoordinator: CallDelegate {
     func callDidConnect(call: Call) {
-        onCallAccepted?(call.from ?? activeCallInvite?.from)
+        if isOutgoingCall, let uuid = activeCallUUID {
+            callKitProvider.reportOutgoingCall(with: uuid, connectedAt: Date())
+        }
+        let label = isOutgoingCall ? outgoingHandleLabel : (call.from ?? activeCallInvite?.from)
+        onCallAccepted?(label, !isOutgoingCall)
     }
 
     func callDidFailToConnect(call: Call, error: Error) {
@@ -243,6 +284,24 @@ extension IncomingCallCoordinator: CXProviderDelegate {
         activeCall?.disconnect()
         activeCallInvite?.reject()
         clearActiveCallState()
+    }
+
+    func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
+        guard let pending = pendingOutgoingConnect else {
+            action.fail()
+            return
+        }
+        // Keep our audio device disabled until CallKit activates the session in didActivate.
+        audioDevice.isEnabled = false
+        provider.reportOutgoingCall(with: action.callUUID, startedConnectingAt: Date())
+
+        let options = ConnectOptions(accessToken: pending.accessToken) { builder in
+            builder.params = pending.params
+            builder.uuid = action.callUUID
+        }
+        activeCall = TwilioVoiceSDK.connect(options: options, delegate: self)
+        pendingOutgoingConnect = nil
+        action.fulfill()
     }
 
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {

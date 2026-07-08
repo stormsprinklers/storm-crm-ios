@@ -63,6 +63,11 @@ final class AuthManager: ObservableObject {
         #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
         IncomingCallCoordinator.shared.stop()
         #endif
+        // Clear voice presence so the server stops routing inbound calls to this device.
+        _ = try? await apiClient.patch(
+            path: APIPath.voicePresence,
+            body: ["status": "OFFLINE"]
+        ) as EmptyResponse
         await PushNotificationManager.shared.unregister(api: apiClient)
         if let refresh = tokenStore.tokens?.refreshToken {
             _ = try? await apiClient.post(

@@ -13,6 +13,8 @@ final class VoiceManager: ObservableObject {
     private let apiClient: APIClient
     private let auth: AuthManager
     private var cachedToken: String?
+    /// True while the active call is being managed by CallKit (both incoming and outgoing).
+    private var callKitActive = false
 
     init(apiClient: APIClient, auth: AuthManager) {
         self.apiClient = apiClient
@@ -25,6 +27,21 @@ final class VoiceManager: ObservableObject {
 
     func clearError() {
         lastError = nil
+    }
+
+    struct PresenceBody: Encodable {
+        let status: String
+    }
+
+    /// Report agent presence so the server routes inbound calls to this device. Inbound calls are
+    /// only dialed to agents marked AVAILABLE, so this must be set once voice is ready.
+    private func markPresence(_ status: String) {
+        Task { [apiClient] in
+            _ = try? await apiClient.patch(
+                path: APIPath.voicePresence,
+                body: PresenceBody(status: status)
+            ) as EmptyResponse
+        }
     }
 
     struct TokenResponse: Decodable {
@@ -49,6 +66,8 @@ final class VoiceManager: ObservableObject {
             #if canImport(TwilioVoice)
             startIncomingCalls()
             #endif
+            // Advertise availability so inbound calls ring on this device.
+            markPresence("AVAILABLE")
         } catch {
             lastError = (error as? APIError)?.message ?? error.localizedDescription
             status = "Voice unavailable"
@@ -66,6 +85,7 @@ final class VoiceManager: ObservableObject {
     }
 
     func stopIncomingCalls() {
+        markPresence("OFFLINE")
         #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
         IncomingCallCoordinator.shared.stop()
         #endif
@@ -109,6 +129,8 @@ final class VoiceManager: ObservableObject {
         activePhone = normalized
         status = "Calling \(normalized)…"
         isInCall = true
+        isIncoming = false
+        markPresence("ON_CALL")
 
         var params: [String: String] = [
             "phoneNumber": normalized,
@@ -119,7 +141,18 @@ final class VoiceManager: ObservableObject {
             params["customerId"] = customerId
         }
 
+        #if canImport(PushKit) && canImport(CallKit)
+        // Route through CallKit so the audio session activates and End/Mute stay in sync.
+        callKitActive = true
+        IncomingCallCoordinator.shared.startOutgoingCall(
+            handleLabel: normalized,
+            accessToken: token,
+            params: params
+        )
+        #else
+        callKitActive = false
         TwilioVoiceBridge.shared.connect(accessToken: token, params: params)
+        #endif
         #else
         lastError = "Twilio Voice SDK not linked. Run xcodegen generate and add the TwilioVoice package."
         status = "SDK missing"
@@ -133,7 +166,8 @@ final class VoiceManager: ObservableObject {
 
     func hangUp() {
         #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
-        if isIncoming {
+        if callKitActive {
+            // CallKit drives the disconnect; state is reset in the onCallEnded callback.
             IncomingCallCoordinator.shared.endActiveCallFromUI()
             return
         }
@@ -146,12 +180,13 @@ final class VoiceManager: ObservableObject {
         activePhone = nil
         lastError = nil
         status = cachedToken == nil ? "Ready" : "Voice ready"
+        markPresence("AVAILABLE")
     }
 
     func toggleMute() {
         isMuted.toggle()
         #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
-        if isIncoming {
+        if callKitActive {
             IncomingCallCoordinator.shared.setMuted(isMuted)
             return
         }
@@ -171,10 +206,12 @@ final class VoiceManager: ObservableObject {
             self?.isInCall = true
         }
         bridge.onDisconnected = { [weak self] in
-            self?.isInCall = false
-            self?.isMuted = false
-            self?.activePhone = nil
-            self?.status = self?.cachedToken == nil ? "Ready" : "Voice ready"
+            guard let self else { return }
+            self.isInCall = false
+            self.isMuted = false
+            self.activePhone = nil
+            self.status = self.cachedToken == nil ? "Ready" : "Voice ready"
+            self.markPresence("AVAILABLE")
         }
         bridge.onError = { [weak self] message in
             self?.lastError = message
@@ -184,24 +221,32 @@ final class VoiceManager: ObservableObject {
     private func bindIncomingCallbacks() {
         #if canImport(PushKit) && canImport(CallKit)
         let coordinator = IncomingCallCoordinator.shared
-        coordinator.onCallAccepted = { [weak self] caller in
+        coordinator.onCallAccepted = { [weak self] caller, incoming in
             Task { @MainActor in
                 guard let self else { return }
-                self.isIncoming = true
+                self.callKitActive = true
+                self.isIncoming = incoming
                 self.isInCall = true
                 self.isMuted = false
-                self.activePhone = caller ?? "Incoming call"
+                if let caller, !caller.isEmpty {
+                    self.activePhone = caller
+                } else if self.activePhone == nil {
+                    self.activePhone = incoming ? "Incoming call" : "Active call"
+                }
                 self.status = "On call"
+                self.markPresence("ON_CALL")
             }
         }
         coordinator.onCallEnded = { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
+                self.callKitActive = false
                 self.isIncoming = false
                 self.isInCall = false
                 self.isMuted = false
                 self.activePhone = nil
                 self.status = self.cachedToken == nil ? "Ready" : "Voice ready"
+                self.markPresence("AVAILABLE")
             }
         }
         #endif
