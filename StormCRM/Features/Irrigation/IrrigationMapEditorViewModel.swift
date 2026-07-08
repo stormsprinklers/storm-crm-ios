@@ -67,13 +67,46 @@ final class IrrigationMapEditorViewModel: ObservableObject {
     func captureAerial(api: APIClient) async {
         isCapturingAerial = true
         error = nil
+        successMessage = nil
         defer { isCapturingAerial = false }
         do {
             let response: AerialCaptureResponse = try await api.post(
                 path: APIPath.irrigationMapAerial(customerId: customerId, propertyId: propertyId)
             )
             imageUrl = response.aerialImageUrl
+            // Reload so any zones the server remapped onto the new image come back aligned.
+            await reloadMap(api: api)
             successMessage = "Aerial image captured"
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    /// Crop/zoom the aerial into the selected region. The server recaptures a sharper image and
+    /// remaps existing zone/marker geometry to it, so we reload after the request completes.
+    func cropAerial(api: APIClient, crop: AerialCropRect) async {
+        isCapturingAerial = true
+        error = nil
+        successMessage = nil
+        defer { isCapturingAerial = false }
+        do {
+            let _: AerialCaptureResponse = try await api.post(
+                path: APIPath.irrigationMapAerial(customerId: customerId, propertyId: propertyId),
+                body: AerialCropRequest(crop: crop)
+            )
+            await reloadMap(api: api)
+            successMessage = "Zoomed in — zones realigned to the new image"
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func reloadMap(api: APIClient) async {
+        do {
+            let mapResponse: IrrigationMapResponse = try await api.get(
+                path: APIPath.irrigationMap(customerId: customerId, propertyId: propertyId)
+            )
+            applyProperty(mapResponse.property)
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }

@@ -294,7 +294,6 @@ private struct KpiDashboardReportView: View {
                 }
 
                 PersonCardsSection(title: "Technicians", people: report.technicians)
-                PersonCardsSection(title: "Installers", people: report.installers)
                 PersonCardsSection(title: "CSRs", people: report.csrs)
                 CrewCardsSection(crews: report.crews)
                 PersonCardsSection(title: "Sales", people: report.salespeople)

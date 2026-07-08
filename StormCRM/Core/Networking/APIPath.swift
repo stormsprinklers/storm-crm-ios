@@ -31,6 +31,7 @@ enum APIPath {
     }
     static func visitDiscounts(_ id: String) -> String { "/api/visits/\(id)/discounts" }
     static let scheduleFilters = "/api/schedule/filters"
+    static let scheduleJobs = "/api/schedule/jobs"
     static let priceBookItems = "/api/price-book/items"
     static func priceBookCategory(_ id: String) -> String { "/api/price-book/categories/\(id)" }
     static let priceBookCategories = "/api/price-book/categories"
@@ -87,6 +88,9 @@ enum APIPath {
     static let mobilePushRegister = "/api/mobile/push/register"
     static let mobilePushUnregister = "/api/mobile/push/unregister"
     static let voiceToken = "/api/inbox/voice/token"
+    static func voiceTokenPath(platform: String) -> String {
+        "/api/inbox/voice/token?platform=\(platform)"
+    }
     static let voiceCall = "/api/inbox/voice/call"
     static let companySettings = "/api/settings/company"
     static func reporting(_ type: String) -> String { "/api/reporting/\(type)" }

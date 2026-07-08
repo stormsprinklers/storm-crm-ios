@@ -506,6 +506,7 @@ enum JSONValue: Codable, Equatable {
 struct PartsRunGetResponse: Decodable {
     let options: [PartsRunOptionDTO]?
     let message: String?
+    let usedUserLocation: Bool?
 }
 
 struct PartsRunPostResponse: Decodable {
@@ -518,8 +519,11 @@ struct PartsRunOptionDTO: Decodable, Identifiable {
     let supplierId: String
     let name: String
     let address: String?
+    let city: String?
     let phone: String?
+    let driveMinutes: Int?
     let driveDistanceMiles: Double?
+    let isOpenNow: Bool?
     let mapsUrl: String?
 }
 

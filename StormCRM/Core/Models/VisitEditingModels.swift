@@ -2,6 +2,14 @@ import Foundation
 
 struct ScheduleFiltersResponse: Decodable {
     let employees: [ScheduleEmployeeDTO]?
+    let serviceAreas: [ScheduleServiceAreaDTO]?
+}
+
+struct ScheduleServiceAreaDTO: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let color: String?
+    let slug: String?
 }
 
 struct ScheduleEmployeeDTO: Decodable, Identifiable, Hashable {

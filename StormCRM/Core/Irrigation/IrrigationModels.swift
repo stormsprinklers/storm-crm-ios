@@ -336,6 +336,18 @@ struct AerialCaptureResponse: Decodable {
     let formattedAddress: String?
 }
 
+/// Normalized crop rectangle (each value 0..1) relative to the current aerial image.
+struct AerialCropRect: Encodable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+}
+
+struct AerialCropRequest: Encodable {
+    let crop: AerialCropRect
+}
+
 // MARK: - PATCH payloads
 
 struct IrrigationMapPatchRequest: Encodable {

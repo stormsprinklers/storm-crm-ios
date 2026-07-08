@@ -60,6 +60,9 @@ final class AuthManager: ObservableObject {
     }
 
     func logout() async {
+        #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
+        IncomingCallCoordinator.shared.stop()
+        #endif
         await PushNotificationManager.shared.unregister(api: apiClient)
         if let refresh = tokenStore.tokens?.refreshToken {
             _ = try? await apiClient.post(

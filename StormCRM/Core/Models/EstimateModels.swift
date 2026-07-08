@@ -77,7 +77,8 @@ struct EstimateCopyResponse: Decodable {
 struct CreateEstimateBody: Encodable {
     let customerId: String
     let propertyId: String?
-    let visitId: String
+    /// Optional: estimates created from the customer profile have no originating visit.
+    let visitId: String?
 }
 
 struct EstimateStatusBody: Encodable {

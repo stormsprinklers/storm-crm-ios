@@ -112,18 +112,23 @@ struct PartsRunSheet: View {
     @Environment(\.dismiss) private var dismiss
     let visitId: String
     var onComplete: (() async -> Void)?
+
     @State private var suppliers: [PartsRunOptionDTO] = []
     @State private var error: String?
-    @State private var mapsUrl: String?
-    @State private var isLoading = false
+    @State private var isLoading = true
+    @State private var usedUserLocation = false
     @State private var locationNote: String?
+    @State private var selectingId: String?
 
     var body: some View {
         NavigationStack {
             Group {
-                if isLoading && suppliers.isEmpty {
+                if isLoading {
                     VStack(spacing: 12) {
-                        ProgressView("Finding nearby suppliers…")
+                        ProgressView()
+                        Text("Finding the nearest suppliers…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         if let locationNote {
                             Text(locationNote)
                                 .font(.caption)
@@ -132,54 +137,120 @@ struct PartsRunSheet: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if suppliers.isEmpty {
+                    VStack(spacing: 10) {
+                        Image(systemName: "shippingbox")
+                            .font(.largeTitle)
+                            .foregroundStyle(.secondary)
+                        Text(error ?? "No suppliers found nearby.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        Button("Try again") { Task { await load() } }
+                            .buttonStyle(StormSecondaryButtonStyle())
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    List(suppliers) { supplier in
-                        Button {
-                            Task { await selectSupplier(supplier.id) }
-                        } label: {
-                            VStack(alignment: .leading) {
-                                Text(supplier.name).font(.headline)
-                                if let address = supplier.address {
-                                    Text(address).font(.caption).foregroundStyle(.secondary)
+                    List {
+                        Section {
+                            ForEach(suppliers) { supplier in
+                                Button {
+                                    Task { await selectSupplier(supplier) }
+                                } label: {
+                                    supplierRow(supplier)
                                 }
-                                if let miles = supplier.driveDistanceMiles {
-                                    Text(String(format: "%.1f mi", miles)).font(.caption2)
+                                .disabled(selectingId != nil)
+                            }
+                        } footer: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                if let locationNote {
+                                    Text(locationNote)
                                 }
+                                Text(usedUserLocation
+                                     ? "Sorted by drive time from your current location. Tap a supplier to pause your timer and open directions."
+                                     : "Sorted by drive time from the job site. Tap a supplier to pause your timer and open directions.")
                             }
                         }
                     }
                 }
             }
             .navigationTitle("Parts run")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
                 }
             }
-            .overlay {
-                if let mapsUrl, let url = URL(string: mapsUrl) {
-                    Link("Open directions", destination: url)
+            .task { await load() }
+        }
+    }
+
+    @ViewBuilder
+    private func supplierRow(_ supplier: PartsRunOptionDTO) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(titleLine(for: supplier))
+                    .font(.headline)
+                    .foregroundStyle(StormTheme.navy)
+                if let address = supplier.address, !address.isEmpty {
+                    Text(address)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                HStack(spacing: 8) {
+                    if let miles = supplier.driveDistanceMiles {
+                        Text(String(format: "%.1f mi", miles))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    if supplier.isOpenNow == false {
+                        Text("Closed now")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    } else if supplier.isOpenNow == true {
+                        Text("Open now")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(StormTheme.success)
+                    }
                 }
             }
-            .task { await load() }
-            if let error {
-                Text(error).foregroundStyle(.red).padding()
-            }
-            if let locationNote, !suppliers.isEmpty {
-                Text(locationNote)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal)
+            Spacer()
+            if selectingId == supplier.id {
+                ProgressView()
+            } else if let minutes = supplier.driveMinutes {
+                VStack(spacing: 0) {
+                    Text("\(minutes)")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(StormTheme.sky)
+                    Text(minutes == 1 ? "min" : "mins")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(.tertiary)
             }
         }
+        .contentShape(Rectangle())
+    }
+
+    /// e.g. "Sprinkler World, Salt Lake City"
+    private func titleLine(for supplier: PartsRunOptionDTO) -> String {
+        if let city = supplier.city, !city.isEmpty {
+            return "\(supplier.name), \(city)"
+        }
+        return supplier.name
     }
 
     private func load() async {
         isLoading = true
+        error = nil
         defer { isLoading = false }
 
         let location = await env.location.awaitLocation(timeout: 12)
-        if let location {
+        if location != nil {
             locationNote = nil
         } else {
             switch env.location.authorizationStatus {
@@ -192,8 +263,10 @@ struct PartsRunSheet: View {
 
         var query: [URLQueryItem] = []
         if let location {
-            query.append(URLQueryItem(name: "originLat", value: String(location.coordinate.latitude)))
-            query.append(URLQueryItem(name: "originLng", value: String(location.coordinate.longitude)))
+            query = [
+                URLQueryItem(name: "originLat", value: String(location.coordinate.latitude)),
+                URLQueryItem(name: "originLng", value: String(location.coordinate.longitude)),
+            ]
         }
 
         do {
@@ -202,42 +275,34 @@ struct PartsRunSheet: View {
                 query: query
             )
             suppliers = response.options ?? []
-            if suppliers.isEmpty, let message = response.message {
-                error = message
+            usedUserLocation = response.usedUserLocation ?? false
+            if suppliers.isEmpty {
+                error = response.message ?? "No suppliers found nearby."
             }
         } catch {
             self.error = (error as? APIError)?.message
         }
     }
 
-    private func selectSupplier(_ supplierId: String) async {
-        struct Body: Encodable {
-            let supplierId: String
-            let originLat: Double?
-            let originLng: Double?
-        }
-
-        let location = env.location.lastLocation
-            ?? await env.location.awaitLocation(timeout: 8)
-
+    private func selectSupplier(_ supplier: PartsRunOptionDTO) async {
+        selectingId = supplier.id
+        defer { selectingId = nil }
+        struct Body: Encodable { let supplierId: String }
         do {
             let response: PartsRunPostResponse = try await env.apiClient.post(
                 path: APIPath.visitPartsRun(visitId),
-                body: Body(
-                    supplierId: supplierId,
-                    originLat: location?.coordinate.latitude,
-                    originLng: location?.coordinate.longitude
-                )
+                body: Body(supplierId: supplier.id)
             )
-            mapsUrl = response.mapsUrl
             if response.paused == true {
                 await onComplete?()
             }
-            if let url = mapsUrl, let maps = URL(string: url) {
+            let urlString = response.mapsUrl ?? supplier.mapsUrl
+            if let urlString, let maps = URL(string: urlString) {
                 #if canImport(UIKit)
                 await UIApplication.shared.open(maps)
                 #endif
             }
+            dismiss()
         } catch {
             self.error = (error as? APIError)?.message
         }

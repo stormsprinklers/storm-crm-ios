@@ -17,10 +17,6 @@ struct MainTabView: View {
                 .tabItem { Label("Schedule", systemImage: "calendar") }
                 .tag(MainTab.schedule)
 
-            VisitsListView()
-                .tabItem { Label("Visits", systemImage: "wrench.and.screwdriver") }
-                .tag(MainTab.visits)
-
             CustomersListView()
                 .tabItem { Label("Customers", systemImage: "person.2") }
                 .tag(MainTab.customers)

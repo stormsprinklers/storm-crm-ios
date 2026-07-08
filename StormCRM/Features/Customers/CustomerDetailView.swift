@@ -65,8 +65,19 @@ struct CustomerDetailView: View {
 
     @StateObject private var viewModel = CustomerDetailViewModel()
     @State private var showEdit = false
+    @State private var showCreateVisit = false
+    @State private var showCreateEstimate = false
+    @State private var scheduleEmployees: [ScheduleEmployeeDTO] = []
+    @State private var scheduleServiceAreas: [ScheduleServiceAreaDTO] = []
+    @State private var createdVisit: CreatedVisitRoute?
+    @State private var createdEstimate: CreatedEstimateRoute?
     @State private var noteDraft = ""
     @State private var isAddingNote = false
+
+    private struct CreatedVisitRoute: Identifiable, Hashable { let id: String }
+    private struct CreatedEstimateRoute: Identifiable, Hashable { let id: String }
+
+    private var canCreateVisit: Bool { userRole.map { UserRoles.canEditVisitOfficeFields($0) } ?? false }
 
     private var userRole: String? { env.auth.user?.role }
     private var canEdit: Bool { userRole.map { UserRoles.canEditCustomers($0) } ?? false }
@@ -173,6 +184,23 @@ struct CustomerDetailView: View {
         .toolbar {
             if canEdit, viewModel.customer != nil {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button {
+                            showCreateVisit = true
+                        } label: {
+                            Label("New visit", systemImage: "calendar.badge.plus")
+                        }
+                        .disabled(!canCreateVisit)
+                        Button {
+                            showCreateEstimate = true
+                        } label: {
+                            Label("New estimate", systemImage: "doc.text")
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("Edit") { showEdit = true }
                 }
             }
@@ -194,9 +222,55 @@ struct CustomerDetailView: View {
                 }
             }
         }
+        .sheet(isPresented: $showCreateVisit) {
+            if let customer = viewModel.customer {
+                CustomerVisitCreateSheet(
+                    customer: customer,
+                    properties: viewModel.properties,
+                    employees: scheduleEmployees,
+                    serviceAreas: scheduleServiceAreas
+                ) { created in
+                    await viewModel.load(api: env.apiClient, customerId: customerId)
+                    navigate(afterDelay: { createdVisit = CreatedVisitRoute(id: created.id) })
+                }
+                .environmentObject(env)
+            }
+        }
+        .sheet(isPresented: $showCreateEstimate) {
+            if let customer = viewModel.customer {
+                CustomerEstimateCreateSheet(
+                    customer: customer,
+                    properties: viewModel.properties
+                ) { created in
+                    await viewModel.load(api: env.apiClient, customerId: customerId)
+                    navigate(afterDelay: { createdEstimate = CreatedEstimateRoute(id: created.id) })
+                }
+                .environmentObject(env)
+            }
+        }
+        .navigationDestination(item: $createdVisit) { route in
+            VisitDetailView(visitId: route.id)
+        }
+        .navigationDestination(item: $createdEstimate) { route in
+            EstimateDetailView(estimateId: route.id)
+        }
         .refreshable { await viewModel.load(api: env.apiClient, customerId: customerId) }
         .task { await viewModel.load(api: env.apiClient, customerId: customerId) }
+        .task { await loadScheduleFilters() }
         .customerHistoryDestinations()
+    }
+
+    private func loadScheduleFilters() async {
+        guard canEdit, scheduleEmployees.isEmpty else { return }
+        if let filters = try? await env.apiClient.get(path: APIPath.scheduleFilters) as ScheduleFiltersResponse {
+            scheduleEmployees = filters.employees ?? []
+            scheduleServiceAreas = filters.serviceAreas ?? []
+        }
+    }
+
+    /// Push the newly created record once the create sheet finishes dismissing.
+    private func navigate(afterDelay work: @escaping () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { work() }
     }
 
     private func submitNote() async {

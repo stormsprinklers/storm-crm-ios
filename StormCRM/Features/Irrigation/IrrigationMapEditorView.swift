@@ -7,6 +7,7 @@ struct IrrigationMapEditorView: View {
     @State private var draftPoints: ImagePolygon = []
     @State private var renamingZoneIndex: Int?
     @State private var renameText = ""
+    @State private var showCrop = false
 
     init(customerId: String, propertyId: String, propertyName: String) {
         _viewModel = StateObject(
@@ -64,6 +65,20 @@ struct IrrigationMapEditorView: View {
         }
         .task { await viewModel.load(api: env.apiClient) }
         .onChange(of: viewModel.markerPlacement) { _, _ in draftPoints = [] }
+        .sheet(isPresented: $showCrop) {
+            if let url = viewModel.mapImageUrl {
+                IrrigationAerialCropView(imageUrl: url, isBusy: viewModel.isCapturingAerial) { crop in
+                    Task {
+                        await viewModel.cropAerial(api: env.apiClient, crop: crop)
+                        if viewModel.error == nil {
+                            showCrop = false
+                            draftPoints = []
+                        }
+                    }
+                }
+                .environmentObject(env)
+            }
+        }
     }
 
     private var headerBar: some View {
@@ -91,6 +106,16 @@ struct IrrigationMapEditorView: View {
                 }
                 .buttonStyle(StormSecondaryButtonStyle())
                 .disabled(viewModel.isCapturingAerial)
+
+                if viewModel.mapImageUrl != nil {
+                    Button {
+                        showCrop = true
+                    } label: {
+                        Label("Zoom in", systemImage: "plus.magnifyingglass")
+                    }
+                    .buttonStyle(StormSecondaryButtonStyle())
+                    .disabled(viewModel.isCapturingAerial)
+                }
 
                 Button(viewModel.isSaving ? "Saving…" : "Save draft") {
                     Task { await viewModel.save(api: env.apiClient, publish: false) }

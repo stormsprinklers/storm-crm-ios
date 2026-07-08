@@ -8,6 +8,7 @@ final class VoiceManager: ObservableObject {
     @Published private(set) var isInCall = false
     @Published private(set) var isMuted = false
     @Published private(set) var activePhone: String?
+    @Published private(set) var isIncoming = false
 
     private let apiClient: APIClient
     private let auth: AuthManager
@@ -18,6 +19,7 @@ final class VoiceManager: ObservableObject {
         self.auth = auth
         #if canImport(TwilioVoice)
         bindBridgeCallbacks()
+        bindIncomingCallbacks()
         #endif
     }
 
@@ -25,20 +27,48 @@ final class VoiceManager: ObservableObject {
         lastError = nil
     }
 
+    struct TokenResponse: Decodable {
+        let token: String
+        let identity: String
+    }
+
+    /// Fetch a Twilio access token for iOS (includes the Push Credential grant used for
+    /// incoming-call registration).
+    private func fetchToken() async throws -> String {
+        let response: TokenResponse = try await apiClient.post(
+            path: APIPath.voiceTokenPath(platform: "ios")
+        )
+        return response.token
+    }
+
     func prepare() async {
         do {
-            struct TokenResponse: Decodable {
-                let token: String
-                let identity: String
-            }
-            let response: TokenResponse = try await apiClient.post(path: APIPath.voiceToken)
-            cachedToken = response.token
+            cachedToken = try await fetchToken()
             status = "Voice ready"
             lastError = nil
+            #if canImport(TwilioVoice)
+            startIncomingCalls()
+            #endif
         } catch {
             lastError = (error as? APIError)?.message ?? error.localizedDescription
             status = "Voice unavailable"
         }
+    }
+
+    /// Register for incoming calls so the app rings on VoIP push (even when closed).
+    func startIncomingCalls() {
+        #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
+        IncomingCallCoordinator.shared.start { [weak self] in
+            guard let self else { return nil }
+            return try? await self.fetchToken()
+        }
+        #endif
+    }
+
+    func stopIncomingCalls() {
+        #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
+        IncomingCallCoordinator.shared.stop()
+        #endif
     }
 
     func call(phone: String, customerId: String? = nil) async {
@@ -102,6 +132,12 @@ final class VoiceManager: ObservableObject {
     }
 
     func hangUp() {
+        #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
+        if isIncoming {
+            IncomingCallCoordinator.shared.endActiveCallFromUI()
+            return
+        }
+        #endif
         #if canImport(TwilioVoice)
         TwilioVoiceBridge.shared.disconnect()
         #endif
@@ -114,6 +150,12 @@ final class VoiceManager: ObservableObject {
 
     func toggleMute() {
         isMuted.toggle()
+        #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
+        if isIncoming {
+            IncomingCallCoordinator.shared.setMuted(isMuted)
+            return
+        }
+        #endif
         #if canImport(TwilioVoice)
         TwilioVoiceBridge.shared.setMuted(isMuted)
         #endif
@@ -137,6 +179,32 @@ final class VoiceManager: ObservableObject {
         bridge.onError = { [weak self] message in
             self?.lastError = message
         }
+    }
+
+    private func bindIncomingCallbacks() {
+        #if canImport(PushKit) && canImport(CallKit)
+        let coordinator = IncomingCallCoordinator.shared
+        coordinator.onCallAccepted = { [weak self] caller in
+            Task { @MainActor in
+                guard let self else { return }
+                self.isIncoming = true
+                self.isInCall = true
+                self.isMuted = false
+                self.activePhone = caller ?? "Incoming call"
+                self.status = "On call"
+            }
+        }
+        coordinator.onCallEnded = { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.isIncoming = false
+                self.isInCall = false
+                self.isMuted = false
+                self.activePhone = nil
+                self.status = self.cachedToken == nil ? "Ready" : "Voice ready"
+            }
+        }
+        #endif
     }
     #endif
 }

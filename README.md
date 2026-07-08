@@ -120,6 +120,54 @@ xcodegen generate   # links TwilioVoice SPM package from project.yml
 
 If the SDK is not linked, the app falls back to opening the native Phone app (`tel:`).
 
+## Incoming calls (ring the app)
+
+The app can **receive** calls routed to a user from a CRM call flow. In the web CRM, add a
+**"Ring a person's app"** step (a `DIAL_USER` node) under **Settings → Voice → Call flows** and pick the
+user. Twilio then rings every device that user is signed into — the web softphone **and** their iOS app.
+When the app is closed, iOS wakes it with a **VoIP push** and shows the native **CallKit** incoming-call
+screen (lock screen included), as long as notifications are enabled.
+
+How it works in the app:
+
+- `IncomingCallCoordinator` registers a **PushKit** VoIP token and hands it to Twilio (via
+  `TwilioVoiceSDK.register`) using a token from `POST /api/inbox/voice/token?platform=ios`.
+- Incoming VoIP pushes are reported to **CallKit** immediately, then the Twilio `CallInvite` is
+  accepted/declined from the native UI. Answered calls also show the in-app call bar (mute / end).
+
+### One-time setup (required for incoming calls)
+
+These must be done manually — they need your Apple and Twilio accounts:
+
+1. **Apple: create a VoIP Services certificate**
+   - Apple Developer → Certificates → **VoIP Services Certificate** for bundle id
+     `com.stormsprinklers.stormcrm`.
+   - Export it as a **`.p12`** (certificate + private key).
+
+2. **Twilio: create a Push Credential**
+   - Twilio Console → **Voice → Push Credentials → Create new (Apple)**.
+   - Upload the VoIP `.p12` (or its PEM cert + key). Use **Sandbox** for Xcode debug builds and a
+     **Production** credential for TestFlight/App Store.
+   - Copy the credential **SID** (`CRxxxx…`).
+
+3. **CRM server env** (see `crm/.env.example`):
+   - `TWILIO_PUSH_CREDENTIAL_SID=CRxxxx…` — added to the iOS access token's Voice grant so Twilio can
+     wake the app. (Optional `TWILIO_ANDROID_PUSH_CREDENTIAL_SID` for a future Android app.)
+   - Redeploy the CRM so `/api/inbox/voice/token?platform=ios` includes the push credential.
+
+4. **Xcode capabilities** on the StormCRM target (Signing & Capabilities):
+   - **Push Notifications**
+   - **Background Modes** → **Voice over IP** and **Remote notifications** (already declared in
+     `Info.plist`: `voip`, `remote-notification`, `audio`).
+   - `StormCRM.entitlements` `aps-environment`: `development` for debug, `production` for release.
+
+5. Test on a **physical device** (VoIP push is not delivered to the Simulator). Sign in once so the app
+   registers its VoIP token with Twilio; then place a call through a call flow whose step rings that user.
+
+> If `TWILIO_PUSH_CREDENTIAL_SID` is not set, outbound calling still works and the app registers as a
+> live client — it will ring only while open/registered, but closed-app VoIP wake-up requires the
+> push credential.
+
 ## Dashboard
 
 The **Dashboard** tab (first tab) is the home screen:

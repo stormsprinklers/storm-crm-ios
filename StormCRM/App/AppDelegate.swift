@@ -7,6 +7,11 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        // Register the VoIP push delegate early so incoming calls can wake and ring the app
+        // even on a cold launch from a killed state.
+        #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
+        IncomingCallCoordinator.shared.configure()
+        #endif
         return true
     }
 

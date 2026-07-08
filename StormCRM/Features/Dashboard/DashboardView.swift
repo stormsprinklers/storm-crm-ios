@@ -95,7 +95,7 @@ final class DashboardViewModel: ObservableObject {
         case "TECH":
             people = report.technicians
         case "INSTALLER":
-            people = report.installers
+            people = report.installers ?? []
         case "CSR":
             people = report.csrs
         case "SALES":

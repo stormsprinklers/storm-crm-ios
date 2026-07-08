@@ -163,7 +163,7 @@ struct KpiDashboardReport: Decodable {
     let rangeLabel: String
     let company: [ReportMetric]
     let technicians: [KpiPersonCard]
-    let installers: [KpiPersonCard]
+    let installers: [KpiPersonCard]?
     let csrs: [KpiPersonCard]
     let crews: [KpiCrewCard]
     let salespeople: [KpiPersonCard]
