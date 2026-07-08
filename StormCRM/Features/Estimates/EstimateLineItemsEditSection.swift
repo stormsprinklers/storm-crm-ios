@@ -39,10 +39,10 @@ struct EstimateLineItemsEditSection: View {
                 } else if canEdit {
                     ForEach(items) { item in
                         LineItemEditRow(
-                            name: drafts.bindingName(for: item),
-                            description: drafts.bindingDescription(for: item),
-                            quantity: drafts.bindingQuantity(for: item),
-                            unitPrice: drafts.bindingPrice(for: item),
+                            name: $drafts.bindingName(for: item),
+                            description: $drafts.bindingDescription(for: item),
+                            quantity: $drafts.bindingQuantity(for: item),
+                            unitPrice: $drafts.bindingPrice(for: item),
                             isSaving: savingItemId == item.id,
                             onSave: { Task { await saveItem(item) } },
                             onDelete: { Task { await deleteItem(item.id) } }
