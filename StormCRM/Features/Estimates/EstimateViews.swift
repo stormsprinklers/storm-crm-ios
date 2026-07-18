@@ -219,7 +219,6 @@ struct EstimateDetailView: View {
         .background(StormTheme.page.ignoresSafeArea())
         .navigationTitle(estimate?.displayTitle ?? "Estimate")
         .navigationBarTitleDisplayMode(.inline)
-        .customerHistoryDestinations()
         .refreshable { await load() }
         .task { await load() }
         .confirmationDialog(
