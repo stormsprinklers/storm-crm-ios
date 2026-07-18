@@ -127,7 +127,7 @@ struct ScheduleJobCreateSheet: View {
             let assignedUserId: String?
         }
         do {
-            let assignee = assignedUserId.isEmpty ? nil : assignedUserId
+            var assignee = assignedUserId.isEmpty ? nil : assignedUserId
             if let role = env.auth.user?.role, UserRoles.isFieldRole(role), let me = env.auth.user?.id {
                 assignee = me
             }
