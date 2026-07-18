@@ -94,7 +94,12 @@ final class SmsConversationViewModel: ObservableObject {
         do {
             let response: MessagesResponse = try await api.get(path: APIPath.smsMessages(conversationId))
             conversation = response.conversation
-            messages = response.messages
+            // Avoid republishing an identical list — replacing the array every poll rebuilds
+            // LazyVStack cells and makes the thread bounce while the user is scrolling.
+            let next = response.messages
+            if messages.map(\.scrollFingerprint) != next.map(\.scrollFingerprint) {
+                messages = next
+            }
         } catch {
             if !silent {
                 self.error = (error as? APIError)?.message ?? error.localizedDescription

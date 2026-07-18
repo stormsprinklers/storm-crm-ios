@@ -746,6 +746,12 @@ struct MessageDTO: Decodable, Identifiable {
     var displayDate: String { sentAt ?? createdAt ?? "" }
     var isOutbound: Bool { direction.uppercased() == "OUTBOUND" }
 
+    /// Stable identity for inbox polling diffs (avoids ScrollView thrash on silent refresh).
+    var scrollFingerprint: String {
+        let mediaKey = media?.map { "\($0.id):\($0.blobUrl)" }.joined(separator: ",") ?? ""
+        return [id, body ?? "", direction, deliveryStatus ?? "", mediaKey].joined(separator: "|")
+    }
+
     enum CodingKeys: String, CodingKey {
         case id, body, direction, sentAt, createdAt, sender, media, deliveryStatus
     }

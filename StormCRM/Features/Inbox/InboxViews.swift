@@ -179,6 +179,8 @@ struct SmsConversationView: View {
     @StateObject private var viewModel = SmsConversationViewModel()
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var showCamera = false
+    /// When false, the user has scrolled up to read history — don't yank them to the latest message.
+    @State private var isPinnedToBottom = true
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -188,13 +190,24 @@ struct SmsConversationView: View {
                         SmsMessageBubble(message: message)
                             .id(message.id)
                     }
+                    // Sentinel: when this leaves the viewport the user is reading older messages.
+                    Color.clear
+                        .frame(height: 1)
+                        .id("threadBottom")
+                        .onAppear { isPinnedToBottom = true }
+                        .onDisappear { isPinnedToBottom = false }
                 }
                 .padding()
             }
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: viewModel.messages.count) { _, _ in
-                if let last = viewModel.messages.last {
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+            .onChange(of: viewModel.messages.last?.id) { oldId, newId in
+                guard let newId, newId != oldId else { return }
+                // First load (oldId == nil) or user is already at the bottom.
+                guard oldId == nil || isPinnedToBottom else { return }
+                DispatchQueue.main.async {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo("threadBottom", anchor: .bottom)
+                    }
                 }
             }
         }
@@ -293,7 +306,10 @@ struct SmsConversationView: View {
                     .textFieldStyle(.roundedBorder)
 
                 Button {
-                    Task { await viewModel.send(api: env.apiClient, conversationId: conversationId, scope: scope) }
+                    Task {
+                        isPinnedToBottom = true
+                        await viewModel.send(api: env.apiClient, conversationId: conversationId, scope: scope)
+                    }
                 } label: {
                     if viewModel.isSending {
                         ProgressView()
