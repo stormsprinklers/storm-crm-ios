@@ -199,10 +199,11 @@ final class IncomingCallCoordinator: NSObject, @unchecked Sendable {
         let handle = CXHandle(type: .generic, value: handleLabel)
         let startAction = CXStartCallAction(call: uuid, handle: handle)
         startAction.isVideo = false
+        let onFailed = onCallFailed
         callKitController.request(CXTransaction(action: startAction)) { [weak self] error in
             if let error {
                 print("CallKit start call failed:", error.localizedDescription)
-                self?.onCallFailed?(error.localizedDescription)
+                onFailed?(error.localizedDescription)
                 self?.clearActiveCallState()
             }
         }
