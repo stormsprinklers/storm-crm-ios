@@ -48,7 +48,7 @@ final class IncomingCallCoordinator: NSObject {
     var onVoIPRegistrationUpdated: ((_ succeeded: Bool, _ message: String?) -> Void)?
 
     override init() {
-        let configuration = CXProviderConfiguration(localizedName: "Storm CRM")
+        let configuration = CXProviderConfiguration()
         configuration.supportsVideo = false
         configuration.maximumCallGroups = 1
         configuration.maximumCallsPerCallGroup = 1

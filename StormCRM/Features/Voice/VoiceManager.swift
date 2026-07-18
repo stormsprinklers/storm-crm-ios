@@ -110,9 +110,14 @@ final class VoiceManager: ObservableObject {
         lastError = nil
 
         #if targetEnvironment(simulator)
-        lastError = "Voice calls require a physical iPhone or iPad. The Simulator cannot place VoIP calls."
-        return
+        let runningOnSimulator = true
+        #else
+        let runningOnSimulator = false
         #endif
+        if runningOnSimulator {
+            lastError = "Voice calls require a physical iPhone or iPad. The Simulator cannot place VoIP calls."
+            return
+        }
 
         let normalized = PhoneDialing.normalize(phone)
         guard !normalized.isEmpty else {

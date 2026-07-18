@@ -22,7 +22,8 @@ struct PriceBookBrowseAddView: View {
     private enum BrowseTab: String, CaseIterable, Identifiable {
         case all, favorites
         var id: String { rawValue }
-        var title: String {
+
+        func title(itemType: String) -> String {
             switch self {
             case .all: return itemType == "MATERIAL" ? "All materials" : "All services"
             case .favorites: return "Favorites"
@@ -58,7 +59,7 @@ struct PriceBookBrowseAddView: View {
                 Section {
                     Picker("Tab", selection: $tab) {
                         ForEach(BrowseTab.allCases) { tab in
-                            Text(tab.title).tag(tab)
+                            Text(tab.title(itemType: itemType)).tag(tab)
                         }
                     }
                     .pickerStyle(.segmented)
