@@ -110,15 +110,8 @@ final class VoiceManager: ObservableObject {
         lastError = nil
 
         #if targetEnvironment(simulator)
-        let runningOnSimulator = true
+        lastError = "Voice calls require a physical iPhone or iPad. The Simulator cannot place VoIP calls."
         #else
-        let runningOnSimulator = false
-        #endif
-        if runningOnSimulator {
-            lastError = "Voice calls require a physical iPhone or iPad. The Simulator cannot place VoIP calls."
-            return
-        }
-
         let normalized = PhoneDialing.normalize(phone)
         guard !normalized.isEmpty else {
             lastError = "No phone number"
@@ -188,6 +181,7 @@ final class VoiceManager: ObservableObject {
         if let url = URL(string: "tel:\(normalized)") {
             await UIApplication.shared.open(url)
         }
+        #endif
         #endif
         #endif
     }

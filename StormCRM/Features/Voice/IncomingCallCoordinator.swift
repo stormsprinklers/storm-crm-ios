@@ -14,7 +14,8 @@ import TwilioVoice
 ///  4. Answering/declining flows through CallKit and is applied to the Twilio call/invite.
 ///
 /// Created on the main queue so all delegate callbacks land on the main thread.
-final class IncomingCallCoordinator: NSObject {
+/// Main-thread confined (PushKit queue is `.main`; CallKit delegate queue is nil/main).
+final class IncomingCallCoordinator: NSObject, @unchecked Sendable {
     static let shared = IncomingCallCoordinator()
 
     private let pushRegistry = PKPushRegistry(queue: .main)
@@ -96,35 +97,52 @@ final class IncomingCallCoordinator: NSObject {
 
     private func registerWithTwilio() async {
         guard let voipDeviceToken else {
-            DispatchQueue.main.async { [weak self] in
-                self?.onVoIPRegistrationUpdated?(false, "Waiting for VoIP push token from iOS")
-            }
+            await notifyVoIPRegistration(succeeded: false, message: "Waiting for VoIP push token from iOS")
             return
         }
         guard let token = await accessTokenProvider?() else {
-            DispatchQueue.main.async { [weak self] in
-                self?.onVoIPRegistrationUpdated?(false, "Voice token unavailable for registration")
-            }
+            await notifyVoIPRegistration(succeeded: false, message: "Voice token unavailable for registration")
             return
         }
-        TwilioVoiceSDK.register(accessToken: token, deviceToken: voipDeviceToken) { [weak self] error in
-            DispatchQueue.main.async {
-                if let error {
-                    print("Twilio VoIP register failed:", error.localizedDescription)
-                    self?.onVoIPRegistrationUpdated?(false, error.localizedDescription)
-                } else {
-                    self?.onVoIPRegistrationUpdated?(true, nil)
+
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                TwilioVoiceSDK.register(accessToken: token, deviceToken: voipDeviceToken) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
                 }
             }
+            await notifyVoIPRegistration(succeeded: true, message: nil)
+        } catch {
+            print("Twilio VoIP register failed:", error.localizedDescription)
+            await notifyVoIPRegistration(succeeded: false, message: error.localizedDescription)
         }
     }
 
     private func unregisterFromTwilio() async {
         guard let voipDeviceToken, let token = await accessTokenProvider?() else { return }
-        TwilioVoiceSDK.unregister(accessToken: token, deviceToken: voipDeviceToken) { error in
-            if let error {
-                print("Twilio VoIP unregister failed:", error.localizedDescription)
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                TwilioVoiceSDK.unregister(accessToken: token, deviceToken: voipDeviceToken) { error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume()
+                    }
+                }
             }
+        } catch {
+            print("Twilio VoIP unregister failed:", error.localizedDescription)
+        }
+    }
+
+    private func notifyVoIPRegistration(succeeded: Bool, message: String?) async {
+        let callback = onVoIPRegistrationUpdated
+        await MainActor.run {
+            callback?(succeeded, message)
         }
     }
 
@@ -136,10 +154,11 @@ final class IncomingCallCoordinator: NSObject {
         update.hasVideo = false
         update.supportsDTMF = true
         update.supportsHolding = false
+        let onFailed = onCallFailed
         callKitProvider.reportNewIncomingCall(with: uuid, update: update) { [weak self] error in
             if let error {
                 print("CallKit reportNewIncomingCall failed:", error.localizedDescription)
-                self?.onCallFailed?(error.localizedDescription)
+                onFailed?(error.localizedDescription)
                 self?.clearActiveCallState()
             }
         }

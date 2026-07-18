@@ -363,7 +363,7 @@ struct EstimateDetailView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
-                        if let sourceVisitId {
+                        if sourceVisitId != nil {
                             Button {
                                 Task { await copyToVisit(target: "this_visit") }
                             } label: {
