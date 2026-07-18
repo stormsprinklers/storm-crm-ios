@@ -11,6 +11,9 @@ enum CustomerHistoryDestination: Hashable {
 }
 
 extension View {
+    /// Register once on each root `NavigationStack` that can push customer history.
+    /// Do not also apply this on pushed detail screens — nested duplicates trigger
+    /// "navigationDestination was declared earlier on the stack" warnings.
     func customerHistoryDestinations() -> some View {
         navigationDestination(for: CustomerHistoryDestination.self) { destination in
             switch destination {
@@ -22,7 +25,11 @@ extension View {
                 InvoiceDetailView(invoiceId: invoiceId)
             }
         }
-        .navigationDestination(for: CustomerListRoute.self) { route in
+    }
+
+    /// Register once on each root `NavigationStack` that can push customer detail.
+    func customerDetailDestination() -> some View {
+        navigationDestination(for: CustomerListRoute.self) { route in
             switch route {
             case .detail(let customerId):
                 CustomerDetailView(customerId: customerId)

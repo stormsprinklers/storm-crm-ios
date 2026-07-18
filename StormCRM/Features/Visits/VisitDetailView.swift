@@ -413,7 +413,7 @@ struct VisitDetailView: View {
         }
         .navigationTitle("Visit")
         .navigationBarTitleDisplayMode(.inline)
-        .customerHistoryDestinations()
+
         .sheet(isPresented: $showPayment) {
             PaymentSheet(
                 visitId: visitId,

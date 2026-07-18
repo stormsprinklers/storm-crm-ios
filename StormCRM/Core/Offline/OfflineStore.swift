@@ -10,12 +10,31 @@ enum OfflineStore {
     ])
 
     static func makeContainer() throws -> ModelContainer {
+        let storeDirectory = try applicationSupportDirectory()
+        let storeURL = storeDirectory.appendingPathComponent("StormCRMOffline.store")
         let config = ModelConfiguration(
             "StormCRMOffline",
             schema: schema,
-            isStoredInMemoryOnly: false
+            url: storeURL,
+            cloudKitDatabase: .none
         )
         return try ModelContainer(for: schema, configurations: [config])
+    }
+
+    /// SwiftData/Core Data will log a long sandbox diagnostic dump if Application Support
+    /// does not exist yet when the store is first created. Create it up front.
+    private static func applicationSupportDirectory() throws -> URL {
+        let fileManager = FileManager.default
+        let root = try fileManager.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        if !fileManager.fileExists(atPath: root.path) {
+            try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        }
+        return root
     }
 
     static func sharedContext(from container: ModelContainer) -> ModelContext {

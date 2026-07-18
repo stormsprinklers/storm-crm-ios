@@ -175,6 +175,8 @@ struct DashboardView: View {
             .navigationDestination(for: VisitDTO.self) { job in
                 VisitDetailView(visitId: job.id)
             }
+            .customerHistoryDestinations()
+            .customerDetailDestination()
         }
     }
 

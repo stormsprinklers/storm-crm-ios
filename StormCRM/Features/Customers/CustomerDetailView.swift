@@ -260,7 +260,7 @@ struct CustomerDetailView: View {
         .refreshable { await viewModel.load(api: env.apiClient, customerId: customerId) }
         .task { await viewModel.load(api: env.apiClient, customerId: customerId) }
         .task { await loadScheduleFilters() }
-        .customerHistoryDestinations()
+
     }
 
     private func loadScheduleFilters() async {

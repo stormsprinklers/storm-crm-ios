@@ -292,16 +292,8 @@ struct ScheduleView: View {
             .navigationDestination(for: String.self) { visitId in
                 VisitDetailView(visitId: visitId)
             }
-            .navigationDestination(for: CustomerHistoryDestination.self) { destination in
-                switch destination {
-                case .visit(let visitId):
-                    VisitDetailView(visitId: visitId)
-                case .estimate(let estimateId):
-                    EstimateDetailView(estimateId: estimateId)
-                case .invoice(let invoiceId):
-                    InvoiceDetailView(invoiceId: invoiceId)
-                }
-            }
+            .customerHistoryDestinations()
+            .customerDetailDestination()
             .refreshable { await reload() }
             .task { await loadInitial() }
             .onChange(of: env.deepLinkNavigation) { _, navigation in

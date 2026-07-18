@@ -215,7 +215,7 @@ struct InvoiceDetailView: View {
         .background(StormTheme.page.ignoresSafeArea())
         .navigationTitle("Invoice")
         .navigationBarTitleDisplayMode(.inline)
-        .customerHistoryDestinations()
+
         .refreshable { await load() }
         .task { await load() }
     }
