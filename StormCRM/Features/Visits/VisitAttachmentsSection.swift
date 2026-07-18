@@ -1,14 +1,26 @@
 import PhotosUI
 import SwiftUI
 
+private struct CapturedPhotoDraft: Identifiable {
+    let id = UUID()
+    let image: UIImage
+}
+
 struct VisitAttachmentsSection: View {
     @EnvironmentObject private var env: AppEnvironment
+    @ObservedObject private var uploadQueue = MediaUploadQueue.shared
     let visitId: String
     @State private var attachments: [AttachmentDTO] = []
     @State private var pickerItem: PhotosPickerItem?
     @State private var showCamera = false
-    @State private var isUploading = false
     @State private var error: String?
+    @State private var capturedDraft: CapturedPhotoDraft?
+    @State private var showAnnotation = false
+    @State private var showUploadOptions = false
+
+    private var pendingUploadCount: Int {
+        uploadQueue.pendingCount(for: visitId)
+    }
 
     var body: some View {
         StormCard {
@@ -16,6 +28,15 @@ struct VisitAttachmentsSection: View {
                 StormSectionHeader(title: "Attachments", systemImage: "paperclip")
                 if let error {
                     Text(error).font(.caption).foregroundStyle(.red)
+                }
+                if pendingUploadCount > 0 || uploadQueue.isProcessing {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text("\(pendingUploadCount) photo(s) uploading…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 ScrollView(.horizontal) {
                     HStack(spacing: 10) {
@@ -36,16 +57,9 @@ struct VisitAttachmentsSection: View {
                         AttachmentAddTile(title: "Take photo", systemImage: "camera.fill") {
                             showCamera = true
                         }
-                        .disabled(isUploading)
 
                         PhotosPicker(selection: $pickerItem, matching: .images) {
                             AttachmentAddTile(title: "Library", systemImage: "photo.on.rectangle")
-                        }
-                        .disabled(isUploading)
-
-                        if isUploading {
-                            ProgressView()
-                                .frame(width: 80, height: 80)
                         }
                     }
                 }
@@ -53,21 +67,57 @@ struct VisitAttachmentsSection: View {
         }
         .sheet(isPresented: $showCamera) {
             CameraImagePicker { image in
-                Task { await uploadImageData(image.attachmentJPEGData()) }
+                capturedDraft = CapturedPhotoDraft(image: image)
+                showUploadOptions = true
             }
             .ignoresSafeArea()
+        }
+        .confirmationDialog("Photo captured", isPresented: $showUploadOptions, titleVisibility: .visible) {
+            Button("Upload as-is") {
+                if let draft = capturedDraft {
+                    queueUpload(image: draft.image)
+                }
+                capturedDraft = nil
+            }
+            Button("Annotate first") {
+                showAnnotation = true
+            }
+            Button("Cancel", role: .cancel) {
+                capturedDraft = nil
+            }
+        } message: {
+            Text("Optionally add arrows, circles, or labels before uploading.")
+        }
+        .fullScreenCover(isPresented: $showAnnotation) {
+            if let draft = capturedDraft {
+                PhotoAnnotationEditor(
+                    image: draft.image,
+                    onDone: { annotated in
+                        queueUpload(image: annotated)
+                        capturedDraft = nil
+                        showUploadOptions = false
+                    },
+                    onCancel: {
+                        showUploadOptions = true
+                    }
+                )
+            }
         }
         .task { await load() }
         .onChange(of: pickerItem) { _, item in
             guard let item else { return }
             Task {
-                await uploadPickerItem(item)
+                await handlePickerItem(item)
                 pickerItem = nil
             }
+        }
+        .onChange(of: uploadQueue.items.count) { _, _ in
+            Task { await load() }
         }
     }
 
     private func load() async {
+        guard env.offlineSync.isOnline else { return }
         do {
             attachments = try await env.apiClient.get(path: APIPath.visitAttachments(visitId))
         } catch {
@@ -75,34 +125,29 @@ struct VisitAttachmentsSection: View {
         }
     }
 
-    private func uploadPickerItem(_ item: PhotosPickerItem) async {
+    private func handlePickerItem(_ item: PhotosPickerItem) async {
         do {
-            guard let data = try await item.loadTransferable(type: Data.self) else { return }
-            await uploadImageData(data)
+            guard let data = try await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data)
+            else { return }
+            capturedDraft = CapturedPhotoDraft(image: image)
+            showUploadOptions = true
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 
-    private func uploadImageData(_ data: Data?) async {
-        guard let data, !data.isEmpty else {
+    private func queueUpload(image: UIImage) {
+        error = nil
+        guard let data = image.attachmentJPEGData() else {
             error = "Could not read photo"
             return
         }
-        isUploading = true
-        error = nil
-        defer { isUploading = false }
+        let fileName = "photo-\(Int(Date().timeIntervalSince1970)).jpg"
         do {
-            let fileName = "photo-\(Int(Date().timeIntervalSince1970)).jpg"
-            _ = try await env.apiClient.uploadMultipart(
-                path: APIPath.visitAttachments(visitId),
-                fileData: data,
-                fileName: fileName,
-                mimeType: "image/jpeg"
-            )
-            await load()
+            try uploadQueue.enqueueVisitPhoto(visitId: visitId, data: data, fileName: fileName)
         } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            self.error = error.localizedDescription
         }
     }
 }

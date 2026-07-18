@@ -41,15 +41,20 @@ final class InboxListViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
 
-    func load(api: APIClient, scope: InboxScope) async {
+    func load(api: APIClient, scope: InboxScope, useFieldSmsWindow: Bool = false) async {
         isLoading = true
         error = nil
         defer { isLoading = false }
         do {
-            conversations = try await api.get(
-                path: APIPath.smsConversations,
-                query: [URLQueryItem(name: "scope", value: scope.apiScope)]
-            )
+            let path: String
+            var query: [URLQueryItem] = []
+            if useFieldSmsWindow, scope == .customers {
+                path = APIPath.mobileInboxSms
+            } else {
+                path = APIPath.smsConversations
+                query = [URLQueryItem(name: "scope", value: scope.apiScope)]
+            }
+            conversations = try await api.get(path: path, query: query)
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }

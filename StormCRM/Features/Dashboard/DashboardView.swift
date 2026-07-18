@@ -14,22 +14,22 @@ final class DashboardViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
 
-    func load(api: APIClient, user: UserDTO?) async {
+    func load(api: APIClient, user: UserDTO?, offlineSync: OfflineSyncManager?) async {
         isLoading = nextJob == nil && weeklyStats == nil
         error = nil
         defer { isLoading = false }
 
-        async let scheduleLoad: Void = loadNextJob(api: api)
+        async let scheduleLoad: Void = loadNextJob(api: api, offlineSync: offlineSync)
         async let statsLoad: Void = loadWeeklyStats(api: api, user: user)
 
         _ = await (scheduleLoad, statsLoad)
     }
 
-    func refresh(api: APIClient, user: UserDTO?) async {
-        await load(api: api, user: user)
+    func refresh(api: APIClient, user: UserDTO?, offlineSync: OfflineSyncManager?) async {
+        await load(api: api, user: user, offlineSync: offlineSync)
     }
 
-    private func loadNextJob(api: APIClient) async {
+    private func loadNextJob(api: APIClient, offlineSync: OfflineSyncManager?) async {
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: Date())
         guard let endDay = calendar.date(byAdding: .day, value: 14, to: start),
@@ -45,6 +45,7 @@ final class DashboardViewModel: ObservableObject {
                 ]
             )
             nextJob = Self.pickNextJob(from: jobs)
+            offlineSync?.cacheVisits(jobs)
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
@@ -127,38 +128,98 @@ struct DashboardView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var auth: AuthManager
     @StateObject private var viewModel = DashboardViewModel()
+    @StateObject private var techDashboard = TechDashboardViewModel()
     @StateObject private var clock = TimeClockViewModel()
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if !env.offlineSync.isOnline {
+                        offlineBanner
+                    }
+
                     if let user = auth.user {
                         greetingSection(user: user)
                     }
 
+                    if let alerts = techDashboard.dashboard?.alerts {
+                        alertsSection(alerts)
+                    }
+
                     clockSection
+                    categoryTimerSection
+                    activeAndNextJobSection
+                    remainingTodaySection
 
-                    nextJobSection
-
-                    weeklyStatsSection
+                    if !UserRoles.isFieldRole(auth.user?.role ?? "") {
+                        weeklyStatsSection
+                    }
                 }
                 .padding()
             }
             .background(StormTheme.page.ignoresSafeArea())
             .navigationTitle("Dashboard")
             .refreshable {
-                async let dashboard: Void = viewModel.refresh(api: env.apiClient, user: auth.user)
+                async let dashboard: Void = viewModel.refresh(api: env.apiClient, user: auth.user, offlineSync: env.offlineSync)
+                async let tech: Void = techDashboard.load(api: env.apiClient)
                 async let clockLoad: Void = clock.load(api: env.apiClient)
-                _ = await (dashboard, clockLoad)
+                _ = await (dashboard, tech, clockLoad)
             }
             .task {
-                async let dashboard: Void = viewModel.load(api: env.apiClient, user: auth.user)
+                async let dashboard: Void = viewModel.load(api: env.apiClient, user: auth.user, offlineSync: env.offlineSync)
+                async let tech: Void = techDashboard.load(api: env.apiClient)
                 async let clockLoad: Void = clock.load(api: env.apiClient)
-                _ = await (dashboard, clockLoad)
+                _ = await (dashboard, tech, clockLoad)
             }
             .navigationDestination(for: VisitDTO.self) { job in
                 VisitDetailView(visitId: job.id)
+            }
+        }
+    }
+
+    private var offlineBanner: some View {
+        HStack {
+            Image(systemName: "wifi.slash")
+            Text("You're offline — calls, SMS, Rachio, and card payments need a connection.")
+                .font(.caption)
+        }
+        .foregroundStyle(.orange)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func alertsSection(_ alerts: MobileDashboardDTO.AlertsDTO) -> some View {
+        let hasAlert = alerts.unreadSms > 0 || alerts.missedTransfers > 0 || alerts.timerLeftRunning
+        if hasAlert {
+            StormCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    StormSectionHeader(title: "Alerts", systemImage: "bell")
+                    if alerts.timerLeftRunning {
+                        Text("A category timer has been running a long time.")
+                            .font(.subheadline)
+                            .foregroundStyle(.orange)
+                    }
+                    if alerts.unreadSms > 0 {
+                        Button {
+                            env.selectedTab = .messages
+                        } label: {
+                            Text("\(alerts.unreadSms) unread customer text\(alerts.unreadSms == 1 ? "" : "s")")
+                                .font(.subheadline)
+                        }
+                    }
+                    if alerts.missedTransfers > 0 {
+                        NavigationLink {
+                            MissedTransfersView()
+                        } label: {
+                            Text("\(alerts.missedTransfers) missed transfer\(alerts.missedTransfers == 1 ? "" : "s")")
+                                .font(.subheadline)
+                        }
+                    }
+                }
             }
         }
     }
@@ -216,50 +277,121 @@ struct DashboardView: View {
         }
     }
 
-    @ViewBuilder
-    private var nextJobSection: some View {
+    private var categoryTimerSection: some View {
         StormCard {
             VStack(alignment: .leading, spacing: 12) {
-                StormSectionHeader(title: nextJobHeaderTitle, systemImage: "mappin.and.ellipse")
+                StormSectionHeader(title: "Activity timer", systemImage: "timer")
 
-                if viewModel.isLoading && viewModel.nextJob == nil {
-                    ProgressView()
-                } else if let job = viewModel.nextJob {
-                    NavigationLink(value: job) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(job.title)
-                                .font(.headline)
-                                .foregroundStyle(StormTheme.navy)
-                            if let customer = job.customer {
-                                Text(customer.name)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                if let message = techDashboard.segmentMessage {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                }
+
+                if let open = techDashboard.dashboard?.openSegment {
+                    Text("\(TechTimeCategory(rawValue: open.category)?.title ?? open.category) since \(APIDateFormatting.displayString(from: open.startedAt))")
+                        .font(.subheadline)
+                    if open.leftRunning == true {
+                        Text("Left running — consider stopping this timer.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    Button("Stop timer", role: .destructive) {
+                        Task { await techDashboard.stopSegment(api: env.apiClient) }
+                    }
+                    .buttonStyle(StormSecondaryButtonStyle())
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                        ForEach(TechTimeCategory.allCases) { category in
+                            Button(category.title) {
+                                Task {
+                                    await techDashboard.startSegment(
+                                        api: env.apiClient,
+                                        category: category,
+                                        visitId: techDashboard.dashboard?.activeVisit?.id
+                                    )
+                                }
                             }
-                            HStack {
-                                Text(APIDateFormatting.displayString(from: job.startAt))
-                                Spacer()
-                                StatusBadge(status: job.status)
-                            }
-                            .font(.subheadline)
-                            if let address = formattedAddress(job) {
-                                Text(address)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                            .buttonStyle(StormSecondaryButtonStyle())
                         }
                     }
-                    .buttonStyle(.plain)
-                } else {
-                    Text("No upcoming jobs in the next two weeks.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
                 }
             }
         }
     }
 
-    private var nextJobHeaderTitle: String {
-        guard let status = viewModel.nextJob?.status else { return "Next job" }
+    @ViewBuilder
+    private var activeAndNextJobSection: some View {
+        let active = techDashboard.dashboard?.activeVisit
+        let next = techDashboard.dashboard?.nextJob ?? viewModel.nextJob
+        StormCard {
+            VStack(alignment: .leading, spacing: 12) {
+                if let active {
+                    StormSectionHeader(title: "Active job", systemImage: "wrench.and.screwdriver")
+                    jobLink(active)
+                    if let next, next.id != active.id {
+                        Divider()
+                        Text("Next up").font(.caption).foregroundStyle(.secondary)
+                        jobLink(next)
+                    }
+                } else {
+                    StormSectionHeader(title: nextJobHeaderTitle(for: next), systemImage: "mappin.and.ellipse")
+                    if techDashboard.isLoading && next == nil {
+                        ProgressView()
+                    } else if let job = next {
+                        jobLink(job)
+                    } else {
+                        Text("No upcoming jobs today.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func jobLink(_ job: VisitDTO) -> some View {
+        NavigationLink(value: job) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(job.title)
+                    .font(.headline)
+                    .foregroundStyle(StormTheme.navy)
+                if let customer = job.customer {
+                    Text(customer.name)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text(APIDateFormatting.displayString(from: job.startAt))
+                    Spacer()
+                    StatusBadge(status: job.status)
+                }
+                .font(.subheadline)
+                if let address = formattedAddress(job) {
+                    Text(address)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var remainingTodaySection: some View {
+        if let remaining = techDashboard.dashboard?.remainingToday {
+            StormCard {
+                HStack {
+                    StormSectionHeader(title: "Remaining today", systemImage: "calendar")
+                    Spacer()
+                    Text("\(remaining)")
+                        .font(.title2.bold())
+                        .foregroundStyle(StormTheme.navy)
+                }
+            }
+        }
+    }
+
+    private func nextJobHeaderTitle(for job: VisitDTO?) -> String {
+        guard let status = job?.status else { return "Next job" }
         let active = Set(["EN_ROUTE", "IN_PROGRESS", "PAUSED"])
         return active.contains(status) ? "Current job" : "Next job"
     }

@@ -36,13 +36,14 @@ struct CustomersListView: View {
     @State private var search = ""
     @State private var showCreate = false
     @State private var searchTask: Task<Void, Never>?
+    @State private var navigationPath = NavigationPath()
 
     private var canCreate: Bool {
         env.auth.user.map { UserRoles.canEditCustomers($0.role) } ?? false
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             Group {
                 if viewModel.isLoading && viewModel.customers.isEmpty {
                     ProgressView("Loading customers…")
@@ -90,6 +91,13 @@ struct CustomersListView: View {
             }
             .refreshable { await viewModel.load(api: env.apiClient, search: search) }
             .task { await viewModel.load(api: env.apiClient, search: search) }
+            .onChange(of: env.deepLinkNavigation) { _, navigation in
+                guard let navigation else { return }
+                if case .customer(let customerId) = navigation {
+                    navigationPath.append(CustomerListRoute.detail(id: customerId))
+                    env.deepLinkNavigation = nil
+                }
+            }
             .onChange(of: search) { _, newValue in
                 searchTask?.cancel()
                 searchTask = Task {

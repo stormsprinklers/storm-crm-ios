@@ -48,4 +48,13 @@ enum UserRoles {
     static func canManageChecklists(_ role: String) -> Bool {
         role == "ADMIN" || role == "MANAGER"
     }
+
+    static func canControlRachio(_ role: String) -> Bool {
+        // Field may start/stop on accessible properties (server-enforced).
+        role == "ADMIN" || role == "MANAGER" || role == "CSR" || role == "TECH" || role == "INSTALLER" || role == "SALES"
+    }
+
+    static func canLinkRachio(_ role: String) -> Bool {
+        canEditVisitOfficeFields(role)
+    }
 }

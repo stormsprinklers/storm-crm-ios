@@ -23,7 +23,16 @@ struct RachioPropertySection: View {
 
     private var canManage: Bool {
         guard let role = auth.user?.role else { return false }
-        return UserRoles.canEditVisitOfficeFields(role)
+        return UserRoles.canLinkRachio(role)
+    }
+
+    private var canControl: Bool {
+        guard let role = auth.user?.role else { return false }
+        return UserRoles.canControlRachio(role)
+    }
+
+    private var isOnline: Bool {
+        env.offlineSync.isOnline
     }
 
     var body: some View {
@@ -45,6 +54,12 @@ struct RachioPropertySection: View {
         VStack(alignment: .leading, spacing: 10) {
                 StormSectionHeader(title: "Rachio", systemImage: "drop.circle")
 
+                if !isOnline {
+                    Text("Rachio controls need an internet connection.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+
                 if let error {
                     Text(error).font(.caption).foregroundStyle(.red)
                 } else if !linked {
@@ -52,7 +67,7 @@ struct RachioPropertySection: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    if canManage {
+                    if canManage, isOnline {
                         rachioLinker
                     }
                 } else {
@@ -72,7 +87,7 @@ struct RachioPropertySection: View {
                                 }
                             }
                             Spacer()
-                            if canManage {
+                            if canControl, isOnline {
                                 Button("Run 3m") {
                                     Task { await runZone(zone.id, minutes: 3) }
                                 }
@@ -81,18 +96,22 @@ struct RachioPropertySection: View {
                             }
                         }
                     }
-                    if canManage {
+                    if canControl || canManage {
                         HStack(spacing: 10) {
-                            Button("Stop all watering") {
-                                Task { await stopAll() }
+                            if canControl, isOnline {
+                                Button("Stop all watering") {
+                                    Task { await stopAll() }
+                                }
+                                .buttonStyle(StormSecondaryButtonStyle())
                             }
-                            .buttonStyle(StormSecondaryButtonStyle())
 
-                            Button("Unlink") {
-                                Task { await unlinkDevice() }
+                            if canManage, isOnline {
+                                Button("Unlink") {
+                                    Task { await unlinkDevice() }
+                                }
+                                .buttonStyle(StormSecondaryButtonStyle())
+                                .disabled(unlinking)
                             }
-                            .buttonStyle(StormSecondaryButtonStyle())
-                            .disabled(unlinking)
                         }
                     }
                 }

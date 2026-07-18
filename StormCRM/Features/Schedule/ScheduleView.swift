@@ -6,7 +6,7 @@ final class ScheduleViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
 
-    func load(api: APIClient, around date: Date = Date()) async {
+    func load(api: APIClient, around date: Date = Date(), offlineSync: OfflineSyncManager? = nil) async {
         isLoading = true
         error = nil
         defer { isLoading = false }
@@ -27,6 +27,7 @@ final class ScheduleViewModel: ObservableObject {
                     URLQueryItem(name: "end", value: APIDateFormatting.queryString(from: rangeEnd)),
                 ]
             )
+            offlineSync?.cacheVisits(jobs)
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
@@ -189,6 +190,8 @@ struct ScheduleView: View {
     @StateObject private var viewModel = ScheduleViewModel()
     @StateObject private var visitsModel = VisitsListViewModel()
 
+    @State private var navigationPath = NavigationPath()
+
     @State private var mode: ScheduleMode = .schedule
     @State private var colorMode: ScheduleColorMode = .technician
     @State private var jobToEdit: VisitDTO?
@@ -208,11 +211,14 @@ struct ScheduleView: View {
     }
 
     private var canEditSchedule: Bool {
-        env.auth.user.map { UserRoles.canEditVisitOfficeFields($0.role) } ?? false
+        // Field may self-create/reschedule; office keeps full edit.
+        env.auth.user != nil
     }
 
     /// Office roles can view/switch between teammates' schedules; field techs see only their own.
-    private var canViewOthers: Bool { canEditSchedule }
+    private var canViewOthers: Bool {
+        env.auth.user.map { UserRoles.canEditVisitOfficeFields($0.role) } ?? false
+    }
 
     private var jobsForSelectedDay: [VisitDTO] {
         let day = calendar.startOfDay(for: selectedDate)
@@ -234,7 +240,7 @@ struct ScheduleView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
                 Picker("View", selection: $mode) {
                     ForEach(ScheduleMode.allCases) { Text($0.rawValue).tag($0) }
@@ -286,10 +292,32 @@ struct ScheduleView: View {
             .navigationDestination(for: String.self) { visitId in
                 VisitDetailView(visitId: visitId)
             }
+            .navigationDestination(for: CustomerHistoryDestination.self) { destination in
+                switch destination {
+                case .visit(let visitId):
+                    VisitDetailView(visitId: visitId)
+                case .estimate(let estimateId):
+                    EstimateDetailView(estimateId: estimateId)
+                case .invoice(let invoiceId):
+                    InvoiceDetailView(invoiceId: invoiceId)
+                }
+            }
             .refreshable { await reload() }
             .task { await loadInitial() }
+            .onChange(of: env.deepLinkNavigation) { _, navigation in
+                guard let navigation else { return }
+                switch navigation {
+                case .visit(let visitId):
+                    navigationPath.append(visitId)
+                case .estimate(let estimateId):
+                    navigationPath.append(CustomerHistoryDestination.estimate(estimateId))
+                case .customer:
+                    break
+                }
+                env.deepLinkNavigation = nil
+            }
             .onChange(of: selectedDate) { _, _ in
-                Task { await viewModel.load(api: env.apiClient, around: selectedDate) }
+                Task { await viewModel.load(api: env.apiClient, around: selectedDate, offlineSync: env.offlineSync) }
             }
             .onChange(of: mode) { _, newMode in
                 if newMode == .visits && visitsModel.visits.isEmpty {
@@ -459,16 +487,21 @@ struct ScheduleView: View {
     // MARK: - Actions
 
     private func loadInitial() async {
-        await viewModel.load(api: env.apiClient, around: selectedDate)
-        if canViewOthers, employees.isEmpty {
+        await viewModel.load(api: env.apiClient, around: selectedDate, offlineSync: env.offlineSync)
+        if serviceAreas.isEmpty {
             let filters = try? await env.apiClient.get(path: APIPath.scheduleFilters) as ScheduleFiltersResponse
-            employees = filters?.employees ?? []
+            if canViewOthers {
+                employees = filters?.employees ?? []
+            }
             serviceAreas = filters?.serviceAreas ?? []
+        }
+        if let me = env.auth.user?.id, !canViewOthers {
+            selectedEmployeeId = me
         }
     }
 
     private func reload() async {
-        await viewModel.load(api: env.apiClient, around: selectedDate)
+        await viewModel.load(api: env.apiClient, around: selectedDate, offlineSync: env.offlineSync)
         if mode == .visits || !visitsModel.visits.isEmpty {
             await visitsModel.load(api: env.apiClient)
         }

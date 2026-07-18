@@ -2,10 +2,7 @@ import SwiftUI
 
 struct MainTabView: View {
     @EnvironmentObject private var env: AppEnvironment
-
-    private var showReporting: Bool {
-        env.auth.user.map { UserRoles.canViewReporting($0.role) } ?? false
-    }
+    @ObservedObject private var push = PushNotificationManager.shared
 
     var body: some View {
         TabView(selection: $env.selectedTab) {
@@ -21,15 +18,9 @@ struct MainTabView: View {
                 .tabItem { Label("Customers", systemImage: "person.2") }
                 .tag(MainTab.customers)
 
-            if showReporting {
-                ReportingHubView()
-                    .tabItem { Label("Reports", systemImage: "chart.bar") }
-                    .tag(MainTab.reporting)
-            }
-
-            InboxHubView()
-                .tabItem { Label("Inbox", systemImage: "message") }
-                .tag(MainTab.inbox)
+            MessagesHubView()
+                .tabItem { Label("Messages", systemImage: "message") }
+                .tag(MainTab.messages)
 
             MoreView()
                 .tabItem { Label("More", systemImage: "ellipsis.circle") }
@@ -37,6 +28,21 @@ struct MainTabView: View {
         }
         .sheet(item: $env.paymentReturn) { payment in
             PaymentReturnSheet(payment: payment)
+        }
+        .onChange(of: push.pendingConversationId) { _, _ in
+            env.applyPushNavigation(from: push)
+        }
+        .onChange(of: push.pendingVisitId) { _, _ in
+            env.applyPushNavigation(from: push)
+        }
+        .onChange(of: push.pendingCustomerId) { _, _ in
+            env.applyPushNavigation(from: push)
+        }
+        .onChange(of: push.pendingEstimateId) { _, _ in
+            env.applyPushNavigation(from: push)
+        }
+        .onChange(of: push.pendingDeepLink) { _, _ in
+            env.applyPushNavigation(from: push)
         }
     }
 }

@@ -2,10 +2,16 @@ import Foundation
 
 enum APIPath {
     static let mobileLogin = "/api/mobile/auth/login"
+    static let mobileMfa = "/api/mobile/auth/mfa"
+    static let mobileMfaResend = "/api/mobile/auth/mfa/resend"
     static let mobileRefresh = "/api/mobile/auth/refresh"
     static let mobileLogout = "/api/mobile/auth/logout"
     static let mobileSchedule = "/api/mobile/schedule"
     static let mobileActiveVisit = "/api/mobile/visits/active"
+    static let mobileInboxSms = "/api/mobile/inbox/sms/conversations"
+    static let mobileTimeSegments = "/api/mobile/time-segments"
+    static let mobileMissedTransfers = "/api/mobile/voice/missed-transfers"
+    static let mobileDashboard = "/api/mobile/dashboard"
 
     static func visit(_ id: String) -> String { "/api/visits/\(id)" }
     static func visitTime(_ id: String) -> String { "/api/visits/\(id)/time" }

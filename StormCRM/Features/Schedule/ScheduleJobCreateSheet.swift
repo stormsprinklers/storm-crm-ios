@@ -52,10 +52,15 @@ struct ScheduleJobCreateSheet: View {
                 }
 
                 Section("Assignment") {
-                    Picker("Technician", selection: $assignedUserId) {
-                        Text("Unassigned").tag("")
-                        ForEach(employees) { employee in
-                            Text(employee.name).tag(employee.id)
+                    if let role = env.auth.user?.role, UserRoles.isFieldRole(role) {
+                        Text("Assigned to you")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Technician", selection: $assignedUserId) {
+                            Text("Unassigned").tag("")
+                            ForEach(employees) { employee in
+                                Text(employee.name).tag(employee.id)
+                            }
                         }
                     }
                 }
@@ -122,13 +127,17 @@ struct ScheduleJobCreateSheet: View {
             let assignedUserId: String?
         }
         do {
+            let assignee = assignedUserId.isEmpty ? nil : assignedUserId
+            if let role = env.auth.user?.role, UserRoles.isFieldRole(role), let me = env.auth.user?.id {
+                assignee = me
+            }
             let body = Body(
                 title: title.trimmingCharacters(in: .whitespaces),
                 startAt: VisitDateEditing.isoString(from: startDate),
                 endAt: VisitDateEditing.isoString(from: endDate),
                 division: division,
                 serviceAreaId: serviceAreaId,
-                assignedUserId: assignedUserId.isEmpty ? nil : assignedUserId
+                assignedUserId: assignee
             )
             let _: VisitDTO = try await env.apiClient.post(path: APIPath.scheduleJobs, body: body)
             await onCreated()

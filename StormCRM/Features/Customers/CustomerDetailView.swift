@@ -77,7 +77,10 @@ struct CustomerDetailView: View {
     private struct CreatedVisitRoute: Identifiable, Hashable { let id: String }
     private struct CreatedEstimateRoute: Identifiable, Hashable { let id: String }
 
-    private var canCreateVisit: Bool { userRole.map { UserRoles.canEditVisitOfficeFields($0) } ?? false }
+    private var canCreateVisit: Bool {
+        // Field techs may self-schedule; office roles already could.
+        userRole != nil
+    }
 
     private var userRole: String? { env.auth.user?.role }
     private var canEdit: Bool { userRole.map { UserRoles.canEditCustomers($0) } ?? false }

@@ -5,6 +5,8 @@ final class AuthManager: ObservableObject {
     @Published private(set) var user: UserDTO?
     @Published private(set) var isAuthenticated = false
     @Published var lastError: String?
+    /// Set after password login when SMS MFA is required.
+    @Published private(set) var pendingMfa: PendingMfaChallenge?
 
     private let tokenStore: TokenStore
     private let apiClient: APIClient
@@ -33,29 +35,110 @@ final class AuthManager: ObservableObject {
 
     func login(email: String, password: String) async {
         lastError = nil
+        pendingMfa = nil
         do {
             let body = LoginRequest(
                 email: email,
                 password: password,
                 deviceName: UIDevice.current.name
             )
-            let response: LoginResponse = try await apiClient.post(
+            let response: MobileLoginChallengeResponse = try await apiClient.post(
                 path: APIPath.mobileLogin,
                 body: body,
                 authenticated: false
             )
-            tokenStore.save(
-                accessToken: response.accessToken,
-                refreshToken: response.refreshToken,
-                expiresIn: response.expiresIn
-            )
-            user = response.user
-            persistUser(response.user)
-            isAuthenticated = true
-            await PushNotificationManager.shared.requestAuthorizationIfNeeded()
-            await PushNotificationManager.shared.syncToken(api: apiClient)
+            if response.mfaRequired == true, let challengeId = response.challengeId {
+                pendingMfa = PendingMfaChallenge(
+                    challengeId: challengeId,
+                    phoneMasked: response.phoneMasked ?? "your phone",
+                    debugCode: response.debugCode
+                )
+                return
+            }
+            // Legacy fallback if server ever returns tokens directly.
+            if let access = response.accessToken,
+               let refresh = response.refreshToken,
+               let expiresIn = response.expiresIn,
+               let user = response.user {
+                applySession(accessToken: access, refreshToken: refresh, expiresIn: expiresIn, user: user)
+            } else {
+                lastError = "Unexpected login response"
+            }
         } catch {
             lastError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    func verifyMfa(code: String) async {
+        guard let pending = pendingMfa else {
+            lastError = "Sign in again."
+            return
+        }
+        lastError = nil
+        do {
+            let body = MfaVerifyRequest(
+                challengeId: pending.challengeId,
+                code: code.trimmingCharacters(in: .whitespacesAndNewlines),
+                deviceName: UIDevice.current.name
+            )
+            let response: LoginResponse = try await apiClient.post(
+                path: APIPath.mobileMfa,
+                body: body,
+                authenticated: false
+            )
+            pendingMfa = nil
+            applySession(
+                accessToken: response.accessToken,
+                refreshToken: response.refreshToken,
+                expiresIn: response.expiresIn,
+                user: response.user
+            )
+        } catch {
+            lastError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    func resendMfa() async {
+        guard let pending = pendingMfa else { return }
+        lastError = nil
+        do {
+            let response: MfaResendResponse = try await apiClient.post(
+                path: APIPath.mobileMfaResend,
+                body: MfaResendRequest(challengeId: pending.challengeId),
+                authenticated: false
+            )
+            pendingMfa = PendingMfaChallenge(
+                challengeId: response.challengeId,
+                phoneMasked: response.phoneMasked ?? pending.phoneMasked,
+                debugCode: response.debugCode
+            )
+        } catch {
+            lastError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    func cancelMfa() {
+        pendingMfa = nil
+        lastError = nil
+    }
+
+    private func applySession(
+        accessToken: String,
+        refreshToken: String,
+        expiresIn: Int,
+        user: UserDTO
+    ) {
+        tokenStore.save(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            expiresIn: expiresIn
+        )
+        self.user = user
+        persistUser(user)
+        isAuthenticated = true
+        Task {
+            await PushNotificationManager.shared.requestAuthorizationIfNeeded()
+            await PushNotificationManager.shared.syncToken(api: apiClient)
         }
     }
 
@@ -63,7 +146,6 @@ final class AuthManager: ObservableObject {
         #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
         IncomingCallCoordinator.shared.stop()
         #endif
-        // Clear voice presence so the server stops routing inbound calls to this device.
         _ = try? await apiClient.patch(
             path: APIPath.voicePresence,
             body: ["status": "OFFLINE"]
@@ -79,6 +161,7 @@ final class AuthManager: ObservableObject {
         tokenStore.clear()
         user = nil
         persistUser(nil)
+        pendingMfa = nil
         isAuthenticated = false
     }
 
@@ -87,7 +170,6 @@ final class AuthManager: ObservableObject {
         try await refreshSession()
     }
 
-    /// Restores the signed-in user profile when tokens exist but user was not persisted (e.g. after relaunch).
     func ensureUserLoaded() async throws {
         if user != nil { return }
         guard tokenStore.tokens != nil else {
@@ -120,10 +202,32 @@ final class AuthManager: ObservableObject {
 import UIKit
 #endif
 
+struct PendingMfaChallenge: Equatable {
+    let challengeId: String
+    let phoneMasked: String
+    let debugCode: String?
+}
+
 struct LoginRequest: Encodable {
     let email: String
     let password: String
     let deviceName: String
+}
+
+struct MfaVerifyRequest: Encodable {
+    let challengeId: String
+    let code: String
+    let deviceName: String
+}
+
+struct MfaResendRequest: Encodable {
+    let challengeId: String
+}
+
+struct MfaResendResponse: Decodable {
+    let challengeId: String
+    let phoneMasked: String?
+    let debugCode: String?
 }
 
 struct RefreshRequest: Encodable {
@@ -132,6 +236,17 @@ struct RefreshRequest: Encodable {
 
 struct LogoutRequest: Encodable {
     let refreshToken: String
+}
+
+struct MobileLoginChallengeResponse: Decodable {
+    let mfaRequired: Bool?
+    let challengeId: String?
+    let phoneMasked: String?
+    let debugCode: String?
+    let accessToken: String?
+    let refreshToken: String?
+    let expiresIn: Int?
+    let user: UserDTO?
 }
 
 struct LoginResponse: Decodable {

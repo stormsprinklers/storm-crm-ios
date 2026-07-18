@@ -67,6 +67,11 @@ struct VisitPaymentsSection: View {
                     }
 
                     VStack(spacing: 8) {
+                        if !env.offlineSync.isOnline {
+                            Text("Card payments require an internet connection.")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
                         Button {
                             showPayment = true
                         } label: {
@@ -74,7 +79,7 @@ struct VisitPaymentsSection: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(StormPrimaryButtonStyle())
-                        .disabled(!canBill)
+                        .disabled(!canBill || !env.offlineSync.isOnline)
 
                         Button {
                             Task { await sendInvoice() }

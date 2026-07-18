@@ -65,12 +65,26 @@ final class VisitDetailViewModel: ObservableObject {
         }
     }
 
-    func addNote(api: APIClient, visitId: String, body: String, userRole: String?) async {
+    func addNote(api: APIClient, visitId: String, body: String, userRole: String?, offlineSync: OfflineSyncManager?) async {
         struct Body: Encodable { let body: String }
+        if offlineSync?.isOnline == false {
+            if let data = try? JSONCoding.makeEncoder().encode(Body(body: body)) {
+                offlineSync?.enqueue(path: APIPath.visitNotes(visitId), method: "POST", bodyData: data)
+                actionMessage = "Note saved offline — will sync when online"
+            }
+            return
+        }
         do {
             let _: VisitNoteDTO = try await api.post(path: APIPath.visitNotes(visitId), body: Body(body: body))
             await load(api: api, visitId: visitId, userRole: userRole)
         } catch {
+            if offlineSync?.isOnline == false || isLikelyOffline(error) {
+                if let data = try? JSONCoding.makeEncoder().encode(Body(body: body)) {
+                    offlineSync?.enqueue(path: APIPath.visitNotes(visitId), method: "POST", bodyData: data)
+                    actionMessage = "Note saved offline — will sync when online"
+                    return
+                }
+            }
             actionMessage = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
@@ -80,9 +94,21 @@ final class VisitDetailViewModel: ObservableObject {
         visitId: String,
         checklistId: String,
         itemId: String,
-        response: JSONValue
+        response: JSONValue,
+        offlineSync: OfflineSyncManager?
     ) async {
         struct Body: Encodable { let response: JSONValue }
+        if offlineSync?.isOnline == false {
+            if let data = try? JSONCoding.makeEncoder().encode(Body(response: response)) {
+                offlineSync?.enqueue(
+                    path: APIPath.visitChecklistItem(visitId, checklistId: checklistId, itemId: itemId),
+                    method: "PATCH",
+                    bodyData: data
+                )
+                actionMessage = "Saved offline — will sync when online"
+            }
+            return
+        }
         do {
             let _: ChecklistItemDTO = try await api.patch(
                 path: APIPath.visitChecklistItem(visitId, checklistId: checklistId, itemId: itemId),
@@ -90,8 +116,29 @@ final class VisitDetailViewModel: ObservableObject {
             )
             checklists = (try? await api.get(path: APIPath.visitChecklists(visitId))) ?? checklists
         } catch {
+            if offlineSync?.isOnline == false || isLikelyOffline(error) {
+                if let data = try? JSONCoding.makeEncoder().encode(Body(response: response)) {
+                    offlineSync?.enqueue(
+                        path: APIPath.visitChecklistItem(visitId, checklistId: checklistId, itemId: itemId),
+                        method: "PATCH",
+                        bodyData: data
+                    )
+                    actionMessage = "Saved offline — will sync when online"
+                    return
+                }
+            }
             actionMessage = (error as? APIError)?.message ?? error.localizedDescription
         }
+    }
+
+    private func isLikelyOffline(_ error: Error) -> Bool {
+        if let apiError = error as? APIError, case .network = apiError { return true }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && (
+            nsError.code == NSURLErrorNotConnectedToInternet
+                || nsError.code == NSURLErrorNetworkConnectionLost
+                || nsError.code == NSURLErrorTimedOut
+        )
     }
 
     func completeChecklist(api: APIClient, visitId: String, checklistId: String) async {
@@ -171,10 +218,10 @@ struct VisitDetailView: View {
                                     visit: visit,
                                     computedTotal: total
                                 )
-                                let canEditSchedule = env.auth.user.map {
-                                    UserRoles.canEditVisitOfficeFields($0.role)
+                                let canEditSchedule = env.auth.user != nil
+                                let canEditTags = env.auth.user.map {
+                                    UserRoles.canEditVisitOfficeFields($0.role) || UserRoles.isFieldRole($0.role)
                                 } ?? false
-                                let canEditTags = canEditSchedule
 
                                 if visit.customer?.doNotService == true {
                                     DoNotServiceBanner()
@@ -247,7 +294,8 @@ struct VisitDetailView: View {
                                             visitId: visitId,
                                             checklistId: checklistId,
                                             itemId: itemId,
-                                            response: response
+                                            response: response,
+                                            offlineSync: env.offlineSync
                                         )
                                     },
                                     onComplete: { checklistId in
@@ -312,7 +360,8 @@ struct VisitDetailView: View {
                                             api: env.apiClient,
                                             visitId: visitId,
                                             body: text,
-                                            userRole: env.auth.user?.role
+                                            userRole: env.auth.user?.role,
+                                            offlineSync: env.offlineSync
                                         )
                                     }
                                 )
@@ -473,12 +522,28 @@ struct VisitDetailView: View {
                 viewModel.actionMessage = "On my way without GPS — ETA may be less accurate"
             }
         }
+        if type == "FINISH" {
+            let summary = (visit.workSummary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if summary.isEmpty {
+                viewModel.actionMessage = "Add a work summary before completing the visit."
+                return
+            }
+            let incompleteRequired = viewModel.checklists.contains { checklist in
+                (checklist.requiredForCompletion == true) && checklist.completedAt == nil
+            }
+            if incompleteRequired {
+                viewModel.actionMessage = "Complete required checklists before finishing."
+                return
+            }
+        }
+
         await viewModel.postTimeEvent(
             api: env.apiClient,
             visitId: visitId,
             type: type,
             location: location
         )
+        // Payment is optional — prompt only, never block completion.
         if type == "FINISH",
            !(visit.lineItems ?? []).isEmpty,
            paymentSummary.hasBalanceDue {

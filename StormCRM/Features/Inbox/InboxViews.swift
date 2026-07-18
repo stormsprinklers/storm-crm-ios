@@ -8,34 +8,45 @@ struct InboxHubView: View {
     @State private var navigationPath = NavigationPath()
     @State private var showCompose = false
 
+    private var isField: Bool {
+        env.auth.user.map { UserRoles.isFieldRole($0.role) } ?? false
+    }
+
     var body: some View {
         NavigationStack(path: $navigationPath) {
-            InboxListView(scope: scope)
-                .navigationTitle("Inbox")
-                .onAppear {
-                    if let role = env.auth.user?.role, UserRoles.isFieldRole(role) {
-                        scope = .team
-                    }
-                }
+            InboxListView(scope: scope, useFieldSmsWindow: isField && scope == .customers)
+                .navigationTitle("Messages")
                 .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        if isField {
+                            NavigationLink {
+                                MissedTransfersView()
+                            } label: {
+                                Image(systemName: "phone.arrow.down.left")
+                            }
+                        }
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             showCompose = true
                         } label: {
                             Image(systemName: "square.and.pencil")
                         }
+                        .disabled(!env.offlineSync.isOnline)
                     }
                 }
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    Picker("Inbox", selection: $scope) {
-                        ForEach(InboxScope.allCases) { item in
-                            Text(item.title).tag(item)
+                    if !isField {
+                        Picker("Inbox", selection: $scope) {
+                            ForEach(InboxScope.allCases) { item in
+                                Text(item.title).tag(item)
+                            }
                         }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        .background(StormTheme.page)
                     }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                    .background(StormTheme.page)
                 }
                 .navigationDestination(for: String.self) { conversationId in
                     SmsConversationView(conversationId: conversationId, scope: scope)
@@ -87,15 +98,16 @@ struct InboxHubView: View {
 struct InboxListView: View {
     @EnvironmentObject private var env: AppEnvironment
     let scope: InboxScope
+    var useFieldSmsWindow: Bool = false
     @StateObject private var viewModel = InboxListViewModel()
 
     var body: some View {
         Group {
             if viewModel.isLoading && viewModel.conversations.isEmpty {
-                ProgressView("Loading inbox…")
+                ProgressView("Loading messages…")
             } else if let error = viewModel.error {
                 ContentUnavailableView(
-                    "Could not load inbox",
+                    "Could not load messages",
                     systemImage: "exclamationmark.triangle",
                     description: Text(error)
                 )
@@ -110,8 +122,12 @@ struct InboxListView: View {
                 .listStyle(.plain)
             }
         }
-        .refreshable { await viewModel.load(api: env.apiClient, scope: scope) }
-        .task(id: scope) { await viewModel.load(api: env.apiClient, scope: scope) }
+        .refreshable {
+            await viewModel.load(api: env.apiClient, scope: scope, useFieldSmsWindow: useFieldSmsWindow)
+        }
+        .task(id: "\(scope.rawValue)-\(useFieldSmsWindow)") {
+            await viewModel.load(api: env.apiClient, scope: scope, useFieldSmsWindow: useFieldSmsWindow)
+        }
     }
 }
 
@@ -542,3 +558,5 @@ struct OutboxAttachmentChip: View {
         }
     }
 }
+
+typealias MessagesHubView = InboxHubView
