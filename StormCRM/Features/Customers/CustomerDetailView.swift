@@ -95,6 +95,8 @@ struct CustomerDetailView: View {
                         DoNotServiceBanner()
                     }
 
+                    CustomerStatsCard(customer: customer)
+
                     CustomerContactCard(
                         customer: customer,
                         voice: env.voice,
@@ -115,8 +117,6 @@ struct CustomerDetailView: View {
                     if viewModel.properties.isEmpty, !customer.formattedAddress.isEmpty {
                         CustomerAddressCard(address: customer.formattedAddress)
                     }
-
-                    CustomerStatsCard(customer: customer)
 
                     if canEditTags || canFlagDoNotService {
                         CustomerTagsAndFlagsSection(
@@ -166,6 +166,8 @@ struct CustomerDetailView: View {
                         isAddingNote: isAddingNote,
                         onAdd: { Task { await submitNote() } }
                     )
+
+                    CustomerAttachmentsSection(customerId: customerId)
                 } else if viewModel.isLoading {
                     ProgressView("Loading customer…")
                         .frame(maxWidth: .infinity)
@@ -390,119 +392,206 @@ struct CustomerHistorySection: View {
 
     var body: some View {
         StormCard {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 StormSectionHeader(title: "History", systemImage: "clock.arrow.circlepath")
+
                 if let history {
-                    Text("\(history.pastVisitCount) visit\(history.pastVisitCount == 1 ? "" : "s")")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    if history.visits.isEmpty {
-                        Text("No visits yet").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(history.visits.prefix(15)) { visit in
-                            NavigationLink(value: CustomerHistoryDestination.visit(visit.id)) {
-                                HStack(alignment: .top) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(visit.title)
-                                            .font(.subheadline.weight(.medium))
-                                            .foregroundStyle(StormTheme.navy)
-                                        Text(APIDateFormatting.displayString(from: visit.startAt))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        if let tech = visit.assignedUserName {
-                                            Text(tech).font(.caption2).foregroundStyle(.tertiary)
-                                        }
-                                    }
-                                    Spacer()
-                                    StormBadge(text: visit.status.visitDisplayLabel)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            if visit.id != history.visits.prefix(15).last?.id {
-                                Divider()
-                            }
-                        }
+                    DisclosureGroup {
+                        historyVisitsContent(history)
+                    } label: {
+                        historyCategoryLabel(
+                            "Visits",
+                            count: history.visits.isEmpty ? history.pastVisitCount : history.visits.count,
+                            systemImage: "calendar"
+                        )
                     }
 
-                    if !history.estimatesWithoutVisit.isEmpty {
-                        Text("Estimates without visit")
-                            .font(.caption.weight(.semibold))
-                            .padding(.top, 8)
-                        ForEach(history.estimatesWithoutVisit.prefix(5)) { estimate in
-                            NavigationLink(value: CustomerHistoryDestination.estimate(estimate.id)) {
-                                HStack {
-                                    VStack(alignment: .leading) {
-                                        Text(estimate.status.replacingOccurrences(of: "_", with: " "))
-                                            .font(.subheadline)
-                                            .foregroundStyle(StormTheme.navy)
-                                        Text(APIDateFormatting.displayString(from: estimate.createdAt))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(estimate.total, format: .currency(code: "USD"))
-                                        .font(.subheadline.weight(.medium))
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
+                    DisclosureGroup {
+                        historyEstimatesContent(history)
+                    } label: {
+                        historyCategoryLabel(
+                            "Estimates",
+                            count: estimateCount(history),
+                            systemImage: "doc.text"
+                        )
                     }
 
-                    if let linked = history.estimatesLinkedToVisits, !linked.isEmpty {
-                        Text("Estimates on visits")
-                            .font(.caption.weight(.semibold))
-                            .padding(.top, 8)
-                        ForEach(linked.prefix(5)) { estimate in
-                            NavigationLink(value: CustomerHistoryDestination.estimate(estimate.id)) {
-                                HStack {
-                                    VStack(alignment: .leading) {
-                                        Text(estimate.visitTitle ?? "Visit estimate")
-                                            .font(.subheadline)
-                                            .foregroundStyle(StormTheme.navy)
-                                        Text(estimate.status.replacingOccurrences(of: "_", with: " "))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(estimate.total, format: .currency(code: "USD"))
-                                        .font(.subheadline.weight(.medium))
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-
-                    if let invoices = history.invoices, !invoices.isEmpty {
-                        Text("Invoices")
-                            .font(.caption.weight(.semibold))
-                            .padding(.top, 8)
-                        ForEach(invoices.prefix(10)) { invoice in
-                            NavigationLink(value: CustomerHistoryDestination.invoice(invoice.id)) {
-                                HStack {
-                                    VStack(alignment: .leading) {
-                                        Text(invoice.invoiceNumber)
-                                            .font(.subheadline)
-                                            .foregroundStyle(StormTheme.navy)
-                                        Text(invoice.status.replacingOccurrences(of: "_", with: " "))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        if let visitTitle = invoice.visitTitle {
-                                            Text(visitTitle)
-                                                .font(.caption2)
-                                                .foregroundStyle(.tertiary)
-                                        }
-                                    }
-                                    Spacer()
-                                    Text(invoice.total, format: .currency(code: "USD"))
-                                        .font(.subheadline.weight(.medium))
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
+                    DisclosureGroup {
+                        historyInvoicesContent(history)
+                    } label: {
+                        historyCategoryLabel(
+                            "Invoices",
+                            count: history.invoices?.count ?? 0,
+                            systemImage: "dollarsign.circle"
+                        )
                     }
                 } else {
-                    Text("No history loaded").foregroundStyle(.secondary)
+                    Text("No history loaded")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func estimateCount(_ history: CustomerHistoryDTO) -> Int {
+        history.estimatesWithoutVisit.count + (history.estimatesLinkedToVisits?.count ?? 0)
+    }
+
+    private func historyCategoryLabel(_ title: String, count: Int, systemImage: String) -> some View {
+        Label {
+            HStack {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(StormTheme.navy)
+                Spacer()
+                Text("\(count)")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+        } icon: {
+            Image(systemName: systemImage)
+                .foregroundStyle(StormTheme.sky)
+        }
+    }
+
+    @ViewBuilder
+    private func historyVisitsContent(_ history: CustomerHistoryDTO) -> some View {
+        if history.visits.isEmpty {
+            Text("No visits yet")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(history.visits.prefix(15).enumerated()), id: \.element.id) { index, visit in
+                    NavigationLink(value: CustomerHistoryDestination.visit(visit.id)) {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(visit.title)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(StormTheme.navy)
+                                Text(APIDateFormatting.displayString(from: visit.startAt))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if let tech = visit.assignedUserName {
+                                    Text(tech).font(.caption2).foregroundStyle(.tertiary)
+                                }
+                            }
+                            Spacer()
+                            StormBadge(text: visit.status.visitDisplayLabel)
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                    if index < min(history.visits.count, 15) - 1 {
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func historyEstimatesContent(_ history: CustomerHistoryDTO) -> some View {
+        let standalone = Array(history.estimatesWithoutVisit.prefix(5))
+        let linked = Array((history.estimatesLinkedToVisits ?? []).prefix(5))
+
+        if standalone.isEmpty && linked.isEmpty {
+            Text("No estimates yet")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(standalone.enumerated()), id: \.element.id) { index, estimate in
+                    NavigationLink(value: CustomerHistoryDestination.estimate(estimate.id)) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(estimate.status.replacingOccurrences(of: "_", with: " "))
+                                    .font(.subheadline)
+                                    .foregroundStyle(StormTheme.navy)
+                                Text(APIDateFormatting.displayString(from: estimate.createdAt))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(estimate.total, format: .currency(code: "USD"))
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                    if index < standalone.count - 1 || !linked.isEmpty {
+                        Divider()
+                    }
+                }
+
+                ForEach(Array(linked.enumerated()), id: \.element.id) { index, estimate in
+                    NavigationLink(value: CustomerHistoryDestination.estimate(estimate.id)) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(estimate.visitTitle ?? "Visit estimate")
+                                    .font(.subheadline)
+                                    .foregroundStyle(StormTheme.navy)
+                                Text(estimate.status.replacingOccurrences(of: "_", with: " "))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(estimate.total, format: .currency(code: "USD"))
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                    if index < linked.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func historyInvoicesContent(_ history: CustomerHistoryDTO) -> some View {
+        let invoices = Array((history.invoices ?? []).prefix(10))
+        if invoices.isEmpty {
+            Text("No invoices yet")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(invoices.enumerated()), id: \.element.id) { index, invoice in
+                    NavigationLink(value: CustomerHistoryDestination.invoice(invoice.id)) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(invoice.invoiceNumber)
+                                    .font(.subheadline)
+                                    .foregroundStyle(StormTheme.navy)
+                                Text(invoice.status.replacingOccurrences(of: "_", with: " "))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                if let visitTitle = invoice.visitTitle {
+                                    Text(visitTitle)
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            Spacer()
+                            Text(invoice.total, format: .currency(code: "USD"))
+                                .font(.subheadline.weight(.medium))
+                        }
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(.plain)
+                    if index < invoices.count - 1 {
+                        Divider()
+                    }
                 }
             }
         }

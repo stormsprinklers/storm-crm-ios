@@ -25,9 +25,15 @@ final class APIClient {
     func post<T: Decodable, B: Encodable>(
         path: String,
         body: B,
-        authenticated: Bool = true
+        authenticated: Bool = true,
+        headers: [String: String] = [:]
     ) async throws -> T {
-        var request = try await buildRequest(path: path, method: "POST", authenticated: authenticated)
+        var request = try await buildRequest(
+            path: path,
+            method: "POST",
+            authenticated: authenticated,
+            headers: headers
+        )
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(body)
         return try await perform(request)
@@ -35,18 +41,30 @@ final class APIClient {
 
     func post<T: Decodable>(
         path: String,
-        authenticated: Bool = true
+        authenticated: Bool = true,
+        headers: [String: String] = [:]
     ) async throws -> T {
-        let request = try await buildRequest(path: path, method: "POST", authenticated: authenticated)
+        let request = try await buildRequest(
+            path: path,
+            method: "POST",
+            authenticated: authenticated,
+            headers: headers
+        )
         return try await perform(request)
     }
 
     func patch<T: Decodable, B: Encodable>(
         path: String,
         body: B,
-        authenticated: Bool = true
+        authenticated: Bool = true,
+        headers: [String: String] = [:]
     ) async throws -> T {
-        var request = try await buildRequest(path: path, method: "PATCH", authenticated: authenticated)
+        var request = try await buildRequest(
+            path: path,
+            method: "PATCH",
+            authenticated: authenticated,
+            headers: headers
+        )
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(body)
         return try await perform(request)
@@ -55,9 +73,15 @@ final class APIClient {
     func put<T: Decodable, B: Encodable>(
         path: String,
         body: B,
-        authenticated: Bool = true
+        authenticated: Bool = true,
+        headers: [String: String] = [:]
     ) async throws -> T {
-        var request = try await buildRequest(path: path, method: "PUT", authenticated: authenticated)
+        var request = try await buildRequest(
+            path: path,
+            method: "PUT",
+            authenticated: authenticated,
+            headers: headers
+        )
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(body)
         return try await perform(request)
@@ -65,9 +89,15 @@ final class APIClient {
 
     func put<T: Decodable>(
         path: String,
-        authenticated: Bool = true
+        authenticated: Bool = true,
+        headers: [String: String] = [:]
     ) async throws -> T {
-        let request = try await buildRequest(path: path, method: "PUT", authenticated: authenticated)
+        let request = try await buildRequest(
+            path: path,
+            method: "PUT",
+            authenticated: authenticated,
+            headers: headers
+        )
         return try await perform(request)
     }
 
@@ -163,7 +193,8 @@ final class APIClient {
         path: String,
         method: String,
         query: [URLQueryItem] = [],
-        authenticated: Bool
+        authenticated: Bool,
+        headers: [String: String] = [:]
     ) async throws -> URLRequest {
         guard var components = URLComponents(string: AppConfig.apiBaseURL + path) else {
             throw APIError.invalidURL
@@ -174,6 +205,9 @@ final class APIClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        for (key, value) in headers {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
 
         if authenticated, let token = tokenStore.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

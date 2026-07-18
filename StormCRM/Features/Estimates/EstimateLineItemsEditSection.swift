@@ -82,7 +82,7 @@ struct EstimateLineItemsEditSection: View {
                 if let description = item.description, !description.isEmpty {
                     Text(description).font(.caption).foregroundStyle(.secondary)
                 }
-                Text("\(item.quantity.formatted()) × \(item.unitPrice.formatted(.currency(code: "USD")))")
+                Text(item.qtyPriceLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -103,6 +103,7 @@ struct EstimateLineItemsEditSection: View {
             let description: String?
             let unitPrice: Double
             let quantity: Double
+            let unit: String?
         }
         struct PatchBody: Encodable {
             let lineItemId: String
@@ -117,7 +118,8 @@ struct EstimateLineItemsEditSection: View {
                     name: item.name,
                     description: item.description,
                     unitPrice: expectedUnitPrice,
-                    quantity: 1
+                    quantity: 1,
+                    unit: item.unit
                 )
             )
             if let added = PriceBookLineItemAdding.matchingLineItem(in: updated.lineItems, for: item),

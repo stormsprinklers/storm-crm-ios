@@ -101,12 +101,94 @@ enum PolygonGeometry {
     }
 }
 
+struct MapFocusRect: Equatable {
+    var minX: Double
+    var minY: Double
+    var maxX: Double
+    var maxY: Double
+
+    var width: Double { max(0, maxX - minX) }
+    var height: Double { max(0, maxY - minY) }
+}
+
+extension PolygonGeometry {
+    /// Bounding box around zone polygons / markers, padded — mirrors web `computeMapFocusBounds`.
+    static func mapFocusBounds(
+        polygons: [ImagePolygon?],
+        markerPoints: [ImagePoint?] = [],
+        padding: Double = 0.1,
+        minCropSize: Double = 0.22
+    ) -> MapFocusRect? {
+        var points: [ImagePoint] = []
+        for polygon in polygons {
+            if let polygon { points.append(contentsOf: polygon) }
+        }
+        for point in markerPoints {
+            if let point { points.append(point) }
+        }
+        guard !points.isEmpty else { return nil }
+
+        var minX = points.map(\.x).min() ?? 0
+        var minY = points.map(\.y).min() ?? 0
+        var maxX = points.map(\.x).max() ?? 1
+        var maxY = points.map(\.y).max() ?? 1
+
+        let padX = max((maxX - minX) * padding, 0.02)
+        let padY = max((maxY - minY) * padding, 0.02)
+        minX = max(0, minX - padX)
+        minY = max(0, minY - padY)
+        maxX = min(1, maxX + padX)
+        maxY = min(1, maxY + padY)
+
+        func expand(_ minV: inout Double, _ maxV: inout Double) {
+            var span = maxV - minV
+            if span >= minCropSize { return }
+            let center = (minV + maxV) / 2
+            minV = center - minCropSize / 2
+            maxV = center + minCropSize / 2
+            if minV < 0 {
+                maxV -= minV
+                minV = 0
+            }
+            if maxV > 1 {
+                minV -= maxV - 1
+                maxV = 1
+            }
+            span = maxV - minV
+            _ = span
+        }
+
+        expand(&minX, &maxX)
+        expand(&minY, &maxY)
+
+        guard maxX > minX, maxY > minY else { return nil }
+        return MapFocusRect(minX: minX, minY: minY, maxX: maxX, maxY: maxY)
+    }
+}
+
 struct MapImageLayout {
     let containerSize: CGSize
     let imageSize: CGSize
+    /// When set, zoom the aerial so this normalized crop fills the container.
+    var focus: MapFocusRect? = nil
 
     var displayRect: CGRect {
-        guard imageSize.width > 0, imageSize.height > 0 else { return .zero }
+        guard imageSize.width > 0, imageSize.height > 0,
+              containerSize.width > 0, containerSize.height > 0 else { return .zero }
+
+        if let focus, focus.width > 0, focus.height > 0 {
+            let scaleX = containerSize.width / (focus.width * imageSize.width)
+            let scaleY = containerSize.height / (focus.height * imageSize.height)
+            let scale = min(scaleX, scaleY)
+            let displayW = imageSize.width * scale
+            let displayH = imageSize.height * scale
+            let visibleW = focus.width * displayW
+            let visibleH = focus.height * displayH
+            let x = -focus.minX * displayW + (containerSize.width - visibleW) / 2
+            let y = -focus.minY * displayH + (containerSize.height - visibleH) / 2
+            return CGRect(x: x, y: y, width: displayW, height: displayH)
+        }
+
         let scale = min(containerSize.width / imageSize.width, containerSize.height / imageSize.height)
         let width = imageSize.width * scale
         let height = imageSize.height * scale
@@ -117,7 +199,7 @@ struct MapImageLayout {
 
     func normalizedPoint(from location: CGPoint) -> ImagePoint? {
         let rect = displayRect
-        guard rect.width > 0, rect.height > 0, rect.contains(location) else { return nil }
+        guard rect.width > 0, rect.height > 0 else { return nil }
         let x = PolygonGeometry.roundNormalized(Double((location.x - rect.minX) / rect.width))
         let y = PolygonGeometry.roundNormalized(Double((location.y - rect.minY) / rect.height))
         guard x >= 0, x <= 1, y >= 0, y <= 1 else { return nil }

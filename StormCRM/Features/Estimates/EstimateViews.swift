@@ -55,10 +55,13 @@ struct VisitEstimatesSection: View {
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(estimate.total, format: .currency(code: "USD"))
+                                    Text(estimate.titleLabel)
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(StormTheme.navy)
                                     HStack(spacing: 6) {
+                                        Text(estimate.total, format: .currency(code: "USD"))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
                                         StormBadge(text: estimate.status)
                                         Text(APIDateFormatting.displayString(from: estimate.createdAt))
                                             .font(.caption2)
@@ -144,11 +147,14 @@ struct EstimateDetailView: View {
     }
 
     @State private var estimate: EstimateDetailDTO?
+    @State private var customerHistory: CustomerHistoryDTO?
     @State private var isLoading = true
     @State private var isSaving = false
     @State private var error: String?
     @State private var actionMessage: String?
     @State private var showCopyNewVisitConfirm = false
+    @State private var hasSignatureInk = false
+    @StateObject private var signatureController = EstimateSignatureController()
 
     var body: some View {
         Group {
@@ -159,6 +165,13 @@ struct EstimateDetailView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         header(for: estimate)
 
+                        EstimateCustomerInfoSection(
+                            customer: estimate.customer,
+                            property: estimate.property,
+                            voice: env.voice,
+                            customerHistory: customerHistory
+                        )
+
                         if let actionMessage {
                             Text(actionMessage)
                                 .font(.footnote)
@@ -168,15 +181,29 @@ struct EstimateDetailView: View {
                             Text(error).font(.caption).foregroundStyle(.red)
                         }
 
-                        EstimateLineItemsEditSection(
-                            estimateId: estimateId,
-                            items: estimate.lineItems,
+                        LineItemsSummarySection(
+                            owner: .estimate(
+                                id: estimateId,
+                                optionId: estimate.selectedOptionId ?? estimate.options.first?.id
+                            ),
+                            items: {
+                                let optionId = estimate.selectedOptionId ?? estimate.options.first?.id
+                                if let optionId {
+                                    return estimate.lineItems.filter {
+                                        $0.optionId == optionId || $0.optionId == nil
+                                    }
+                                }
+                                return estimate.lineItems
+                            }(),
+                            discounts: estimate.discounts,
+                            subtotal: estimate.subtotal,
+                            discountTotal: estimate.discountTotal,
+                            total: estimate.total,
                             canEdit: estimate.status != "CONVERTED"
                         ) {
                             await load()
                             await onUpdated()
                         }
-                        totalsSection(for: estimate)
                         actionsSection(for: estimate)
                     }
                     .padding()
@@ -190,8 +217,9 @@ struct EstimateDetailView: View {
             }
         }
         .background(StormTheme.page.ignoresSafeArea())
-        .navigationTitle("Estimate")
+        .navigationTitle(estimate?.displayTitle ?? "Estimate")
         .navigationBarTitleDisplayMode(.inline)
+        .customerHistoryDestinations()
         .refreshable { await load() }
         .task { await load() }
         .confirmationDialog(
@@ -213,16 +241,19 @@ struct EstimateDetailView: View {
         StormCard {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(estimate.total, format: .currency(code: "USD"))
-                        .font(.title2.weight(.bold))
+                    Text(estimate.displayTitle)
+                        .font(.title3.weight(.bold))
                         .foregroundStyle(StormTheme.navy)
                     Spacer()
                     StormBadge(text: estimate.status)
                 }
-                Text(estimate.customer.name)
-                    .font(.subheadline.weight(.medium))
-                if let property = estimate.property {
-                    Text(property.name).font(.caption).foregroundStyle(.secondary)
+                Text(estimate.total, format: .currency(code: "USD"))
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(StormTheme.navy)
+                if estimate.options.count > 1 {
+                    Text("\(estimate.options.count) options")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 if let expiresAt = estimate.expiresAt {
                     Text("Expires \(APIDateFormatting.displayString(from: expiresAt))")
@@ -291,14 +322,41 @@ struct EstimateDetailView: View {
                     }
 
                     if !estimate.isApproved {
-                        Button {
-                            Task { await markApproved() }
-                        } label: {
-                            Label(isSaving ? "Saving…" : "Mark approved", systemImage: "checkmark.seal")
-                                .frame(maxWidth: .infinity)
+                        VStack(alignment: .leading, spacing: 10) {
+                            EstimateSignaturePad(hasInk: $hasSignatureInk, controller: signatureController)
+                                .frame(height: 200)
+
+                            HStack {
+                                Button("Clear") {
+                                    signatureController.clear()
+                                    hasSignatureInk = false
+                                }
+                                .buttonStyle(StormSecondaryButtonStyle())
+                                .disabled(!hasSignatureInk || isSaving)
+
+                                Spacer(minLength: 0)
+
+                                Button {
+                                    Task { await approveWithSignature() }
+                                } label: {
+                                    Label(
+                                        isSaving ? "Approving…" : "Approve with signature",
+                                        systemImage: "checkmark.seal.fill"
+                                    )
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(StormPrimaryButtonStyle())
+                                .disabled(isSaving || !hasSignatureInk || estimate.lineItems.isEmpty)
+                            }
+
+                            Text("Customer must sign before the estimate can be approved.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
-                        .buttonStyle(StormSecondaryButtonStyle())
-                        .disabled(isSaving || estimate.lineItems.isEmpty)
+                    } else if let signedAt = estimate.signedAt {
+                        Text("Signed \(APIDateFormatting.displayString(from: signedAt))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     if estimate.canCopyToVisit {
@@ -339,7 +397,11 @@ struct EstimateDetailView: View {
         error = nil
         defer { isLoading = false }
         do {
-            estimate = try await env.apiClient.get(path: APIPath.estimate(estimateId))
+            let loaded: EstimateDetailDTO = try await env.apiClient.get(path: APIPath.estimate(estimateId))
+            estimate = loaded
+            customerHistory = try? await env.apiClient.get(
+                path: APIPath.customerHistory(loaded.customer.id)
+            )
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
@@ -360,17 +422,28 @@ struct EstimateDetailView: View {
         }
     }
 
-    private func markApproved() async {
+    private func approveWithSignature() async {
+        guard let png = signatureController.pngData() else {
+            error = "Customer signature is required"
+            return
+        }
         isSaving = true
         error = nil
         actionMessage = nil
         defer { isSaving = false }
+
+        let base64 = png.base64EncodedString()
+        let dataUrl = "data:image/png;base64,\(base64)"
+        struct Body: Encodable { let signature: String }
+
         do {
-            estimate = try await env.apiClient.patch(
-                path: APIPath.estimate(estimateId),
-                body: EstimateStatusBody(status: "APPROVED")
+            estimate = try await env.apiClient.post(
+                path: APIPath.estimateSignature(estimateId),
+                body: Body(signature: dataUrl)
             )
-            actionMessage = "Estimate marked approved"
+            actionMessage = "Estimate approved with signature"
+            signatureController.clear()
+            hasSignatureInk = false
             await onUpdated()
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
@@ -423,5 +496,110 @@ struct EstimateDetailView: View {
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
+    }
+}
+
+/// Customer card for estimates — same contact/history UX as visits, without irrigation map.
+struct EstimateCustomerInfoSection: View {
+    @EnvironmentObject private var env: AppEnvironment
+    let customer: EstimateCustomerDTO
+    let property: EstimatePropertyDTO?
+    @ObservedObject var voice: VoiceManager
+    var customerHistory: CustomerHistoryDTO? = nil
+
+    var body: some View {
+        StormCard {
+            VStack(alignment: .leading, spacing: 12) {
+                StormSectionHeader(title: "Customer", systemImage: "person.crop.circle")
+
+                NavigationLink(value: CustomerListRoute.detail(id: customer.id)) {
+                    HStack(spacing: 6) {
+                        Text(customer.name)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(StormTheme.navy)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("View customer profile")
+
+                if let phone = customer.phone, !phone.isEmpty {
+                    HStack(spacing: 16) {
+                        Button {
+                            env.openCustomerSmsInbox(
+                                customerId: customer.id,
+                                name: customer.name,
+                                phone: phone
+                            )
+                        } label: {
+                            Image(systemName: "message.fill")
+                                .font(.title3)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(StormTheme.sky)
+                        .accessibilityLabel("Message customer")
+
+                        Button {
+                            Task { await voice.call(phone: phone, customerId: customer.id) }
+                        } label: {
+                            Image(systemName: "phone.fill")
+                                .font(.title3)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(StormTheme.sky)
+                        .accessibilityLabel("Call customer")
+
+                        Text(phone)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let email = customer.email, !email.isEmpty {
+                    Link(destination: URL(string: "mailto:\(email)")!) {
+                        Label(email, systemImage: "envelope")
+                    }
+                    .font(.subheadline)
+                }
+
+                if let property {
+                    Text(property.name)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(StormTheme.navy)
+                }
+
+                if let address = property?.formattedAddress {
+                    Text(address)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    if let url = AppleMapsURL.directionsURL(
+                        latitude: nil,
+                        longitude: nil,
+                        address: address
+                    ) {
+                        Link("Open in Maps", destination: url)
+                            .font(.subheadline)
+                            .foregroundStyle(StormTheme.sky)
+                    }
+                }
+
+                DisclosureGroup {
+                    VisitCustomerHistoryContent(history: customerHistory)
+                } label: {
+                    Label(historyDisclosureTitle, systemImage: "clock.arrow.circlepath")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(StormTheme.navy)
+                }
+            }
+        }
+    }
+
+    private var historyDisclosureTitle: String {
+        if let count = customerHistory?.pastVisitCount {
+            return "History · \(count) past visit\(count == 1 ? "" : "s")"
+        }
+        return "Customer history"
     }
 }

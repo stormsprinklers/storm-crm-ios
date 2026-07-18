@@ -138,17 +138,21 @@ struct VisitDetailDTO: Decodable, Identifiable {
 
 struct EstimateSummaryDTO: Decodable, Identifiable {
     let id: String
+    let estimateNumber: String?
+    let displayNumber: String?
     let status: String
     let total: Double
     let createdAt: String
 
     enum CodingKeys: String, CodingKey {
-        case id, status, total, createdAt
+        case id, estimateNumber, displayNumber, status, total, createdAt
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
+        estimateNumber = try container.decodeIfPresent(String.self, forKey: .estimateNumber)
+        displayNumber = try container.decodeIfPresent(String.self, forKey: .displayNumber)
         status = try container.decode(String.self, forKey: .status)
         total = try container.decodeFlexibleDouble(forKey: .total) ?? 0
         if let text = try container.decodeIfPresent(String.self, forKey: .createdAt) {
@@ -158,6 +162,10 @@ struct EstimateSummaryDTO: Decodable, Identifiable {
         } else {
             createdAt = ""
         }
+    }
+
+    var titleLabel: String {
+        displayNumber ?? estimateNumber ?? "Estimate"
     }
 }
 
@@ -276,10 +284,20 @@ struct LineItemDTO: Decodable, Identifiable {
     let description: String?
     let quantity: Double
     let unitPrice: Double
+    let unit: String
+    let itemType: String?
+    let sortOrder: Int
     let total: Double
+    let optionId: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, priceBookItemId, name, description, quantity, unitPrice, total
+        case id, priceBookItemId, name, description, quantity, unitPrice, unit, itemType, sortOrder, total, optionId
+        case priceBookItem
+    }
+
+    private struct PriceBookRef: Decodable {
+        let type: String?
+        let unit: String?
     }
 
     init(from decoder: Decoder) throws {
@@ -290,7 +308,26 @@ struct LineItemDTO: Decodable, Identifiable {
         description = try container.decodeIfPresent(String.self, forKey: .description)
         quantity = try container.decodeFlexibleDouble(forKey: .quantity) ?? 0
         unitPrice = try container.decodeFlexibleDouble(forKey: .unitPrice) ?? 0
+        let nested = try container.decodeIfPresent(PriceBookRef.self, forKey: .priceBookItem)
+        let trimmedUnit = try container.decodeIfPresent(String.self, forKey: .unit)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        unit = (trimmedUnit?.isEmpty == false ? trimmedUnit : nil)
+            ?? nested?.unit
+            ?? "each"
+        itemType = try container.decodeIfPresent(String.self, forKey: .itemType) ?? nested?.type
+        sortOrder = try container.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
         total = try container.decodeFlexibleDouble(forKey: .total) ?? 0
+        optionId = try container.decodeIfPresent(String.self, forKey: .optionId)
+    }
+
+    var qtyPriceLabel: String {
+        let qty = quantity.formatted(.number.precision(.fractionLength(0...2)))
+        let price = unitPrice.formatted(.currency(code: "USD"))
+        return "Qty \(qty) @\(price)/\(unit)"
+    }
+
+    var isMaterial: Bool {
+        itemType?.uppercased() == "MATERIAL"
     }
 }
 
@@ -299,9 +336,10 @@ struct DiscountDTO: Decodable, Identifiable {
     let name: String
     let amount: Double
     let type: String
+    let optionId: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, label, amount, type
+        case id, name, label, amount, type, optionId
     }
 
     init(from decoder: Decoder) throws {
@@ -312,6 +350,7 @@ struct DiscountDTO: Decodable, Identifiable {
             ?? "Discount"
         amount = try container.decodeFlexibleDouble(forKey: .amount) ?? 0
         type = try container.decode(String.self, forKey: .type)
+        optionId = try container.decodeIfPresent(String.self, forKey: .optionId)
     }
 }
 
@@ -926,45 +965,6 @@ struct CustomerLinkedEstimateDTO: Decodable, Identifiable {
         } else {
             createdAt = ""
         }
-    }
-}
-
-struct VisitProfitDTO: Decodable {
-    let revenue: Double
-    let grossProfit: Double
-    let netProfit: Double
-    let marginPercent: Double
-    let breakdown: [VisitProfitLineDTO]?
-    let notes: [String]?
-
-    enum CodingKeys: String, CodingKey {
-        case revenue, grossProfit, netProfit, marginPercent, breakdown, notes
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        revenue = try container.decodeFlexibleDouble(forKey: .revenue) ?? 0
-        grossProfit = try container.decodeFlexibleDouble(forKey: .grossProfit) ?? 0
-        netProfit = try container.decodeFlexibleDouble(forKey: .netProfit) ?? 0
-        marginPercent = try container.decodeFlexibleDouble(forKey: .marginPercent) ?? 0
-        breakdown = try container.decodeIfPresent([VisitProfitLineDTO].self, forKey: .breakdown)
-        notes = try container.decodeIfPresent([String].self, forKey: .notes)
-    }
-}
-
-struct VisitProfitLineDTO: Decodable, Identifiable {
-    var id: String { label }
-    let label: String
-    let amount: Double
-
-    enum CodingKeys: String, CodingKey {
-        case label, amount
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        label = try container.decode(String.self, forKey: .label)
-        amount = try container.decodeFlexibleDouble(forKey: .amount) ?? 0
     }
 }
 

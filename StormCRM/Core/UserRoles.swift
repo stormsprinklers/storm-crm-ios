@@ -5,10 +5,6 @@ enum UserRoles {
         role == "TECH" || role == "INSTALLER"
     }
 
-    static func canViewProfitMargins(_ role: String) -> Bool {
-        role == "ADMIN" || role == "MANAGER"
-    }
-
     static func canViewMaintenancePlans(_ role: String) -> Bool {
         role == "CSR" || role == "MANAGER" || role == "ADMIN" || role == "TECH" || role == "INSTALLER" || role == "SALES"
     }

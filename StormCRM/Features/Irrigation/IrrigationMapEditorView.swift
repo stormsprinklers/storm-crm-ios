@@ -20,27 +20,41 @@ struct IrrigationMapEditorView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                headerBar
+        VStack(spacing: 0) {
+            if viewModel.isLoading {
+                ProgressView("Loading map…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    headerBar
+                        .padding(.horizontal)
+                        .padding(.top, 8)
 
-                if viewModel.isLoading {
-                    ProgressView("Loading map…")
-                } else {
                     mapSection
-                    zoneTabs
-                    drawControls
-                    markerControls
-                    systemFields
-                    activeZoneAttributes
-                    programSection
-                    RachioPropertySection(
-                        customerId: viewModel.customerId,
-                        propertyId: viewModel.propertyId
-                    )
+                        .padding(.horizontal)
+
+                    Text("Tap to place points · Pinch to zoom · Double-tap to reset zoom")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal)
+                }
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        zoneTabs
+                        drawControls
+                        markerControls
+                        systemFields
+                        activeZoneAttributes
+                        programSection
+                        RachioPropertySection(
+                            customerId: viewModel.customerId,
+                            propertyId: viewModel.propertyId
+                        )
+                    }
+                    .padding()
                 }
             }
-            .padding()
         }
         .background(StormTheme.page.ignoresSafeArea())
         .navigationTitle(viewModel.propertyName)
@@ -100,7 +114,8 @@ struct IrrigationMapEditorView: View {
                 Text(message).font(.caption).foregroundStyle(StormTheme.success)
             }
 
-            HStack(spacing: 8) {
+            // Wrap so buttons never force horizontal page scroll on small phones.
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], spacing: 8) {
                 Button(viewModel.isCapturingAerial ? "Capturing…" : "Capture aerial") {
                     Task { await viewModel.captureAerial(api: env.apiClient) }
                 }
@@ -133,16 +148,19 @@ struct IrrigationMapEditorView: View {
     }
 
     private var mapSection: some View {
-        IrrigationMapEditorCanvas(
-            imageUrl: viewModel.mapImageUrl,
-            zones: viewModel.zones,
-            markers: viewModel.markers,
-            activeZoneIndex: viewModel.activeZoneIndex,
-            draftPoints: draftPoints,
-            readOnly: false,
-            maxHeight: 420,
-            onTap: handleMapTap
-        )
+        GeometryReader { geo in
+            IrrigationMapEditorCanvas(
+                imageUrl: viewModel.mapImageUrl,
+                zones: viewModel.zones,
+                markers: viewModel.markers,
+                activeZoneIndex: viewModel.activeZoneIndex,
+                draftPoints: draftPoints,
+                readOnly: false,
+                height: IrrigationMapSizing.preferredHeight(forWidth: geo.size.width),
+                onTap: handleMapTap
+            )
+        }
+        .frame(height: IrrigationMapSizing.preferredHeight(forWidth: UIScreen.main.bounds.width - 32))
     }
 
     private var zoneTabs: some View {
@@ -228,7 +246,8 @@ struct IrrigationMapEditorView: View {
                     Button("Complete polygon") { completePolygon() }
                         .buttonStyle(StormPrimaryButtonStyle())
                         .disabled(draftPoints.count < 3)
-
+                }
+                HStack {
                     Button("Undo point") {
                         if !draftPoints.isEmpty { draftPoints.removeLast() }
                     }

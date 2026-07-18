@@ -46,7 +46,7 @@ struct MoreView: View {
 
                     if let role = auth.user?.role, UserRoles.canViewReporting(role) {
                         NavigationLink {
-                            ReportingHubView()
+                            ReportDetailView(kind: .kpiDashboard)
                         } label: {
                             Label("Reports", systemImage: "chart.bar")
                         }

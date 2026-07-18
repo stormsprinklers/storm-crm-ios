@@ -5,6 +5,7 @@ import UIKit
 
 enum MediaUploadTarget: Codable, Equatable {
     case visitAttachment(visitId: String)
+    case customerAttachment(customerId: String)
     case inboxMedia
 }
 
@@ -91,6 +92,16 @@ final class MediaUploadQueue: ObservableObject {
         )
     }
 
+    func enqueueCustomerPhoto(customerId: String, data: Data, fileName: String, mimeType: String = "image/jpeg") throws {
+        try enqueue(
+            target: .customerAttachment(customerId: customerId),
+            apiPath: APIPath.customerAttachments(customerId),
+            data: data,
+            fileName: fileName,
+            mimeType: mimeType
+        )
+    }
+
     func enqueueInboxMedia(data: Data, fileName: String, mimeType: String) throws {
         try enqueue(
             target: .inboxMedia,
@@ -120,10 +131,23 @@ final class MediaUploadQueue: ObservableObject {
     func pendingCount(for visitId: String? = nil) -> Int {
         items.filter { item in
             guard item.status == .pending || item.status == .failed || item.status == .uploading else { return false }
-            if let visitId, case .visitAttachment(let id) = item.target {
-                return id == visitId
+            if let visitId {
+                if case .visitAttachment(let id) = item.target {
+                    return id == visitId
+                }
+                return false
             }
-            return visitId == nil
+            return true
+        }.count
+    }
+
+    func pendingCount(forCustomerId customerId: String) -> Int {
+        items.filter { item in
+            guard item.status == .pending || item.status == .failed || item.status == .uploading else { return false }
+            if case .customerAttachment(let id) = item.target {
+                return id == customerId
+            }
+            return false
         }.count
     }
 

@@ -5,14 +5,13 @@ final class VisitDetailViewModel: ObservableObject {
     @Published var visit: VisitDetailDTO?
     @Published var checklists: [ChecklistDTO] = []
     @Published var timeEvents: [TimeEventDTO] = []
-    @Published var profit: VisitProfitDTO?
     @Published var customerHistory: CustomerHistoryDTO?
     @Published var isLoading = false
     @Published var isDeleting = false
     @Published var error: String?
     @Published var actionMessage: String?
 
-    func load(api: APIClient, visitId: String, userRole: String?) async {
+    func load(api: APIClient, visitId: String) async {
         isLoading = true
         error = nil
         defer { isLoading = false }
@@ -26,10 +25,6 @@ final class VisitDetailViewModel: ObservableObject {
                     path: APIPath.customerHistory(customerId),
                     query: [URLQueryItem(name: "excludeVisitId", value: visitId)]
                 )
-            }
-
-            if let role = userRole, UserRoles.canViewProfitMargins(role) {
-                profit = try? await api.get(path: APIPath.visitProfit(visitId))
             }
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
@@ -65,7 +60,7 @@ final class VisitDetailViewModel: ObservableObject {
         }
     }
 
-    func addNote(api: APIClient, visitId: String, body: String, userRole: String?, offlineSync: OfflineSyncManager?) async {
+    func addNote(api: APIClient, visitId: String, body: String, offlineSync: OfflineSyncManager?) async {
         struct Body: Encodable { let body: String }
         if offlineSync?.isOnline == false {
             if let data = try? JSONCoding.makeEncoder().encode(Body(body: body)) {
@@ -76,7 +71,7 @@ final class VisitDetailViewModel: ObservableObject {
         }
         do {
             let _: VisitNoteDTO = try await api.post(path: APIPath.visitNotes(visitId), body: Body(body: body))
-            await load(api: api, visitId: visitId, userRole: userRole)
+            await load(api: api, visitId: visitId)
         } catch {
             if offlineSync?.isOnline == false || isLikelyOffline(error) {
                 if let data = try? JSONCoding.makeEncoder().encode(Body(body: body)) {
@@ -219,9 +214,6 @@ struct VisitDetailView: View {
                                     computedTotal: total
                                 )
                                 let canEditSchedule = env.auth.user != nil
-                                let canEditTags = env.auth.user.map {
-                                    UserRoles.canEditVisitOfficeFields($0.role) || UserRoles.isFieldRole($0.role)
-                                } ?? false
 
                                 if visit.customer?.doNotService == true {
                                     DoNotServiceBanner()
@@ -245,6 +237,8 @@ struct VisitDetailView: View {
                                             }
                                             if paymentSummary.isPaid {
                                                 StormBadge(text: "Paid", style: .success)
+                                            } else if env.offlineSync.hasPendingPayment(forVisitId: visitId) {
+                                                StormBadge(text: "Payment pending sync", style: .warning)
                                             }
                                         }
                                     }
@@ -278,6 +272,16 @@ struct VisitDetailView: View {
                                         paymentSummary: paymentSummary
                                     )
                                 }
+
+                                Button {
+                                    showPartsRun = true
+                                } label: {
+                                    Label("Parts run", systemImage: "shippingbox.fill")
+                                        .font(.body.weight(.semibold))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 6)
+                                }
+                                .buttonStyle(StormSecondaryButtonStyle())
 
                                 VisitWorkSummarySection(
                                     visitId: visitId,
@@ -314,7 +318,11 @@ struct VisitDetailView: View {
                                     }
                                 )
 
-                                VisitCustomerInfoSection(visit: visit, voice: env.voice)
+                                VisitCustomerInfoSection(
+                                    visit: visit,
+                                    voice: env.voice,
+                                    customerHistory: viewModel.customerHistory
+                                )
 
                                 if let role = env.auth.user?.role, UserRoles.canViewMaintenancePlans(role) {
                                     VisitMaintenanceSection(
@@ -323,8 +331,7 @@ struct VisitDetailView: View {
                                         onUpdated: {
                                             await viewModel.load(
                                                 api: env.apiClient,
-                                                visitId: visitId,
-                                                userRole: role
+                                                visitId: visitId
                                             )
                                         }
                                     )
@@ -343,10 +350,21 @@ struct VisitDetailView: View {
                                     await reloadVisit()
                                 }
 
-                                VisitLineItemsEditSection(
-                                    visitId: visitId,
+                                LineItemsSummarySection(
+                                    owner: .visit(id: visitId),
                                     items: visit.lineItems ?? [],
                                     discounts: visit.discounts ?? [],
+                                    subtotal: visit.subtotal ?? (visit.lineItems ?? []).reduce(0) { $0 + $1.total },
+                                    discountTotal: max(
+                                        0,
+                                        (visit.subtotal ?? (visit.lineItems ?? []).reduce(0) { $0 + $1.total })
+                                            - (visit.total ?? 0)
+                                    ),
+                                    total: visit.total
+                                        ?? max(
+                                            0,
+                                            (visit.subtotal ?? (visit.lineItems ?? []).reduce(0) { $0 + $1.total })
+                                        ),
                                     onUpdated: { await reloadVisit() }
                                 )
 
@@ -360,7 +378,6 @@ struct VisitDetailView: View {
                                             api: env.apiClient,
                                             visitId: visitId,
                                             body: text,
-                                            userRole: env.auth.user?.role,
                                             offlineSync: env.offlineSync
                                         )
                                     }
@@ -368,31 +385,8 @@ struct VisitDetailView: View {
 
                                 VisitAttachmentsSection(visitId: visitId)
 
-                                VisitTagsSection(
-                                    visitId: visitId,
-                                    tags: visit.tags ?? [],
-                                    canEdit: canEditTags,
-                                    onUpdated: { await reloadVisit() }
-                                )
-
-                                Button("Parts run") { showPartsRun = true }
-                                    .buttonStyle(StormSecondaryButtonStyle())
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-
                                 if visit.hasInstallPlan {
                                     VisitInstallPlanSection(visit: visit)
-                                }
-
-                                if let history = viewModel.customerHistory {
-                                    VisitCustomerHistorySection(history: history)
-                                }
-
-                                if let profit = viewModel.profit {
-                                    VisitProfitSectionView(profit: profit)
-                                }
-
-                                if env.auth.user.map({ UserRoles.canDeleteVisit($0.role) }) == true {
-                                    deleteVisitSection(visit: visit)
                                 }
                             }
                             .padding()
@@ -413,7 +407,21 @@ struct VisitDetailView: View {
         }
         .navigationTitle("Visit")
         .navigationBarTitleDisplayMode(.inline)
-
+        .toolbar {
+            if env.auth.user.map({ UserRoles.canDeleteVisit($0.role) }) == true {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("Delete visit", role: .destructive) {
+                            showDeleteConfirm = true
+                        }
+                        .disabled(viewModel.isDeleting)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .accessibilityLabel("More")
+                    }
+                }
+            }
+        }
         .sheet(isPresented: $showPayment) {
             PaymentSheet(
                 visitId: visitId,
@@ -426,16 +434,15 @@ struct VisitDetailView: View {
             PartsRunSheet(visitId: visitId) {
                 await viewModel.load(
                     api: env.apiClient,
-                    visitId: visitId,
-                    userRole: env.auth.user?.role
+                    visitId: visitId
                 )
             }
         }
         .refreshable {
-            await viewModel.load(api: env.apiClient, visitId: visitId, userRole: env.auth.user?.role)
+            await viewModel.load(api: env.apiClient, visitId: visitId)
         }
         .task {
-            await viewModel.load(api: env.apiClient, visitId: visitId, userRole: env.auth.user?.role)
+            await viewModel.load(api: env.apiClient, visitId: visitId)
         }
         .onReceive(NotificationCenter.default.publisher(for: .visitPaymentCompleted)) { notification in
             guard let visitId = notification.userInfo?["visitId"] as? String, visitId == self.visitId else { return }
@@ -455,39 +462,18 @@ struct VisitDetailView: View {
             Text("This job has \(finishBillingAmount.formatted(.currency(code: "USD"))) outstanding. Collect now or send an invoice?")
         }
         .confirmationDialog(
-            "Delete visit?",
+            "Are you sure you want to delete this visit?",
             isPresented: $showDeleteConfirm,
             titleVisibility: .visible
         ) {
-            Button("Delete visit", role: .destructive) {
+            Button("Delete", role: .destructive) {
                 Task {
                     if await viewModel.deleteVisit(api: env.apiClient, visitId: visitId) {
                         dismiss()
                     }
                 }
             }
-        } message: {
-            if let visit = viewModel.visit {
-                Text("This will permanently delete “\(visit.title)” and its line items, notes, and attachments. This cannot be undone.")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func deleteVisitSection(visit: VisitDetailDTO) -> some View {
-        StormCard {
-            VStack(alignment: .leading, spacing: 8) {
-                StormSectionHeader(title: "Danger zone", systemImage: "exclamationmark.triangle")
-                Text("Permanently remove this visit and all associated data.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button(viewModel.isDeleting ? "Deleting…" : "Delete visit") {
-                    showDeleteConfirm = true
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
-                .disabled(viewModel.isDeleting)
-            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -503,8 +489,7 @@ struct VisitDetailView: View {
     private func reloadVisit() async {
         await viewModel.load(
             api: env.apiClient,
-            visitId: visitId,
-            userRole: env.auth.user?.role
+            visitId: visitId
         )
     }
 

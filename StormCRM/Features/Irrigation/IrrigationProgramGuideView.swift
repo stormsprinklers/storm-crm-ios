@@ -1,93 +1,182 @@
 import SwiftUI
 
+/// Matches web `SprinklerProgrammingSetupTable` mobile card layout.
 struct IrrigationProgramGuideView: View {
     let guide: ControllerProgramGuideDTO
 
+    private var programs: [ControllerProgramDTO] {
+        (guide.programs ?? []).filter { !($0.zones ?? []).isEmpty }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let generatedAt = guide.generatedAt {
-                Text("Generated \(APIDateFormatting.displayString(from: generatedAt))")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Sprinkler Programming Setup")
+                    .font(.headline)
+                Text("Each runtime occurs on every watering day for each start time listed in that program.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(spacing: 16) {
-                weatherStat("ETo", guide.weeklyEToInches, suffix: " in/wk")
-                weatherStat("Rain", guide.totalRainfallInches, suffix: " in")
-                if guide.droughtMode == true {
-                    StormBadge(text: "Drought mode", style: .warning)
-                }
-                if guide.cycleSoakEnabled == true {
-                    StormBadge(text: "Cycle & soak")
-                }
-            }
-
-            if let programs = guide.programs, !programs.isEmpty {
+            if programs.isEmpty {
+                Text("Add zones with vegetation and irrigation types to generate a programming guide.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
                 ForEach(programs) { program in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Program \(program.label)")
-                                .font(.subheadline.bold())
-                            if let days = program.daysLabel {
-                                Text(days).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        if let starts = program.startTimes, !starts.isEmpty {
-                            Text("Start: \(starts.joined(separator: ", "))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let zones = program.zones {
-                            ForEach(zones) { zone in
-                                HStack {
-                                    Text("St \(zone.stationNumber.map(String.init) ?? "—") · \(zone.name)")
-                                        .font(.caption)
-                                    Spacer()
-                                    if let mins = zone.runtimePerEventMinutes {
-                                        Text("\(Int(mins)) min/event")
-                                            .font(.caption.monospacedDigit())
-                                    }
-                                }
-                            }
-                        }
-                        if let wall = program.totalWallClockMinutes {
-                            Text("Wall clock: \(Int(wall)) min")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(10)
-                    .background(StormTheme.ice.opacity(0.25))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    ProgramSetupCard(program: program)
                 }
-            }
 
-            if let notes = guide.notes, !notes.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Notes").font(.caption.bold())
-                    ForEach(notes, id: \.self) { note in
-                        Text("• \(note)").font(.caption).foregroundStyle(.secondary)
+                    Text(footerSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    if let notes = guide.notes, !notes.isEmpty {
+                        ForEach(notes, id: \.self) { note in
+                            Text(note)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
                     }
                 }
+                .padding(.top, 2)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
-            if let gallons = guide.totalGallonsPerWeek {
-                Text("Total: \(Int(gallons)) gal/week")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(StormTheme.navy)
-            }
+    private var footerSummary: String {
+        let gal = Int((guide.totalGallonsPerWeek ?? 0).rounded())
+        let eto = guide.weeklyEToInches.map { String(format: "%.2f", $0) } ?? "—"
+        var parts = ["~\(gal.formatted()) gal/week total", "ET₀ \(eto)\"/wk"]
+        if guide.droughtMode == true {
+            parts.append("Drought schedule")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+private struct ProgramSetupCard: View {
+    let program: ControllerProgramDTO
+
+    private var tint: Color {
+        switch program.id.uppercased() {
+        case "B": return Color.green.opacity(0.08)
+        case "C": return Color.orange.opacity(0.10)
+        default: return Color(.secondarySystemGroupedBackground)
         }
     }
 
-    private func weatherStat(_ label: String, _ value: Double?, suffix: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption2).foregroundStyle(.secondary)
-            if let value {
-                Text(String(format: "%.2f%@", value, suffix))
-                    .font(.caption.weight(.semibold))
-            } else {
-                Text("—").font(.caption)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text("Program \(program.id)")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(.white)
+
+                    if let days = program.daysLabel, !days.isEmpty {
+                        Text(days)
+                            .font(.subheadline)
+                            .foregroundStyle(.white.opacity(0.85))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+
+                if let starts = program.startTimes, !starts.isEmpty {
+                    Text("Starts: \(starts.joined(separator: " · "))")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.7))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if program.isEstablishment == true {
+                    Text("Establishment (temporary)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(Color.orange.opacity(0.95))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(red: 0.12, green: 0.16, blue: 0.22))
+
+            let zones = program.zones ?? []
+            VStack(spacing: 0) {
+                ForEach(Array(zones.enumerated()), id: \.element.id) { index, zone in
+                    ZoneSetupRow(zone: zone)
+                    if index < zones.count - 1 {
+                        Divider().padding(.leading, 12)
+                    }
+                }
+            }
+            .background(tint)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+        )
+    }
+}
+
+private struct ZoneSetupRow: View {
+    let zone: ProgramZoneRuntimeDTO
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(zoneTitle)
+                    .font(.subheadline.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let note = zone.establishmentNote, !note.isEmpty {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(runtimeLabel)
+                    .font(.subheadline.monospacedDigit())
+                Text(gallonsLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private var zoneTitle: String {
+        let station = zone.stationNumber.map { "#\($0)" } ?? "#"
+        return "\(station) \(zone.name)"
+    }
+
+    private var runtimeLabel: String {
+        if let cs = zone.cycleSoak,
+           cs.enabled == true,
+           let count = cs.cycleCount,
+           count > 1,
+           let minutes = cs.minutesPerCycle {
+            let m = Int(minutes.rounded())
+            return "\(m) min × \(count)"
+        }
+        let minutes = Int((zone.runtimePerEventMinutes ?? 0).rounded())
+        return "\(minutes) min"
+    }
+
+    private var gallonsLabel: String {
+        let gal = Int((zone.gallonsPerEvent ?? 0).rounded())
+        return "\(gal.formatted()) gal"
     }
 }

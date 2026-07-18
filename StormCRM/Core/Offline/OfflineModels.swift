@@ -60,6 +60,10 @@ final class OutboxMutation {
     var path: String
     var method: String
     var bodyData: Data?
+    /// When true, `bodyData` is ChaChaPoly-sealed (Keychain-backed key).
+    var bodyEncrypted: Bool
+    /// Optional visit id for UI / pending-payment checks without decrypting the body.
+    var relatedVisitId: String?
     var createdAt: Date
     var retryCount: Int
     var idempotencyKey: String
@@ -71,6 +75,8 @@ final class OutboxMutation {
         path: String,
         method: String,
         bodyData: Data? = nil,
+        bodyEncrypted: Bool = false,
+        relatedVisitId: String? = nil,
         createdAt: Date = Date(),
         retryCount: Int = 0,
         idempotencyKey: String = UUID().uuidString,
@@ -81,6 +87,8 @@ final class OutboxMutation {
         self.path = path
         self.method = method
         self.bodyData = bodyData
+        self.bodyEncrypted = bodyEncrypted
+        self.relatedVisitId = relatedVisitId
         self.createdAt = createdAt
         self.retryCount = retryCount
         self.idempotencyKey = idempotencyKey
@@ -93,16 +101,26 @@ enum PIIProtection {
     private static let keychainAccount = "stormcrm.offline.pii.key"
 
     static func encrypt(_ plaintext: String) -> Data? {
-        guard let data = plaintext.data(using: .utf8), let key = symmetricKey() else { return nil }
-        return try? ChaChaPoly.seal(data, using: key).combined
+        guard let data = plaintext.data(using: .utf8) else { return nil }
+        return encryptData(data)
     }
 
     static func decrypt(_ sealed: Data) -> String? {
+        guard let data = decryptData(sealed) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func encryptData(_ plaintext: Data) -> Data? {
+        guard let key = symmetricKey() else { return nil }
+        return try? ChaChaPoly.seal(plaintext, using: key).combined
+    }
+
+    static func decryptData(_ sealed: Data) -> Data? {
         guard let key = symmetricKey(),
               let box = try? ChaChaPoly.SealedBox(combined: sealed),
               let data = try? ChaChaPoly.open(box, using: key)
         else { return nil }
-        return String(data: data, encoding: .utf8)
+        return data
     }
 
     private static func symmetricKey() -> SymmetricKey? {

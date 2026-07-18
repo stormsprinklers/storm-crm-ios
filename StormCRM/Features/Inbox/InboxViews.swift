@@ -203,6 +203,24 @@ struct SmsConversationView: View {
         }
         .navigationTitle(viewModel.conversation?.displayTitle ?? "Messages")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                if let phone = callPhone {
+                    Button {
+                        Task {
+                            await env.voice.call(
+                                phone: phone,
+                                customerId: viewModel.conversation?.customer?.id
+                            )
+                        }
+                    } label: {
+                        Image(systemName: "phone.fill")
+                    }
+                    .accessibilityLabel("Call")
+                    .disabled(!env.offlineSync.isOnline)
+                }
+            }
+        }
         .task {
             await viewModel.load(api: env.apiClient, conversationId: conversationId)
             viewModel.startPolling(api: env.apiClient, conversationId: conversationId)
@@ -225,6 +243,16 @@ struct SmsConversationView: View {
         .onChange(of: photoItems) { _, items in
             Task { await importPhotos(items, api: env.apiClient) }
         }
+    }
+
+    private var callPhone: String? {
+        let candidates = [
+            viewModel.conversation?.participantPhone,
+            viewModel.conversation?.customer?.phone,
+        ]
+        return candidates
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
     }
 
     private var messageComposer: some View {

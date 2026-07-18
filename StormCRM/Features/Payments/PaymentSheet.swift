@@ -1,5 +1,7 @@
+import CoreImage.CIFilterBuiltins
 import SafariServices
 import SwiftUI
+import UIKit
 
 struct VisitPaymentsSection: View {
     @EnvironmentObject private var env: AppEnvironment
@@ -68,9 +70,14 @@ struct VisitPaymentsSection: View {
 
                     VStack(spacing: 8) {
                         if !env.offlineSync.isOnline {
-                            Text("Card payments require an internet connection.")
+                            Text("Offline — cash/check and send-link can be saved securely and sync when you're back online. Card and QR need a connection.")
                                 .font(.caption)
                                 .foregroundStyle(.orange)
+                        } else if env.offlineSync.hasPendingPayment(forVisitId: visitId) {
+                            let label = env.offlineSync.pendingPaymentMethodLabel(forVisitId: visitId) ?? "Payment"
+                            Text("\(label) recorded on device — waiting to sync.")
+                                .font(.caption)
+                                .foregroundStyle(StormTheme.sky)
                         }
                         Button {
                             showPayment = true
@@ -79,7 +86,7 @@ struct VisitPaymentsSection: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(StormPrimaryButtonStyle())
-                        .disabled(!canBill || !env.offlineSync.isOnline)
+                        .disabled(!canBill)
 
                         Button {
                             Task { await sendInvoice() }
@@ -120,7 +127,7 @@ struct VisitPaymentsSection: View {
                                 .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(StormSecondaryButtonStyle())
-                            .disabled(!canBill || isPreparingLink)
+                            .disabled(!canBill || isPreparingLink || !env.offlineSync.isOnline)
                         }
                     }
                 }
@@ -196,6 +203,49 @@ struct VisitPaymentsSection: View {
     }
 }
 
+private enum PaymentCollectMethod: String, CaseIterable, Identifiable {
+    case manualCard
+    case qrCode
+    case sendLink
+    case cashCheck
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .manualCard: return "Manual card"
+        case .qrCode: return "QR code"
+        case .sendLink: return "Send payment link"
+        case .cashCheck: return "Cash / Check"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .manualCard: return "Open secure card checkout on this device"
+        case .qrCode: return "Customer scans to open the payment link"
+        case .sendLink: return "Email / text the pay link to the customer"
+        case .cashCheck: return "Record cash or check and notify admins"
+        }
+    }
+
+    var requiresOnline: Bool {
+        switch self {
+        case .manualCard, .qrCode: return true
+        case .sendLink, .cashCheck: return false
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .manualCard: return "creditcard.fill"
+        case .qrCode: return "qrcode"
+        case .sendLink: return "paperplane.fill"
+        case .cashCheck: return "banknote.fill"
+        }
+    }
+}
+
 struct PaymentSheet: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
@@ -203,44 +253,22 @@ struct PaymentSheet: View {
     let amountDue: Double
     var onCompleted: () -> Void
 
+    @State private var selectedMethod: PaymentCollectMethod?
     @State private var checkoutURL: URL?
     @State private var payLink: String?
     @State private var error: String?
+    @State private var statusMessage: String?
     @State private var isLoading = false
+    @State private var showCashCheckConfirm = false
+    @State private var cashCheckKind: String = "CASH"
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                if isLoading {
-                    ProgressView("Starting secure checkout…")
-                } else if let error {
-                    Text(error).foregroundStyle(.red).multilineTextAlignment(.center)
-                    Button("Try again") { Task { await startCheckout() } }
-                        .buttonStyle(StormPrimaryButtonStyle())
-                } else if let checkoutURL {
-                    Text("Complete payment in the browser. You'll return here when finished.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    SafariView(url: checkoutURL)
+            Group {
+                if let selectedMethod {
+                    methodDetail(selectedMethod)
                 } else {
-                    Text(amountDue, format: .currency(code: "USD"))
-                        .font(.title.weight(.bold))
-                    Text("Collect payment with card via Stripe Checkout.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Button("Start checkout") {
-                        Task { await startCheckout() }
-                    }
-                    .buttonStyle(StormPrimaryButtonStyle())
-                }
-
-                if let payLink, let url = URL(string: payLink) {
-                    ShareLink(item: url) {
-                        Label("Share pay link instead", systemImage: "square.and.arrow.up")
-                    }
-                    .font(.subheadline)
+                    methodPicker
                 }
             }
             .padding()
@@ -248,10 +276,204 @@ struct PaymentSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button(selectedMethod == nil ? "Close" : "Back") {
+                        if selectedMethod == nil {
+                            dismiss()
+                        } else {
+                            selectedMethod = nil
+                            error = nil
+                            statusMessage = nil
+                            checkoutURL = nil
+                            payLink = nil
+                        }
+                    }
                 }
             }
-            .task { await startCheckout() }
+            .confirmationDialog(
+                "Record cash or check?",
+                isPresented: $showCashCheckConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Cash \(amountDue.formatted(.currency(code: "USD")))") {
+                    cashCheckKind = "CASH"
+                    Task { await recordManualPayment(method: "CASH") }
+                }
+                Button("Check \(amountDue.formatted(.currency(code: "USD")))") {
+                    cashCheckKind = "CHECK"
+                    Task { await recordManualPayment(method: "CHECK") }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(
+                    env.offlineSync.isOnline
+                        ? "Admins will be notified that this job was collected with cash or check."
+                        : "Saved encrypted on this device. It will sync and notify admins when you're back online."
+                )
+            }
+        }
+    }
+
+    private var methodPicker: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(amountDue, format: .currency(code: "USD"))
+                .font(.title.weight(.bold))
+                .foregroundStyle(StormTheme.navy)
+
+            Text("How do you want to collect?")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            if !env.offlineSync.isOnline {
+                Text("You're offline. Cash/check and send-link are saved encrypted on this device and sync when signal returns.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            ForEach(PaymentCollectMethod.allCases) { method in
+                let needsNet = method.requiresOnline && !env.offlineSync.isOnline
+                Button {
+                    selectMethod(method)
+                } label: {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: method.systemImage)
+                            .font(.title3)
+                            .foregroundStyle(needsNet ? Color.secondary : StormTheme.sky)
+                            .frame(width: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(method.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(needsNet ? Color.secondary : StormTheme.navy)
+                            Text(needsNet ? "Needs an internet connection" : method.subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(12)
+                    .background(StormTheme.ice.opacity(needsNet ? 0.25 : 0.45))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(isLoading || needsNet)
+            }
+
+            if let error {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func methodDetail(_ method: PaymentCollectMethod) -> some View {
+        VStack(spacing: 16) {
+            if isLoading {
+                ProgressView(loadingLabel(for: method))
+            } else if let error {
+                Text(error)
+                    .foregroundStyle(.red)
+                    .multilineTextAlignment(.center)
+                Button("Try again") { selectMethod(method) }
+                    .buttonStyle(StormPrimaryButtonStyle())
+            } else {
+                switch method {
+                case .manualCard:
+                    if let checkoutURL {
+                        Text("Complete card payment below. You'll return here when finished.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        SafariView(url: checkoutURL)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                case .qrCode:
+                    if let payLink, let url = URL(string: payLink) {
+                        Text("Have the customer scan this code to pay.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        if let image = QRCodeImage.make(from: payLink) {
+                            Image(uiImage: image)
+                                .interpolation(.none)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: 260)
+                                .padding()
+                                .background(Color.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+                        Text(payLink)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                        ShareLink(item: url) {
+                            Label("Share link", systemImage: "square.and.arrow.up")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(StormSecondaryButtonStyle())
+                    }
+                case .sendLink:
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.largeTitle)
+                        .foregroundStyle(StormTheme.success)
+                    Text(statusMessage ?? "Payment link sent.")
+                        .multilineTextAlignment(.center)
+                    Button("Done") {
+                        onCompleted()
+                        dismiss()
+                    }
+                    .buttonStyle(StormPrimaryButtonStyle())
+                case .cashCheck:
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.largeTitle)
+                        .foregroundStyle(StormTheme.success)
+                    Text(statusMessage ?? "\(cashCheckKind.capitalized) payment recorded. Admins notified.")
+                        .multilineTextAlignment(.center)
+                    Button("Done") {
+                        onCompleted()
+                        dismiss()
+                    }
+                    .buttonStyle(StormPrimaryButtonStyle())
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func loadingLabel(for method: PaymentCollectMethod) -> String {
+        switch method {
+        case .manualCard: return "Starting card checkout…"
+        case .qrCode: return "Preparing QR code…"
+        case .sendLink: return "Sending payment link…"
+        case .cashCheck: return "Recording payment…"
+        }
+    }
+
+    private func selectMethod(_ method: PaymentCollectMethod) {
+        error = nil
+        statusMessage = nil
+        checkoutURL = nil
+        if method.requiresOnline, !env.offlineSync.isOnline {
+            error = "This payment method needs an internet connection."
+            return
+        }
+        switch method {
+        case .manualCard:
+            selectedMethod = method
+            Task { await startCheckout() }
+        case .qrCode:
+            selectedMethod = method
+            Task { await preparePayLink() }
+        case .sendLink:
+            selectedMethod = method
+            Task { await sendPaymentLink() }
+        case .cashCheck:
+            showCashCheckConfirm = true
         }
     }
 
@@ -278,6 +500,170 @@ struct PaymentSheet: View {
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
+    }
+
+    private func preparePayLink() async {
+        isLoading = true
+        error = nil
+        defer { isLoading = false }
+        struct Body: Encodable { let send: Bool }
+        do {
+            let response: VisitInvoiceResponse = try await env.apiClient.post(
+                path: APIPath.visitInvoice(visitId),
+                body: Body(send: false)
+            )
+            payLink = response.payLink
+            if payLink == nil {
+                error = "Could not create a payment link."
+            }
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func sendPaymentLink() async {
+        isLoading = true
+        error = nil
+        defer { isLoading = false }
+        struct Body: Encodable { let send: Bool }
+        let body = Body(send: true)
+
+        if !env.offlineSync.isOnline {
+            queueSendLink()
+            return
+        }
+
+        do {
+            let response: VisitInvoiceResponse = try await env.apiClient.post(
+                path: APIPath.visitInvoice(visitId),
+                body: body
+            )
+            payLink = response.payLink
+            var parts: [String] = []
+            if response.emailSent == true { parts.append("email") }
+            if response.smsSent == true { parts.append("SMS") }
+            if parts.isEmpty {
+                statusMessage = "Payment link prepared\(response.payLink.map { ": \($0)" } ?? ".")"
+            } else {
+                statusMessage = "Payment link sent via \(parts.joined(separator: " and "))."
+            }
+            onCompleted()
+        } catch {
+            if isLikelyOffline(error) {
+                queueSendLink()
+            } else {
+                self.error = (error as? APIError)?.message ?? error.localizedDescription
+            }
+        }
+    }
+
+    private func queueSendLink() {
+        struct SendBody: Encodable { let send: Bool }
+        guard let payload = try? JSONCoding.makeEncoder().encode(SendBody(send: true)) else {
+            error = "Could not save payment link request offline."
+            return
+        }
+        env.offlineSync.enqueue(
+            path: APIPath.visitInvoice(visitId),
+            method: "POST",
+            bodyData: payload,
+            secure: true,
+            relatedVisitId: visitId
+        )
+        statusMessage = "Payment link request saved offline — it will send when you're back online."
+        onCompleted()
+    }
+
+    private func recordManualPayment(method: String) async {
+        selectedMethod = .cashCheck
+        isLoading = true
+        error = nil
+        defer { isLoading = false }
+
+        struct Body: Encodable {
+            let visitId: String
+            let method: String
+            let amount: Double
+            let idempotencyKey: String
+        }
+        let key = UUID().uuidString
+        let body = Body(
+            visitId: visitId,
+            method: method,
+            amount: amountDue,
+            idempotencyKey: key
+        )
+
+        if !env.offlineSync.isOnline {
+            queueManualPayment(body: body, method: method, idempotencyKey: key)
+            return
+        }
+
+        do {
+            let _: ManualPaymentResponse = try await env.apiClient.post(
+                path: APIPath.paymentsManual,
+                body: body,
+                headers: ["Idempotency-Key": key]
+            )
+            cashCheckKind = method
+            statusMessage = "\(method == "CASH" ? "Cash" : "Check") payment recorded. Admins have been notified."
+            onCompleted()
+        } catch {
+            if isLikelyOffline(error) {
+                queueManualPayment(body: body, method: method, idempotencyKey: key)
+            } else {
+                self.error = (error as? APIError)?.message ?? error.localizedDescription
+            }
+        }
+    }
+
+    private func queueManualPayment(body: some Encodable, method: String, idempotencyKey: String) {
+        guard let payload = try? JSONCoding.makeEncoder().encode(body) else {
+            error = "Could not save payment offline."
+            return
+        }
+        env.offlineSync.enqueue(
+            path: APIPath.paymentsManual,
+            method: "POST",
+            bodyData: payload,
+            secure: true,
+            relatedVisitId: visitId,
+            idempotencyKey: idempotencyKey
+        )
+        cashCheckKind = method
+        statusMessage =
+            "\(method == "CASH" ? "Cash" : "Check") payment saved securely on this device. It will sync and notify admins when you're back online."
+        onCompleted()
+    }
+
+    private func isLikelyOffline(_ error: Error) -> Bool {
+        if let apiError = error as? APIError, case .network = apiError { return true }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && (
+            nsError.code == NSURLErrorNotConnectedToInternet
+                || nsError.code == NSURLErrorNetworkConnectionLost
+                || nsError.code == NSURLErrorTimedOut
+        )
+    }
+}
+
+private struct ManualPaymentResponse: Decodable {
+    let ok: Bool?
+    let invoiceStatus: String?
+    let amount: Double?
+    let method: String?
+}
+
+enum QRCodeImage {
+    static func make(from string: String) -> UIImage? {
+        let context = CIContext()
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(string.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage else { return nil }
+        let scaled = output.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
+        guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
+        return UIImage(cgImage: cgImage)
     }
 }
 
@@ -358,7 +744,11 @@ struct SafariView: UIViewControllerRepresentable {
     let url: URL
 
     func makeUIViewController(context: Context) -> SFSafariViewController {
-        SFSafariViewController(url: url)
+        let config = SFSafariViewController.Configuration()
+        config.entersReaderIfAvailable = false
+        let controller = SFSafariViewController(url: url, configuration: config)
+        controller.preferredControlTintColor = UIColor(StormTheme.coral)
+        return controller
     }
 
     func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
@@ -367,7 +757,3 @@ struct SafariView: UIViewControllerRepresentable {
 extension Notification.Name {
     static let visitPaymentCompleted = Notification.Name("stormcrm.visitPaymentCompleted")
 }
-
-#if canImport(UIKit)
-import UIKit
-#endif

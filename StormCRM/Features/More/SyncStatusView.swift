@@ -22,7 +22,7 @@ struct SyncStatusView: View {
                         .foregroundStyle(.red)
                 }
             } footer: {
-                Text("Visit notes and checklist updates made offline are queued here and sent when you're back online.")
+                Text("Visit notes, checklist updates, and offline payments (cash/check, send-link) are queued here and sent when you're back online. Payment payloads are encrypted on device.")
             }
 
             Section("Outbox") {
@@ -85,6 +85,12 @@ private struct OutboxMutationRow: View {
                 Text(shortPath(mutation.path))
                     .font(.subheadline.weight(.medium))
                     .lineLimit(1)
+                if mutation.bodyEncrypted {
+                    Image(systemName: "lock.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Encrypted")
+                }
                 Spacer()
                 statusBadge
             }

@@ -47,36 +47,6 @@ final class ScheduleViewModel: ObservableObject {
     }
 }
 
-@MainActor
-final class VisitsListViewModel: ObservableObject {
-    @Published var visits: [VisitDTO] = []
-    @Published var search = ""
-    @Published var isLoading = false
-    @Published var error: String?
-
-    func load(api: APIClient) async {
-        isLoading = true
-        error = nil
-        defer { isLoading = false }
-        var query: [URLQueryItem] = []
-        if !search.trimmingCharacters(in: .whitespaces).isEmpty {
-            query.append(URLQueryItem(name: "search", value: search))
-        }
-        do {
-            let response: VisitsListResponse = try await api.get(path: APIPath.visits, query: query)
-            visits = response.visits
-        } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
-        }
-    }
-}
-
-enum ScheduleMode: String, CaseIterable, Identifiable {
-    case schedule = "Schedule"
-    case visits = "Visits"
-    var id: String { rawValue }
-}
-
 /// Context for the quick "add job" sheet launched by tapping an empty slot.
 struct ScheduleCreateContext: Identifiable {
     let id = UUID()
@@ -188,11 +158,9 @@ struct ScheduleWeekStrip: View {
 struct ScheduleView: View {
     @EnvironmentObject private var env: AppEnvironment
     @StateObject private var viewModel = ScheduleViewModel()
-    @StateObject private var visitsModel = VisitsListViewModel()
 
     @State private var navigationPath = NavigationPath()
 
-    @State private var mode: ScheduleMode = .schedule
     @State private var colorMode: ScheduleColorMode = .technician
     @State private var jobToEdit: VisitDTO?
     @State private var selectedDate = Calendar.current.startOfDay(for: Date())
@@ -202,6 +170,7 @@ struct ScheduleView: View {
     @State private var createContext: ScheduleCreateContext?
     @State private var jobToDelete: VisitDTO?
     @State private var isDeleting = false
+    @State private var showTimeOffRequest = false
 
     private var calendar: Calendar { Calendar.current }
 
@@ -235,45 +204,37 @@ struct ScheduleView: View {
             }
     }
 
-    private var filteredVisits: [VisitDTO] {
-        visitsModel.visits.filter { viewModel.matchesEmployee($0, selectedEmployeeId) }
-    }
-
     var body: some View {
         NavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
-                Picker("View", selection: $mode) {
-                    ForEach(ScheduleMode.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-                .padding(.bottom, 6)
-
                 if canViewOthers {
                     employeePickerBar
                 }
 
-                Divider()
-
-                if mode == .schedule {
-                    scheduleContent
-                } else {
-                    visitsContent
+                if canViewOthers {
+                    Divider()
                 }
+
+                scheduleContent
             }
-            .navigationTitle(mode == .schedule ? (canEditSchedule ? "Schedule" : "My Schedule") : "Visits")
+            .navigationTitle(canEditSchedule ? "Schedule" : "My Schedule")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if mode == .schedule {
-                    ToolbarItem(placement: .topBarLeading) {
-                        if !calendar.isDateInToday(selectedDate) {
-                            Button("Today") {
-                                selectedDate = calendar.startOfDay(for: Date())
-                            }
+                ToolbarItem(placement: .topBarLeading) {
+                    if !calendar.isDateInToday(selectedDate) {
+                        Button("Today") {
+                            selectedDate = calendar.startOfDay(for: Date())
                         }
                     }
-                    ToolbarItem(placement: .topBarTrailing) {
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 12) {
+                        Button {
+                            showTimeOffRequest = true
+                        } label: {
+                            Label("Time off", systemImage: "calendar.badge.minus")
+                        }
+
                         Menu {
                             Picker("Color by", selection: $colorMode) {
                                 ForEach(ScheduleColorMode.allCases) { mode in
@@ -311,11 +272,6 @@ struct ScheduleView: View {
             .onChange(of: selectedDate) { _, _ in
                 Task { await viewModel.load(api: env.apiClient, around: selectedDate, offlineSync: env.offlineSync) }
             }
-            .onChange(of: mode) { _, newMode in
-                if newMode == .visits && visitsModel.visits.isEmpty {
-                    Task { await visitsModel.load(api: env.apiClient) }
-                }
-            }
             .sheet(item: $jobToEdit) { job in
                 ScheduleJobEditSheet(job: job) {
                     await reload()
@@ -330,6 +286,9 @@ struct ScheduleView: View {
                 ) {
                     await reload()
                 }
+            }
+            .sheet(isPresented: $showTimeOffRequest) {
+                TimeOffRequestSheet()
             }
             .alert("Remove job?", isPresented: Binding(
                 get: { jobToDelete != nil },
@@ -430,52 +389,6 @@ struct ScheduleView: View {
         }
     }
 
-    // MARK: - Visits (list) content
-
-    @ViewBuilder
-    private var visitsContent: some View {
-        Group {
-            if visitsModel.isLoading && visitsModel.visits.isEmpty {
-                Spacer()
-                ProgressView()
-                Spacer()
-            } else if let error = visitsModel.error, visitsModel.visits.isEmpty {
-                ContentUnavailableView("Error", systemImage: "exclamationmark.triangle", description: Text(error))
-            } else if filteredVisits.isEmpty {
-                ContentUnavailableView(
-                    "No visits",
-                    systemImage: "wrench.and.screwdriver",
-                    description: Text("No visits match the current filter.")
-                )
-            } else {
-                List {
-                    ForEach(filteredVisits) { visit in
-                        NavigationLink(value: visit.id) {
-                            ScheduleRow(job: visit, colorMode: colorMode)
-                        }
-                        .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            if canEditSchedule {
-                                Button(role: .destructive) { jobToDelete = visit } label: {
-                                    Label("Remove", systemImage: "trash")
-                                }
-                                Button { jobToEdit = visit } label: {
-                                    Label("Edit", systemImage: "pencil")
-                                }
-                                .tint(StormTheme.sky)
-                            }
-                        }
-                    }
-                }
-                .listStyle(.plain)
-            }
-        }
-        .searchable(text: $visitsModel.search, prompt: "Search visits")
-        .onSubmit(of: .search) { Task { await visitsModel.load(api: env.apiClient) } }
-    }
-
     // MARK: - Actions
 
     private func loadInitial() async {
@@ -494,9 +407,6 @@ struct ScheduleView: View {
 
     private func reload() async {
         await viewModel.load(api: env.apiClient, around: selectedDate, offlineSync: env.offlineSync)
-        if mode == .visits || !visitsModel.visits.isEmpty {
-            await visitsModel.load(api: env.apiClient)
-        }
     }
 
     private func delete(_ job: VisitDTO) async {
@@ -676,92 +586,6 @@ private struct ScheduleTimelineBlock: View {
         let endTime = APIDateFormatting.parse(job.endAt)?.formatted(date: .omitted, time: .shortened)
             ?? APIDateFormatting.displayString(from: job.endAt)
         return "\(startTime) – \(endTime)"
-    }
-}
-
-// MARK: - Shared row (also used by the Visits list)
-
-struct ScheduleRow: View {
-    let job: VisitDTO
-    var colorMode: ScheduleColorMode = .technician
-
-    private var accent: Color {
-        ScheduleColors.accentColor(for: job, mode: colorMode)
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(accent)
-                .frame(width: 4)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text(job.title)
-                    .font(.headline)
-                    .foregroundStyle(StormTheme.navy)
-
-                if let customer = job.customer {
-                    Text(customer.name)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: 8) {
-                    Text(timeRange)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                    StatusBadge(status: job.status)
-                }
-
-                HStack(spacing: 10) {
-                    if let tech = job.assignedUser {
-                        HStack(spacing: 6) {
-                            EmployeeAvatar(person: tech, size: 22)
-                            Text(tech.name)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    } else {
-                        Text("Unassigned")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-
-                    if colorMode != .area, let area = job.serviceArea {
-                        Text(area.name)
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color(hex: area.color ?? "#64748B")?.opacity(0.15) ?? StormTheme.ice.opacity(0.5))
-                            .foregroundStyle(Color(hex: area.color ?? "#64748B") ?? StormTheme.navy)
-                            .clipShape(Capsule())
-                    }
-                }
-            }
-        }
-        .padding(12)
-        .background(ScheduleColors.backgroundColor(for: job, mode: colorMode))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(accent.opacity(0.35), lineWidth: 1)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-
-    private var timeRange: String {
-        let start = APIDateFormatting.displayString(from: job.startAt)
-        let end = APIDateFormatting.displayString(from: job.endAt)
-        if Calendar.current.isDate(
-            APIDateFormatting.parse(job.startAt) ?? Date(),
-            inSameDayAs: APIDateFormatting.parse(job.endAt) ?? Date()
-        ) {
-            let startTime = APIDateFormatting.parse(job.startAt)?.formatted(date: .omitted, time: .shortened) ?? start
-            let endTime = APIDateFormatting.parse(job.endAt)?.formatted(date: .omitted, time: .shortened) ?? end
-            return "\(startTime) – \(endTime)"
-        }
-        return "\(start) – \(end)"
     }
 }
 

@@ -48,13 +48,32 @@ final class OfflineSyncManager: ObservableObject {
         openTimeSegment = segment
     }
 
-    func enqueue(path: String, method: String, bodyData: Data?) {
+    func enqueue(
+        path: String,
+        method: String,
+        bodyData: Data?,
+        secure: Bool = false,
+        relatedVisitId: String? = nil,
+        idempotencyKey: String = UUID().uuidString
+    ) {
+        var storedBody = bodyData
+        var encrypted = false
+        if secure, let bodyData {
+            if let sealed = PIIProtection.encryptData(bodyData) {
+                storedBody = sealed
+                encrypted = true
+            }
+            // If encryption fails, still queue plaintext rather than drop the payment.
+        }
         let context = OfflineStore.sharedContext(from: modelContainer)
         context.insert(
             OutboxMutation(
                 path: path,
                 method: method.uppercased(),
-                bodyData: bodyData
+                bodyData: storedBody,
+                bodyEncrypted: encrypted,
+                relatedVisitId: relatedVisitId,
+                idempotencyKey: idempotencyKey
             )
         )
         try? context.save()
@@ -62,6 +81,34 @@ final class OfflineSyncManager: ObservableObject {
         if isOnline {
             flushOutbox()
         }
+    }
+
+    /// True when a cash/check (or other payment) mutation for this visit is waiting to sync.
+    func hasPendingPayment(forVisitId visitId: String) -> Bool {
+        pendingMutations().contains { mutation in
+            guard mutation.relatedVisitId == visitId else { return false }
+            let status = mutation.status
+            guard status == OutboxMutationStatus.pending.rawValue
+                || status == OutboxMutationStatus.failed.rawValue
+                || status == OutboxMutationStatus.syncing.rawValue
+            else { return false }
+            return mutation.path == APIPath.paymentsManual
+                || mutation.path.hasSuffix("/invoice")
+        }
+    }
+
+    func pendingPaymentMethodLabel(forVisitId visitId: String) -> String? {
+        let mutation = pendingMutations().first {
+            $0.relatedVisitId == visitId && $0.path == APIPath.paymentsManual
+        }
+        guard let mutation else { return nil }
+        guard let plain = plaintextBody(for: mutation),
+              let json = try? JSONSerialization.jsonObject(with: plain) as? [String: Any],
+              let method = json["method"] as? String
+        else {
+            return "Payment"
+        }
+        return method == "CHECK" ? "Check" : "Cash"
     }
 
     func retryMutation(id: String) {
@@ -160,9 +207,18 @@ final class OfflineSyncManager: ObservableObject {
 
             do {
                 try await sendMutation(mutation, api: apiClient)
+                let visitId = mutation.relatedVisitId
+                let path = mutation.path
                 context.delete(mutation)
                 try? context.save()
                 lastError = nil
+                if let visitId, path == APIPath.paymentsManual || path.hasSuffix("/invoice") {
+                    NotificationCenter.default.post(
+                        name: .visitPaymentCompleted,
+                        object: nil,
+                        userInfo: ["visitId": visitId]
+                    )
+                }
             } catch {
                 mutation.retryCount += 1
                 mutation.status = mutation.retryCount >= maxRetries
@@ -179,23 +235,47 @@ final class OfflineSyncManager: ObservableObject {
     }
 
     private func sendMutation(_ mutation: OutboxMutation, api: APIClient) async throws {
+        let headers = ["Idempotency-Key": mutation.idempotencyKey]
         switch mutation.method {
         case "POST":
-            if let bodyData = mutation.bodyData {
-                let _: EmptyResponse = try await postRaw(path: mutation.path, bodyData: bodyData, api: api)
+            if mutation.bodyData != nil {
+                guard let bodyData = plaintextBody(for: mutation) else {
+                    throw APIError.server("Could not decrypt offline payload")
+                }
+                let _: EmptyResponse = try await postRaw(
+                    path: mutation.path,
+                    bodyData: bodyData,
+                    headers: headers,
+                    api: api
+                )
             } else {
-                let _: EmptyResponse = try await api.post(path: mutation.path)
+                let _: EmptyResponse = try await api.post(path: mutation.path, headers: headers)
             }
         case "PATCH":
-            guard let bodyData = mutation.bodyData else {
-                throw APIError.badRequest("Missing PATCH body")
+            guard let bodyData = plaintextBody(for: mutation) else {
+                throw APIError.badRequest(
+                    mutation.bodyEncrypted ? "Could not decrypt offline payload" : "Missing PATCH body"
+                )
             }
-            let _: EmptyResponse = try await patchRaw(path: mutation.path, bodyData: bodyData, api: api)
+            let _: EmptyResponse = try await patchRaw(
+                path: mutation.path,
+                bodyData: bodyData,
+                headers: headers,
+                api: api
+            )
         case "PUT":
-            if let bodyData = mutation.bodyData {
-                let _: EmptyResponse = try await putRaw(path: mutation.path, bodyData: bodyData, api: api)
+            if mutation.bodyData != nil {
+                guard let bodyData = plaintextBody(for: mutation) else {
+                    throw APIError.server("Could not decrypt offline payload")
+                }
+                let _: EmptyResponse = try await putRaw(
+                    path: mutation.path,
+                    bodyData: bodyData,
+                    headers: headers,
+                    api: api
+                )
             } else {
-                let _: EmptyResponse = try await api.put(path: mutation.path)
+                let _: EmptyResponse = try await api.put(path: mutation.path, headers: headers)
             }
         case "DELETE":
             try await api.delete(path: mutation.path)
@@ -204,19 +284,45 @@ final class OfflineSyncManager: ObservableObject {
         }
     }
 
-    private func postRaw(path: String, bodyData: Data, api: APIClient) async throws -> EmptyResponse {
-        let value = try JSONDecoder().decode(AnyCodableValue.self, from: bodyData)
-        return try await api.post(path: path, body: value)
+    private func plaintextBody(for mutation: OutboxMutation) -> Data? {
+        guard let bodyData = mutation.bodyData else { return nil }
+        if mutation.bodyEncrypted {
+            guard let plain = PIIProtection.decryptData(bodyData) else {
+                return nil
+            }
+            return plain
+        }
+        return bodyData
     }
 
-    private func patchRaw(path: String, bodyData: Data, api: APIClient) async throws -> EmptyResponse {
+    private func postRaw(
+        path: String,
+        bodyData: Data,
+        headers: [String: String],
+        api: APIClient
+    ) async throws -> EmptyResponse {
         let value = try JSONDecoder().decode(AnyCodableValue.self, from: bodyData)
-        return try await api.patch(path: path, body: value)
+        return try await api.post(path: path, body: value, headers: headers)
     }
 
-    private func putRaw(path: String, bodyData: Data, api: APIClient) async throws -> EmptyResponse {
+    private func patchRaw(
+        path: String,
+        bodyData: Data,
+        headers: [String: String],
+        api: APIClient
+    ) async throws -> EmptyResponse {
         let value = try JSONDecoder().decode(AnyCodableValue.self, from: bodyData)
-        return try await api.put(path: path, body: value)
+        return try await api.patch(path: path, body: value, headers: headers)
+    }
+
+    private func putRaw(
+        path: String,
+        bodyData: Data,
+        headers: [String: String],
+        api: APIClient
+    ) async throws -> EmptyResponse {
+        let value = try JSONDecoder().decode(AnyCodableValue.self, from: bodyData)
+        return try await api.put(path: path, body: value, headers: headers)
     }
 
     private func refreshPendingCount() {

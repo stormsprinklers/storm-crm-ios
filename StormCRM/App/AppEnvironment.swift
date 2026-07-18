@@ -6,18 +6,34 @@ import SwiftUI
 
 
 
-enum MainTab: Hashable {
-
+enum MainTab: String, Hashable, CaseIterable, Identifiable {
     case dashboard
-
     case schedule
-
     case customers
-
     case messages
-
     case more
 
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .dashboard: return "Dashboard"
+        case .schedule: return "Schedule"
+        case .customers: return "Customers"
+        case .messages: return "Messages"
+        case .more: return "More"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .dashboard: return "house"
+        case .schedule: return "calendar"
+        case .customers: return "person.2"
+        case .messages: return "message"
+        case .more: return "ellipsis.circle"
+        }
+    }
 }
 
 

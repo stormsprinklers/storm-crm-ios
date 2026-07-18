@@ -7,21 +7,27 @@ struct IrrigationMapEditorCanvas: View {
     let activeZoneIndex: Int
     let draftPoints: ImagePolygon
     let readOnly: Bool
-    var maxHeight: CGFloat = 400
+    var height: CGFloat = 420
     var onTap: ((ImagePoint) -> Void)?
 
     @State private var naturalImageSize = CGSize(width: 4, height: 3)
+    @State private var scale: CGFloat = 1
+    @State private var steadyScale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var steadyOffset: CGSize = .zero
 
     var body: some View {
         GeometryReader { geometry in
             let layout = MapImageLayout(containerSize: geometry.size, imageSize: naturalImageSize)
-            ZStack {
+            ZStack(alignment: .topLeading) {
                 if let imageUrl {
-                    AuthenticatedBlobImage(urlString: imageUrl, contentMode: .fit) { size in
+                    AuthenticatedBlobImage(urlString: imageUrl, contentMode: .fill) { size in
                         if size.width > 0, size.height > 0 {
                             naturalImageSize = size
                         }
                     }
+                    .frame(width: layout.displayRect.width, height: layout.displayRect.height)
+                    .position(x: layout.displayRect.midX, y: layout.displayRect.midY)
                 } else {
                     placeholder("Capture an aerial image to draw zones")
                 }
@@ -34,23 +40,89 @@ struct IrrigationMapEditorCanvas: View {
                 }
                 .allowsHitTesting(false)
             }
+            .scaleEffect(scale)
+            .offset(offset)
+            .clipped()
             .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onEnded { value in
-                        guard !readOnly, let onTap,
-                              let point = layout.normalizedPoint(from: value.location) else { return }
-                        onTap(point)
-                    }
-            )
+            .highPriorityGesture(tapPlaceGesture(layout: layout))
+            .gesture(zoomGesture)
+            .simultaneousGesture(panGesture)
+            .onTapGesture(count: 2) {
+                withAnimation(.easeInOut(duration: 0.2)) { resetZoom() }
+            }
         }
         .frame(maxWidth: .infinity)
-        .frame(height: maxHeight)
+        .frame(height: height)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(StormTheme.ice, lineWidth: 1)
         )
+        .accessibilityHint("Tap to place points. Pinch to zoom. Double-tap to reset zoom.")
+    }
+
+    private func tapPlaceGesture(layout: MapImageLayout) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onEnded { value in
+                // Ignore pans used for zoomed navigation
+                guard !readOnly, let onTap else { return }
+                guard hypot(value.translation.width, value.translation.height) < 8 else { return }
+                // Convert from scaled/offset space back to layout coordinates
+                let location = untransformed(value.location, in: layout.containerSize)
+                guard let point = layout.normalizedPoint(from: location) else { return }
+                onTap(point)
+            }
+    }
+
+    private func untransformed(_ location: CGPoint, in size: CGSize) -> CGPoint {
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let translated = CGPoint(
+            x: location.x - offset.width - center.x,
+            y: location.y - offset.height - center.y
+        )
+        return CGPoint(
+            x: translated.x / scale + center.x,
+            y: translated.y / scale + center.y
+        )
+    }
+
+    private var zoomGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                scale = min(max(steadyScale * value, 1), 6)
+            }
+            .onEnded { _ in
+                steadyScale = scale
+                if scale <= 1.01 { resetZoom(animated: true) }
+            }
+    }
+
+    private var panGesture: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                guard scale > 1 else { return }
+                offset = CGSize(
+                    width: steadyOffset.width + value.translation.width,
+                    height: steadyOffset.height + value.translation.height
+                )
+            }
+            .onEnded { _ in
+                steadyOffset = offset
+            }
+    }
+
+    private func resetZoom(animated: Bool = false) {
+        let apply = {
+            scale = 1
+            steadyScale = 1
+            offset = .zero
+            steadyOffset = .zero
+        }
+        if animated {
+            withAnimation(.easeInOut(duration: 0.2)) { apply() }
+        } else {
+            apply()
+        }
     }
 
     private func placeholder(_ text: String) -> some View {

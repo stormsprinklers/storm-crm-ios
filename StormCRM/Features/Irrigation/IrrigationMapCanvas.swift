@@ -1,7 +1,15 @@
 import SwiftUI
 
+enum IrrigationMapSizing {
+    /// Prefer a large, nearly square map that fills the phone width.
+    static func preferredHeight(forWidth width: CGFloat, minimum: CGFloat = 320, maximum: CGFloat = 560) -> CGFloat {
+        let proposed = width * 0.95
+        return min(maximum, max(minimum, proposed))
+    }
+}
+
 private struct ZoomableMapContainer<Content: View>: View {
-    let maxHeight: CGFloat
+    let height: CGFloat
     @ViewBuilder let content: () -> Content
 
     @State private var scale: CGFloat = 1
@@ -25,14 +33,14 @@ private struct ZoomableMapContainer<Content: View>: View {
                 .accessibilityHint("Pinch to zoom. Double-tap to reset.")
         }
         .frame(maxWidth: .infinity)
-        .frame(height: maxHeight)
+        .frame(height: height)
         .clipped()
     }
 
     private var zoomGesture: some Gesture {
         MagnificationGesture()
             .onChanged { value in
-                scale = min(max(steadyScale * value, 1), 5)
+                scale = min(max(steadyScale * value, 1), 6)
             }
             .onEnded { _ in
                 steadyScale = scale
@@ -75,26 +83,36 @@ struct IrrigationMapCanvas: View {
     let imageUrl: String?
     let zones: [IrrigationMapZoneDTO]
     let markers: [IrrigationMapMarkerDTO]
-    var maxHeight: CGFloat = 360
-    var allowsZoom: Bool = false
+    var maxHeight: CGFloat? = nil
+    var allowsZoom: Bool = true
+    /// When true (default), crop/zoom to drawn zones so the map isn't tiny/zoomed-out.
+    var focusOnZones: Bool = true
 
     @State private var naturalImageSize = CGSize(width: 4, height: 3)
 
+    private var focus: MapFocusRect? {
+        guard focusOnZones else { return nil }
+        return PolygonGeometry.mapFocusBounds(
+            polygons: zones.map { $0.polygon },
+            markerPoints: markers.map { $0.point }
+        )
+    }
+
     var body: some View {
-        Group {
-            if allowsZoom {
-                ZoomableMapContainer(maxHeight: maxHeight) {
+        GeometryReader { geo in
+            let height = maxHeight ?? IrrigationMapSizing.preferredHeight(forWidth: geo.size.width)
+            Group {
+                if allowsZoom {
+                    ZoomableMapContainer(height: height) { mapContent }
+                } else {
                     mapContent
+                        .frame(width: geo.size.width, height: height)
                 }
-            } else {
-                GeometryReader { geometry in
-                    mapContent
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: maxHeight)
             }
+            .frame(width: geo.size.width, height: height)
         }
+        .frame(maxWidth: .infinity)
+        .frame(height: maxHeight ?? IrrigationMapSizing.preferredHeight(forWidth: UIScreen.main.bounds.width - 32))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
@@ -103,49 +121,63 @@ struct IrrigationMapCanvas: View {
     }
 
     private var mapContent: some View {
-        ZStack {
-            if let imageUrl {
-                AuthenticatedBlobImage(urlString: imageUrl, contentMode: .fit) { size in
-                    if size.width > 0, size.height > 0 {
-                        naturalImageSize = size
+        GeometryReader { geometry in
+            let layout = MapImageLayout(
+                containerSize: geometry.size,
+                imageSize: naturalImageSize,
+                focus: focus
+            )
+            ZStack(alignment: .topLeading) {
+                if let imageUrl {
+                    AuthenticatedBlobImage(urlString: imageUrl, contentMode: .fill) { size in
+                        if size.width > 0, size.height > 0 {
+                            naturalImageSize = size
+                        }
+                    }
+                    .frame(width: layout.displayRect.width, height: layout.displayRect.height)
+                    .position(x: layout.displayRect.midX, y: layout.displayRect.midY)
+                } else {
+                    placeholder("No aerial image on file")
+                }
+
+                Canvas { context, canvasSize in
+                    let drawLayout = MapImageLayout(
+                        containerSize: canvasSize,
+                        imageSize: naturalImageSize,
+                        focus: focus
+                    )
+                    for (index, zone) in zones.enumerated() {
+                        guard let polygon = zone.polygon, polygon.count >= 3 else { continue }
+                        let path = polygonPath(polygon, layout: drawLayout)
+                        let color = Color(hex: PolygonGeometry.zoneColor(index: index)) ?? StormTheme.sky
+                        context.fill(path, with: .color(color.opacity(0.35)))
+                        context.stroke(path, with: .color(color), lineWidth: 2)
+
+                        let centroid = PolygonGeometry.centroid(polygon)
+                        let labelPoint = drawLayout.cgPoint(from: centroid)
+                        context.draw(
+                            Text(zone.name).font(.caption2.bold()).foregroundColor(.white),
+                            at: labelPoint,
+                            anchor: .center
+                        )
+                    }
+
+                    for marker in markers {
+                        guard let point = marker.point else { continue }
+                        let style = IrrigationConstants.markerStyle(for: marker.type)
+                        let center = drawLayout.cgPoint(from: point)
+                        let dot = Path(ellipseIn: CGRect(x: center.x - 8, y: center.y - 8, width: 16, height: 16))
+                        context.fill(dot, with: .color(Color(hex: style.color) ?? StormTheme.navy))
+                        context.draw(
+                            Text(style.short).font(.caption2.bold()).foregroundColor(.white),
+                            at: center,
+                            anchor: .center
+                        )
                     }
                 }
-            } else {
-                placeholder("No aerial image on file")
+                .allowsHitTesting(false)
             }
-
-            Canvas { context, canvasSize in
-                let drawLayout = MapImageLayout(containerSize: canvasSize, imageSize: naturalImageSize)
-                for (index, zone) in zones.enumerated() {
-                    guard let polygon = zone.polygon, polygon.count >= 3 else { continue }
-                    let path = polygonPath(polygon, layout: drawLayout)
-                    let color = Color(hex: PolygonGeometry.zoneColor(index: index)) ?? StormTheme.sky
-                    context.fill(path, with: .color(color.opacity(0.35)))
-                    context.stroke(path, with: .color(color), lineWidth: 2)
-
-                    let centroid = PolygonGeometry.centroid(polygon)
-                    let labelPoint = drawLayout.cgPoint(from: centroid)
-                    context.draw(
-                        Text(zone.name).font(.caption2.bold()).foregroundColor(.white),
-                        at: labelPoint,
-                        anchor: .center
-                    )
-                }
-
-                for marker in markers {
-                    guard let point = marker.point else { continue }
-                    let style = IrrigationConstants.markerStyle(for: marker.type)
-                    let center = drawLayout.cgPoint(from: point)
-                    let dot = Path(ellipseIn: CGRect(x: center.x - 8, y: center.y - 8, width: 16, height: 16))
-                    context.fill(dot, with: .color(Color(hex: style.color) ?? StormTheme.navy))
-                    context.draw(
-                        Text(style.short).font(.caption2.bold()).foregroundColor(.white),
-                        at: center,
-                        anchor: .center
-                    )
-                }
-            }
-            .allowsHitTesting(false)
+            .clipped()
         }
     }
 

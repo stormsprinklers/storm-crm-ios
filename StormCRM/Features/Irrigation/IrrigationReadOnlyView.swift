@@ -19,13 +19,7 @@ struct PropertyIrrigationInlineSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                StormSectionHeader(title: "Irrigation map & program", systemImage: "drop.fill")
-                Spacer()
-                if mapProperty?.irrigationMapStatus == "PUBLISHED" {
-                    StormBadge(text: "Published", style: .success)
-                }
-            }
+            StormSectionHeader(title: "Irrigation map & program", systemImage: "drop.fill")
 
             if isLoading {
                 ProgressView("Loading irrigation…")
@@ -51,15 +45,12 @@ struct PropertyIrrigationInlineSection: View {
                         .foregroundStyle(.secondary)
                 }
 
-                if let shutoff = mapProperty?.shutoffValveLocation, !shutoff.isEmpty {
-                    LabeledContent("Shutoff") { Text(shutoff).font(.caption) }
-                }
-                if let controller = mapProperty?.controllerLocation, !controller.isEmpty {
-                    LabeledContent("Controller") { Text(controller).font(.caption) }
-                }
-                if let waterSource = mapProperty?.waterSource, !waterSource.isEmpty {
-                    LabeledContent("Water source") { Text(waterSource).font(.caption) }
-                }
+                IrrigationPropertyDetailsTable(
+                    zoneCount: mapProperty?.irrigationZoneCount ?? (zones.isEmpty ? nil : zones.count),
+                    shutoff: mapProperty?.shutoffValveLocation,
+                    controller: mapProperty?.controllerLocation,
+                    waterSource: mapProperty?.waterSource
+                )
 
                 if let guide = programGuide {
                     Divider()
@@ -104,6 +95,58 @@ struct PropertyIrrigationInlineSection: View {
     }
 }
 
+/// Compact label/value rows for property irrigation details (no Form spacing).
+struct IrrigationPropertyDetailsTable: View {
+    var zoneCount: Int?
+    var shutoff: String?
+    var controller: String?
+    var waterSource: String?
+
+    private var rows: [(String, String)] {
+        var result: [(String, String)] = []
+        if let zoneCount, zoneCount > 0 {
+            result.append(("Irrigation zones", "\(zoneCount)"))
+        }
+        if let shutoff, !shutoff.isEmpty {
+            result.append(("Shutoff", shutoff))
+        }
+        if let controller, !controller.isEmpty {
+            result.append(("Controller", controller))
+        }
+        if let waterSource, !waterSource.isEmpty {
+            result.append(("Water source", waterSource))
+        }
+        return result
+    }
+
+    var body: some View {
+        if !rows.isEmpty {
+            VStack(spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                    HStack(alignment: .top, spacing: 12) {
+                        Text(row.0)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 120, alignment: .leading)
+                        Text(row.1)
+                            .font(.subheadline.weight(.medium))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 6)
+                    if index < rows.count - 1 {
+                        Divider()
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 2)
+            .background(StormTheme.ice.opacity(0.35))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+    }
+}
+
 struct VisitPropertyIrrigationPreview: View {
     @EnvironmentObject private var env: AppEnvironment
     let customerId: String
@@ -142,8 +185,8 @@ struct VisitPropertyIrrigationPreview: View {
                     imageUrl: mapProperty?.displayImageUrl ?? property.aerialImageUrl,
                     zones: zones,
                     markers: mapProperty?.allMarkersForDisplay() ?? [],
-                    maxHeight: 220,
-                    allowsZoom: true
+                    allowsZoom: true,
+                    focusOnZones: true
                 )
 
                 if !zones.isEmpty {
@@ -235,13 +278,23 @@ struct IrrigationDetailView: View {
                         imageUrl: property.displayImageUrl,
                         zones: property.irrigationMapZones ?? [],
                         markers: property.allMarkersForDisplay(),
-                        maxHeight: 420,
-                        allowsZoom: true
+                        allowsZoom: true,
+                        focusOnZones: true
                     )
 
                     if let zones = property.irrigationMapZones, !zones.isEmpty {
                         IrrigationZoneLegend(zones: zones)
                     }
+
+                    IrrigationPropertyDetailsTable(
+                        zoneCount: property.irrigationZoneCount
+                            ?? (property.irrigationMapZones?.isEmpty == false
+                                ? property.irrigationMapZones?.count
+                                : nil),
+                        shutoff: property.shutoffValveLocation,
+                        controller: property.controllerLocation,
+                        waterSource: property.waterSource
+                    )
 
                     if let diagram = property.propertyDiagramUrl, diagram != property.aerialImageUrl {
                         Text("Property diagram").font(.headline)

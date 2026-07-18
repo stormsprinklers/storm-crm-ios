@@ -31,28 +31,20 @@ struct CustomerPropertyInlineSection: View {
     var body: some View {
         StormCard {
             VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
-                            Text(property.name)
-                                .font(.headline)
-                            if property.isPrimary == true {
-                                StormBadge(text: "Primary", style: .accent)
-                            }
-                        }
-                        if !property.formattedAddress.isEmpty {
-                            Text(property.formattedAddress)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(property.name)
+                            .font(.headline)
+                        if property.isPrimary == true {
+                            StormBadge(text: "Primary", style: .accent)
                         }
                     }
-                    Spacer()
-                    if property.irrigationMapStatus == "PUBLISHED" {
-                        StormBadge(text: "Map published", style: .success)
+                    if !property.formattedAddress.isEmpty {
+                        Text(property.formattedAddress)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
                     }
                 }
-
-                PropertyInfoSummaryRows(property: property)
 
                 if !property.formattedAddress.isEmpty {
                     PropertyLocationEmbedsView(addressQuery: property.formattedAddress)
@@ -71,51 +63,6 @@ struct CustomerPropertyInlineSection: View {
                     propertyId: property.id,
                     embedded: true
                 )
-            }
-        }
-    }
-}
-
-struct PropertyInfoSummaryRows: View {
-    let property: CustomerPropertyDTO
-
-    private var hasInfo: Bool {
-        property.irrigationZoneCount != nil
-            || !(property.shutoffValveLocation ?? "").isEmpty
-            || !(property.controllerLocation ?? "").isEmpty
-            || property.irrigationMapStatus != nil
-    }
-
-    var body: some View {
-        if hasInfo {
-            VStack(alignment: .leading, spacing: 8) {
-                StormSectionHeader(title: "Property info", systemImage: "info.circle")
-                if let zones = property.irrigationZoneCount, zones > 0 {
-                    LabeledContent("Irrigation zones") {
-                        Text("\(zones)")
-                            .font(.subheadline.weight(.medium))
-                    }
-                }
-                if let shutoff = property.shutoffValveLocation, !shutoff.isEmpty {
-                    LabeledContent("Shutoff") {
-                        Text(shutoff)
-                            .font(.subheadline)
-                            .multilineTextAlignment(.trailing)
-                    }
-                }
-                if let controller = property.controllerLocation, !controller.isEmpty {
-                    LabeledContent("Controller") {
-                        Text(controller)
-                            .font(.subheadline)
-                            .multilineTextAlignment(.trailing)
-                    }
-                }
-                if let status = property.irrigationMapStatus, !status.isEmpty {
-                    LabeledContent("Map status") {
-                        Text(status.replacingOccurrences(of: "_", with: " "))
-                            .font(.subheadline)
-                    }
-                }
             }
         }
     }

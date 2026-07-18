@@ -148,7 +148,6 @@ struct DashboardView: View {
                     }
 
                     clockSection
-                    categoryTimerSection
                     activeAndNextJobSection
                     remainingTodaySection
 
@@ -183,7 +182,7 @@ struct DashboardView: View {
     private var offlineBanner: some View {
         HStack {
             Image(systemName: "wifi.slash")
-            Text("You're offline — calls, SMS, Rachio, and card payments need a connection.")
+            Text("You're offline — calls, SMS, Rachio, and card/QR payments need a connection. Cash/check can still be recorded and will sync later.")
                 .font(.caption)
         }
         .foregroundStyle(.orange)
@@ -195,16 +194,11 @@ struct DashboardView: View {
 
     @ViewBuilder
     private func alertsSection(_ alerts: MobileDashboardDTO.AlertsDTO) -> some View {
-        let hasAlert = alerts.unreadSms > 0 || alerts.missedTransfers > 0 || alerts.timerLeftRunning
+        let hasAlert = alerts.unreadSms > 0 || alerts.missedTransfers > 0
         if hasAlert {
             StormCard {
                 VStack(alignment: .leading, spacing: 8) {
                     StormSectionHeader(title: "Alerts", systemImage: "bell")
-                    if alerts.timerLeftRunning {
-                        Text("A category timer has been running a long time.")
-                            .font(.subheadline)
-                            .foregroundStyle(.orange)
-                    }
                     if alerts.unreadSms > 0 {
                         Button {
                             env.selectedTab = .messages
@@ -274,47 +268,6 @@ struct DashboardView: View {
                     Text("Today: \(hours, format: .number.precision(.fractionLength(2))) hours")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private var categoryTimerSection: some View {
-        StormCard {
-            VStack(alignment: .leading, spacing: 12) {
-                StormSectionHeader(title: "Activity timer", systemImage: "timer")
-
-                if let message = techDashboard.segmentMessage {
-                    Text(message).font(.caption).foregroundStyle(.secondary)
-                }
-
-                if let open = techDashboard.dashboard?.openSegment {
-                    Text("\(TechTimeCategory(rawValue: open.category)?.title ?? open.category) since \(APIDateFormatting.displayString(from: open.startedAt))")
-                        .font(.subheadline)
-                    if open.leftRunning == true {
-                        Text("Left running — consider stopping this timer.")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                    Button("Stop timer", role: .destructive) {
-                        Task { await techDashboard.stopSegment(api: env.apiClient) }
-                    }
-                    .buttonStyle(StormSecondaryButtonStyle())
-                } else {
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                        ForEach(TechTimeCategory.allCases) { category in
-                            Button(category.title) {
-                                Task {
-                                    await techDashboard.startSegment(
-                                        api: env.apiClient,
-                                        category: category,
-                                        visitId: techDashboard.dashboard?.activeVisit?.id
-                                    )
-                                }
-                            }
-                            .buttonStyle(StormSecondaryButtonStyle())
-                        }
-                    }
                 }
             }
         }

@@ -23,7 +23,6 @@ enum APIPath {
     static func visitLineItems(_ id: String) -> String { "/api/visits/\(id)/line-items" }
     static func visitPartsRun(_ id: String) -> String { "/api/visits/\(id)/parts-run" }
     static func visitMaintenancePlan(_ id: String) -> String { "/api/visits/\(id)/maintenance-plan" }
-    static func visitProfit(_ id: String) -> String { "/api/visits/\(id)/profit" }
     static func visitInvoice(_ id: String) -> String { "/api/visits/\(id)/invoice" }
     static func invoice(_ id: String) -> String { "/api/invoices/\(id)" }
     static func invoiceSend(_ id: String) -> String { "/api/invoices/\(id)/send" }
@@ -38,13 +37,19 @@ enum APIPath {
     static func visitDiscounts(_ id: String) -> String { "/api/visits/\(id)/discounts" }
     static let scheduleFilters = "/api/schedule/filters"
     static let scheduleJobs = "/api/schedule/jobs"
+    static let scheduleTimeOff = "/api/schedule/time-off"
     static let priceBookItems = "/api/price-book/items"
+    static let priceBookFrequentItems = "/api/price-book/items/frequent"
+    static let priceBookDiscounts = "/api/price-book/discounts"
     static func priceBookCategory(_ id: String) -> String { "/api/price-book/categories/\(id)" }
     static let priceBookCategories = "/api/price-book/categories"
     static let estimates = "/api/estimates"
     static func estimate(_ id: String) -> String { "/api/estimates/\(id)" }
     static func estimateSend(_ id: String) -> String { "/api/estimates/\(id)/send" }
+    static func estimateSignature(_ id: String) -> String { "/api/estimates/\(id)/signature" }
     static func estimateLineItems(_ id: String) -> String { "/api/estimates/\(id)/line-items" }
+    static func estimateDiscounts(_ id: String) -> String { "/api/estimates/\(id)/discounts" }
+    static func estimateOptions(_ id: String) -> String { "/api/estimates/\(id)/options" }
     static func estimateCopy(_ id: String) -> String { "/api/estimates/\(id)/copy" }
     static func visitChecklistItem(_ visitId: String, checklistId: String, itemId: String) -> String {
         "/api/visits/\(visitId)/checklists/\(checklistId)/items/\(itemId)"
@@ -59,6 +64,7 @@ enum APIPath {
     static func customerProperties(_ id: String) -> String { "/api/customers/\(id)/properties" }
     static func customerHistory(_ id: String) -> String { "/api/customers/\(id)/history" }
     static func customerNotes(_ id: String) -> String { "/api/customers/\(id)/notes" }
+    static func customerAttachments(_ id: String) -> String { "/api/customers/\(id)/attachments" }
     static let mapsEmbed = "/api/maps/embed"
     static func irrigationMap(customerId: String, propertyId: String) -> String {
         "/api/customers/\(customerId)/properties/\(propertyId)/irrigation-map"
@@ -103,5 +109,6 @@ enum APIPath {
     static func reporting(_ type: String) -> String { "/api/reporting/\(type)" }
     static let paymentsCheckout = "/api/payments/checkout"
     static let paymentsConfirm = "/api/payments/confirm"
+    static let paymentsManual = "/api/payments/manual"
     static let inboxContacts = "/api/inbox/contacts"
 }

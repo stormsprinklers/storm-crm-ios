@@ -26,16 +26,6 @@ struct VisitHeaderSection: View {
             Text(APIDateFormatting.displayString(from: visit.startAt))
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-
-            if let tags = visit.tags, !tags.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack {
-                        ForEach(tags, id: \.self) { tag in
-                            StormBadge(text: tag)
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -164,123 +154,78 @@ struct VisitInstallPlanSection: View {
     }
 }
 
-struct VisitProfitSectionView: View {
-    let profit: VisitProfitDTO?
-
-    var body: some View {
-        StormCard {
-            VStack(alignment: .leading, spacing: 8) {
-                StormSectionHeader(title: "Profit", systemImage: "chart.line.uptrend.xyaxis")
-                if let profit {
-                    HStack {
-                        metric("Revenue", profit.revenue)
-                        Spacer()
-                        metric("Net", profit.netProfit)
-                        Spacer()
-                        metric("Margin", profit.marginPercent, isPercent: true)
-                    }
-                    if let breakdown = profit.breakdown {
-                        Divider()
-                        ForEach(breakdown) { line in
-                            HStack {
-                                Text(line.label).font(.caption)
-                                Spacer()
-                                Text(line.amount, format: .currency(code: "USD")).font(.caption)
-                            }
-                        }
-                    }
-                } else {
-                    Text("Profit data unavailable").foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private func metric(_ label: String, _ value: Double, isPercent: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            if isPercent {
-                Text("\(value, format: .number.precision(.fractionLength(1)))%")
-                    .font(.subheadline.weight(.semibold))
-            } else {
-                Text(value, format: .currency(code: "USD"))
-                    .font(.subheadline.weight(.semibold))
-            }
-        }
-    }
-}
-
-struct VisitCustomerHistorySection: View {
+struct VisitCustomerHistoryContent: View {
     let history: CustomerHistoryDTO?
 
     var body: some View {
-        StormCard {
-            VStack(alignment: .leading, spacing: 8) {
-                StormSectionHeader(title: "Customer history", systemImage: "clock.arrow.circlepath")
-                if let history {
-                    Text("\(history.pastVisitCount) past visit(s)")
+        VStack(alignment: .leading, spacing: 8) {
+            if let history {
+                Text("\(history.pastVisitCount) past visit(s)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ForEach(history.visits.prefix(5)) { past in
+                    NavigationLink(value: CustomerHistoryDestination.visit(past.id)) {
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(past.title)
+                                    .font(.subheadline)
+                                    .foregroundStyle(StormTheme.navy)
+                                Text(APIDateFormatting.displayString(from: past.startAt))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            StormBadge(text: past.status.visitDisplayLabel)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                if !history.estimatesWithoutVisit.isEmpty {
+                    Text("Open estimates: \(history.estimatesWithoutVisit.count)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    ForEach(history.visits.prefix(5)) { past in
-                        NavigationLink(value: CustomerHistoryDestination.visit(past.id)) {
+                        .padding(.top, 4)
+                    ForEach(history.estimatesWithoutVisit.prefix(3)) { estimate in
+                        NavigationLink(value: CustomerHistoryDestination.estimate(estimate.id)) {
                             HStack {
-                                VStack(alignment: .leading) {
-                                    Text(past.title)
-                                        .font(.subheadline)
-                                        .foregroundStyle(StormTheme.navy)
-                                    Text(APIDateFormatting.displayString(from: past.startAt))
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                                Text(estimate.status.replacingOccurrences(of: "_", with: " "))
+                                    .font(.caption)
+                                    .foregroundStyle(StormTheme.navy)
                                 Spacer()
-                                StormBadge(text: past.status.visitDisplayLabel)
+                                Text(estimate.total, format: .currency(code: "USD"))
+                                    .font(.caption)
                             }
                         }
                         .buttonStyle(.plain)
                     }
-                    if !history.estimatesWithoutVisit.isEmpty {
-                        Text("Open estimates: \(history.estimatesWithoutVisit.count)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
-                        ForEach(history.estimatesWithoutVisit.prefix(3)) { estimate in
-                            NavigationLink(value: CustomerHistoryDestination.estimate(estimate.id)) {
-                                HStack {
-                                    Text(estimate.status.replacingOccurrences(of: "_", with: " "))
-                                        .font(.caption)
-                                        .foregroundStyle(StormTheme.navy)
-                                    Spacer()
-                                    Text(estimate.total, format: .currency(code: "USD"))
-                                        .font(.caption)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    if let invoices = history.invoices, !invoices.isEmpty {
-                        Text("Invoices: \(invoices.count)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
-                        ForEach(invoices.prefix(3)) { invoice in
-                            NavigationLink(value: CustomerHistoryDestination.invoice(invoice.id)) {
-                                HStack {
-                                    Text(invoice.invoiceNumber)
-                                        .font(.caption)
-                                        .foregroundStyle(StormTheme.navy)
-                                    Spacer()
-                                    Text(invoice.total, format: .currency(code: "USD"))
-                                        .font(.caption)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                } else {
-                    Text("No history loaded").foregroundStyle(.secondary)
                 }
+                if let invoices = history.invoices, !invoices.isEmpty {
+                    Text("Invoices: \(invoices.count)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                    ForEach(invoices.prefix(3)) { invoice in
+                        NavigationLink(value: CustomerHistoryDestination.invoice(invoice.id)) {
+                            HStack {
+                                Text(invoice.invoiceNumber)
+                                    .font(.caption)
+                                    .foregroundStyle(StormTheme.navy)
+                                Spacer()
+                                Text(invoice.total, format: .currency(code: "USD"))
+                                    .font(.caption)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            } else {
+                Text("No history loaded")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 4)
     }
 }
 
@@ -617,6 +562,7 @@ struct VisitCustomerInfoSection: View {
     @EnvironmentObject private var env: AppEnvironment
     let visit: VisitDetailDTO
     @ObservedObject var voice: VoiceManager
+    var customerHistory: CustomerHistoryDTO? = nil
 
     @State private var programGuide: ControllerProgramGuideDTO?
     @State private var isLoadingGuide = false
@@ -695,6 +641,16 @@ struct VisitCustomerInfoSection: View {
                     }
                 }
 
+                if visit.customer != nil {
+                    DisclosureGroup {
+                        VisitCustomerHistoryContent(history: customerHistory)
+                    } label: {
+                        Label(historyDisclosureTitle, systemImage: "clock.arrow.circlepath")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(StormTheme.navy)
+                    }
+                }
+
                 if let customerId = visit.customer?.id, let property = visit.property {
                     VisitPropertyIrrigationPreview(customerId: customerId, property: property)
 
@@ -723,6 +679,13 @@ struct VisitCustomerInfoSection: View {
         }
     }
 
+    private var historyDisclosureTitle: String {
+        if let count = customerHistory?.pastVisitCount {
+            return "History · \(count) past visit\(count == 1 ? "" : "s")"
+        }
+        return "Customer history"
+    }
+
     private func loadProgramGuide(customerId: String, propertyId: String) async {
         isLoadingGuide = programGuide == nil
         defer { isLoadingGuide = false }
@@ -738,111 +701,4 @@ struct VisitCustomerInfoSection: View {
 
 }
 
-struct VisitTagsSection: View {
-    @EnvironmentObject private var env: AppEnvironment
-    let visitId: String
-    let tags: [String]
-    let canEdit: Bool
-    var onUpdated: () async -> Void
 
-    @State private var newTag = ""
-    @State private var isSaving = false
-    @State private var error: String?
-
-    var body: some View {
-        StormCard {
-            VStack(alignment: .leading, spacing: 10) {
-                StormSectionHeader(title: "Tags", systemImage: "tag")
-
-                if tags.isEmpty {
-                    Text(canEdit ? "No tags yet." : "No tags.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                } else {
-                    FlowLayoutTags(tags: tags, canEdit: canEdit) { tag in
-                        Task { await saveTags(tags.filter { $0 != tag }) }
-                    }
-                }
-
-                if canEdit {
-                    HStack {
-                        TextField("Add tag…", text: $newTag)
-                            .textFieldStyle(.roundedBorder)
-                        Button("Add") {
-                            Task { await addTag() }
-                        }
-                        .buttonStyle(StormSecondaryButtonStyle())
-                        .disabled(isSaving || newTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                }
-
-                if let error {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-            }
-        }
-    }
-
-    private func addTag() async {
-        let tag = newTag.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !tag.isEmpty, !tags.contains(tag) else {
-            newTag = ""
-            return
-        }
-        newTag = ""
-        await saveTags(tags + [tag])
-    }
-
-    private func saveTags(_ nextTags: [String]) async {
-        isSaving = true
-        error = nil
-        defer { isSaving = false }
-
-        struct Body: Encodable { let tags: [String] }
-        do {
-            let _: VisitDetailDTO = try await env.apiClient.patch(
-                path: APIPath.visit(visitId),
-                body: Body(tags: nextTags)
-            )
-            await onUpdated()
-        } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
-        }
-    }
-}
-
-private struct FlowLayoutTags: View {
-    let tags: [String]
-    let canEdit: Bool
-    let onRemove: (String) -> Void
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(tags, id: \.self) { tag in
-                    HStack(spacing: 4) {
-                        Text(tag)
-                            .font(.caption.weight(.medium))
-                        if canEdit {
-                            Button {
-                                onRemove(tag)
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(StormTheme.ice.opacity(0.6))
-                    .foregroundStyle(StormTheme.navy)
-                    .clipShape(Capsule())
-                }
-            }
-        }
-    }
-}

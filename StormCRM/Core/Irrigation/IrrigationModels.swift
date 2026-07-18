@@ -283,10 +283,13 @@ struct ControllerProgramDTO: Decodable, Identifiable {
     let daysLabel: String?
     let startTimes: [String]?
     let totalWallClockMinutes: Double?
+    let totalGallonsPerWeek: Double?
+    let isEstablishment: Bool?
     let zones: [ProgramZoneRuntimeDTO]?
 
     enum CodingKeys: String, CodingKey {
-        case id, label, daysLabel, startTimes, totalWallClockMinutes, zones
+        case id, label, daysLabel, startTimes, totalWallClockMinutes
+        case totalGallonsPerWeek, isEstablishment, zones
     }
 
     init(from decoder: Decoder) throws {
@@ -296,7 +299,32 @@ struct ControllerProgramDTO: Decodable, Identifiable {
         daysLabel = try container.decodeIfPresent(String.self, forKey: .daysLabel)
         startTimes = try container.decodeIfPresent([String].self, forKey: .startTimes)
         totalWallClockMinutes = try container.decodeFlexibleDouble(forKey: .totalWallClockMinutes)
+        totalGallonsPerWeek = try container.decodeFlexibleDouble(forKey: .totalGallonsPerWeek)
+        isEstablishment = try container.decodeIfPresent(Bool.self, forKey: .isEstablishment)
         zones = try container.decodeIfPresent([ProgramZoneRuntimeDTO].self, forKey: .zones)
+    }
+}
+
+struct CycleSoakPlanDTO: Decodable, Hashable {
+    let enabled: Bool?
+    let cycleCount: Int?
+    let minutesPerCycle: Double?
+    let soakMinutes: Double?
+    let wallClockMinutes: Double?
+    let description: String?
+
+    enum CodingKeys: String, CodingKey {
+        case enabled, cycleCount, minutesPerCycle, soakMinutes, wallClockMinutes, description
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled)
+        cycleCount = try container.decodeIfPresent(Int.self, forKey: .cycleCount)
+        minutesPerCycle = try container.decodeFlexibleDouble(forKey: .minutesPerCycle)
+        soakMinutes = try container.decodeFlexibleDouble(forKey: .soakMinutes)
+        wallClockMinutes = try container.decodeFlexibleDouble(forKey: .wallClockMinutes)
+        description = try container.decodeIfPresent(String.self, forKey: .description)
     }
 }
 
@@ -308,12 +336,17 @@ struct ProgramZoneRuntimeDTO: Decodable, Identifiable {
     let runtimePerEventMinutes: Double?
     let daysPerWeek: Int?
     let weeklyRuntimeMinutes: Double?
+    let gallonsPerWeek: Double?
+    let gallonsPerEvent: Double?
+    let cycleSoak: CycleSoakPlanDTO?
+    let establishmentNote: String?
     let startTime: String?
     let finishTime: String?
 
     enum CodingKeys: String, CodingKey {
         case zoneId, name, stationNumber, runtimePerEventMinutes, daysPerWeek
-        case weeklyRuntimeMinutes, startTime, finishTime
+        case weeklyRuntimeMinutes, gallonsPerWeek, gallonsPerEvent, cycleSoak
+        case establishmentNote, startTime, finishTime
     }
 
     init(from decoder: Decoder) throws {
@@ -324,6 +357,10 @@ struct ProgramZoneRuntimeDTO: Decodable, Identifiable {
         runtimePerEventMinutes = try container.decodeFlexibleDouble(forKey: .runtimePerEventMinutes)
         daysPerWeek = try container.decodeIfPresent(Int.self, forKey: .daysPerWeek)
         weeklyRuntimeMinutes = try container.decodeFlexibleDouble(forKey: .weeklyRuntimeMinutes)
+        gallonsPerWeek = try container.decodeFlexibleDouble(forKey: .gallonsPerWeek)
+        gallonsPerEvent = try container.decodeFlexibleDouble(forKey: .gallonsPerEvent)
+        cycleSoak = try container.decodeIfPresent(CycleSoakPlanDTO.self, forKey: .cycleSoak)
+        establishmentNote = try container.decodeIfPresent(String.self, forKey: .establishmentNote)
         startTime = try container.decodeIfPresent(String.self, forKey: .startTime)
         finishTime = try container.decodeIfPresent(String.self, forKey: .finishTime)
     }
