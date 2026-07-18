@@ -1,13 +1,13 @@
 import Foundation
 
-struct MobileDashboardDTO: Codable {
-    struct ClockDTO: Codable {
+struct MobileDashboardDTO: Decodable {
+    struct ClockDTO: Decodable {
         let id: String
         let clockInAt: String
         let clockOutAt: String?
     }
 
-    struct AlertsDTO: Codable {
+    struct AlertsDTO: Decodable {
         let unreadSms: Int
         let missedTransfers: Int
         let timerLeftRunning: Bool
