@@ -306,7 +306,7 @@ struct IrrigationDetailView: View {
                 if let guide = programGuide {
                     StormCard {
                         VStack(alignment: .leading, spacing: 8) {
-                            StormSectionHeader(title: "Program guide", systemImage: "clock")
+                            StormSectionHeader(title: "Controller program guide", systemImage: "clock")
                             IrrigationProgramGuideView(guide: guide)
                         }
                     }

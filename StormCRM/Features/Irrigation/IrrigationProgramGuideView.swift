@@ -10,14 +10,11 @@ struct IrrigationProgramGuideView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Sprinkler Programming Setup")
-                    .font(.headline)
-                Text("Each runtime occurs on every watering day for each start time listed in that program.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            // Title comes from the parent section (e.g. "Controller program guide").
+            Text("Each runtime occurs on every watering day for each start time listed in that program.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             if programs.isEmpty {
                 Text("Add zones with vegetation and irrigation types to generate a programming guide.")
