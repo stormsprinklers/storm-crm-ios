@@ -705,7 +705,29 @@ struct MapsEmbedResponse: Decodable {
     let configured: Bool
     let placeEmbed: String?
     let streetEmbed: String?
+    /// Optional still-image URLs from the CRM (preferred when present).
+    let streetImage: String?
+    let placeImage: String?
     let formattedAddress: String?
+
+    enum CodingKeys: String, CodingKey {
+        case configured, placeEmbed, streetEmbed, formattedAddress
+        case streetImage, placeImage
+        case streetViewImage, staticStreetView, staticMap
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        configured = try container.decodeIfPresent(Bool.self, forKey: .configured) ?? false
+        placeEmbed = try container.decodeIfPresent(String.self, forKey: .placeEmbed)
+        streetEmbed = try container.decodeIfPresent(String.self, forKey: .streetEmbed)
+        streetImage = try container.decodeIfPresent(String.self, forKey: .streetImage)
+            ?? (try container.decodeIfPresent(String.self, forKey: .streetViewImage))
+            ?? (try container.decodeIfPresent(String.self, forKey: .staticStreetView))
+        placeImage = try container.decodeIfPresent(String.self, forKey: .placeImage)
+            ?? (try container.decodeIfPresent(String.self, forKey: .staticMap))
+        formattedAddress = try container.decodeIfPresent(String.self, forKey: .formattedAddress)
+    }
 }
 
 struct VisitMaintenanceContextDTO: Decodable {

@@ -88,27 +88,23 @@ struct PropertyLocationEmbedsView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
             } else {
-                if let streetEmbed = embeds?.streetEmbed, let url = URL(string: streetEmbed) {
+                if let streetURL = streetViewImageURL {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Street view")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        GoogleMapsEmbedWebView(url: url, isInteractive: false)
-                            .frame(height: 220)
+                        GoogleMapsStaticImageView(url: streetURL, height: 220)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .allowsHitTesting(false)
                     }
                 }
 
-                if let placeEmbed = embeds?.placeEmbed, let url = URL(string: placeEmbed) {
+                if let mapURL = placeMapImageURL {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Map")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        GoogleMapsEmbedWebView(url: url, isInteractive: false)
-                            .frame(height: 180)
+                        GoogleMapsStaticImageView(url: mapURL, height: 180)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .allowsHitTesting(false)
                     }
                 }
 
@@ -116,7 +112,7 @@ struct PropertyLocationEmbedsView: View {
                     Text("Set GOOGLE_MAPS_API_KEY on the CRM server to show street view and map embeds.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                } else if embeds?.streetEmbed == nil, embeds?.placeEmbed == nil {
+                } else if streetViewImageURL == nil, placeMapImageURL == nil {
                     Text("Map preview is not available for this address.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -142,6 +138,23 @@ struct PropertyLocationEmbedsView: View {
 
     private var mapsDirectionsURL: URL? {
         AppleMapsURL.directionsURL(latitude: nil, longitude: nil, address: addressQuery)
+    }
+
+    /// Prefer a still Street View image over an interactive embed iframe.
+    private var streetViewImageURL: URL? {
+        if let direct = embeds?.streetImage, let url = URL(string: direct) {
+            return url
+        }
+        guard let embed = embeds?.streetEmbed, let embedURL = URL(string: embed) else { return nil }
+        return GoogleMapsStaticImage.streetViewURL(fromEmbed: embedURL, width: 640, height: 400)
+    }
+
+    private var placeMapImageURL: URL? {
+        if let direct = embeds?.placeImage, let url = URL(string: direct) {
+            return url
+        }
+        guard let embed = embeds?.placeEmbed, let embedURL = URL(string: embed) else { return nil }
+        return GoogleMapsStaticImage.mapURL(fromPlaceEmbed: embedURL, width: 640, height: 360)
     }
 
     private func load() async {
