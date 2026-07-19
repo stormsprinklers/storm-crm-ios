@@ -97,34 +97,41 @@ struct TimeTrackingBar: View {
                 )
 
                 if isPaused {
+                    let recent = mostRecentStatusTimestamp(
+                        (startEvent?.occurredAt, "Started at"),
+                        (pauseEvent?.occurredAt, "Paused at")
+                    )
                     timeStep(
                         label: "Resume",
                         systemImage: "play.fill",
                         isActive: true,
                         activeTint: .orange,
                         counter: VisitTimeTrackingLogic.formatDuration(totalSeconds: onTheJobSeconds),
-                        timestamp: startEvent?.occurredAt,
-                        timestampLabel: startEvent == nil ? nil : "Started at",
-                        secondaryTimestamp: pauseEvent?.occurredAt,
-                        secondaryTimestampLabel: pauseEvent == nil ? nil : "Paused at",
+                        timestamp: recent?.occurredAt,
+                        timestampLabel: recent?.label,
                         disabled: isCompleted,
                         action: "RESUME"
                     )
                 } else {
-                timeStep(
-                    label: isWorking ? "Pause" : "Start",
-                    accessibilityLabel: isWorking ? "Pause" : "Start my time",
-                    systemImage: isWorking ? "pause.fill" : "play.fill",
-                    isActive: isWorking,
-                    activeTint: StormTheme.success,
-                    counter: (isWorking || workStarted)
-                        ? VisitTimeTrackingLogic.formatDuration(totalSeconds: onTheJobSeconds)
-                        : nil,
-                    timestamp: startEvent?.occurredAt,
-                    timestampLabel: startEvent == nil ? nil : "Started at",
-                    disabled: isCompleted,
-                    action: isWorking ? "PAUSE" : "START"
-                )
+                    // Prefer the latest work event (resume/start) so the caption stays current.
+                    let recent = mostRecentStatusTimestamp(
+                        (startEvent?.occurredAt, "Started at"),
+                        (VisitTimeTrackingLogic.latestEvent(in: events, type: "RESUME")?.occurredAt, "Resumed at")
+                    )
+                    timeStep(
+                        label: isWorking ? "Pause" : "Start",
+                        accessibilityLabel: isWorking ? "Pause" : "Start my time",
+                        systemImage: isWorking ? "pause.fill" : "play.fill",
+                        isActive: isWorking,
+                        activeTint: StormTheme.success,
+                        counter: (isWorking || workStarted)
+                            ? VisitTimeTrackingLogic.formatDuration(totalSeconds: onTheJobSeconds)
+                            : nil,
+                        timestamp: recent?.occurredAt,
+                        timestampLabel: recent?.label,
+                        disabled: isCompleted,
+                        action: isWorking ? "PAUSE" : "START"
+                    )
                 }
 
                 timeStep(
@@ -149,6 +156,21 @@ struct TimeTrackingBar: View {
         }
     }
 
+    /// Picks the newest of the given (occurredAt, label) pairs for the status caption.
+    private func mostRecentStatusTimestamp(
+        _ candidates: (occurredAt: String?, label: String)...
+    ) -> (occurredAt: String, label: String)? {
+        candidates
+            .compactMap { candidate -> (occurredAt: String, label: String, date: Date)? in
+                guard let raw = candidate.occurredAt,
+                      let date = APIDateFormatting.parse(raw)
+                else { return nil }
+                return (raw, candidate.label, date)
+            }
+            .max(by: { $0.date < $1.date })
+            .map { ($0.occurredAt, $0.label) }
+    }
+
     @ViewBuilder
     private func timeStep(
         label: String,
@@ -159,8 +181,6 @@ struct TimeTrackingBar: View {
         counter: String? = nil,
         timestamp: String?,
         timestampLabel: String?,
-        secondaryTimestamp: String? = nil,
-        secondaryTimestampLabel: String? = nil,
         disabled: Bool,
         action: String
     ) -> some View {
@@ -195,16 +215,6 @@ struct TimeTrackingBar: View {
 
             if let timestamp, let formatted = VisitTimeTrackingLogic.formatEventTimestamp(timestamp) {
                 Text("\(timestampLabel ?? "At") \(formatted)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.85)
-            }
-
-            if let secondaryTimestamp,
-               let formatted = VisitTimeTrackingLogic.formatEventTimestamp(secondaryTimestamp) {
-                Text("\(secondaryTimestampLabel ?? "At") \(formatted)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
