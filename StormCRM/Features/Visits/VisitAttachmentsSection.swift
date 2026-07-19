@@ -157,20 +157,12 @@ struct PartsRunSheet: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     let visitId: String
-    /// Job/property coordinates used to reject Simulator GPS that is hundreds of miles away.
-    var jobLatitude: Double? = nil
-    var jobLongitude: Double? = nil
     var onComplete: (() async -> Void)?
 
     @State private var suppliers: [PartsRunOptionDTO] = []
     @State private var error: String?
     @State private var isLoading = true
-    @State private var usedUserLocation = false
-    @State private var locationNote: String?
     @State private var selectingId: String?
-
-    /// Beyond this, device GPS is treated as unreliable for parts-run ranking (e.g. Simulator at Apple Park).
-    private static let maxOriginDistanceFromJobMeters: CLLocationDistance = 80_000
 
     var body: some View {
         NavigationStack {
@@ -181,12 +173,6 @@ struct PartsRunSheet: View {
                         Text("Finding the nearest suppliers…")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        if let locationNote {
-                            Text(locationNote)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if suppliers.isEmpty {
@@ -205,24 +191,13 @@ struct PartsRunSheet: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
-                        Section {
-                            ForEach(suppliers) { supplier in
-                                Button {
-                                    Task { await selectSupplier(supplier) }
-                                } label: {
-                                    supplierRow(supplier)
-                                }
-                                .disabled(selectingId != nil)
+                        ForEach(suppliers) { supplier in
+                            Button {
+                                Task { await selectSupplier(supplier) }
+                            } label: {
+                                supplierRow(supplier)
                             }
-                        } footer: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                if let locationNote {
-                                    Text(locationNote)
-                                }
-                                Text(usedUserLocation
-                                     ? "Sorted by drive time from your current location. Tap a supplier to pause your timer and open directions."
-                                     : "Sorted by drive time from the job site. Tap a supplier to pause your timer and open directions.")
-                            }
+                            .disabled(selectingId != nil)
                         }
                     }
                 }
@@ -314,15 +289,21 @@ struct PartsRunSheet: View {
         error = nil
         defer { isLoading = false }
 
-        let origin = await resolveOriginQuery()
-        locationNote = origin.note
-        var query: [URLQueryItem] = []
-        if let latitude = origin.latitude, let longitude = origin.longitude {
-            query = [
-                URLQueryItem(name: "originLat", value: String(latitude)),
-                URLQueryItem(name: "originLng", value: String(longitude)),
-            ]
+        guard let location = await env.location.awaitLocation(timeout: 12) else {
+            suppliers = []
+            switch env.location.authorizationStatus {
+            case .denied, .restricted:
+                error = "Turn on Location access for Radar so we can rank suppliers from where you are."
+            default:
+                error = "Couldn't get your GPS location. Try again outdoors or check Location permission."
+            }
+            return
         }
+
+        let query = [
+            URLQueryItem(name: "originLat", value: String(location.coordinate.latitude)),
+            URLQueryItem(name: "originLng", value: String(location.coordinate.longitude)),
+        ]
 
         do {
             let response: PartsRunGetResponse = try await env.apiClient.get(
@@ -332,77 +313,12 @@ struct PartsRunSheet: View {
             // Always rank by drive time. Open/closed is shown as a badge — never bury nearby
             // closed stores behind far-away open ones.
             suppliers = (response.options ?? []).sorted(by: Self.nearerSupplier)
-            usedUserLocation = (response.usedUserLocation ?? false) && origin.sentUserLocation
             if suppliers.isEmpty {
                 error = response.message ?? "No suppliers found nearby."
             }
         } catch {
             self.error = (error as? APIError)?.message
         }
-    }
-
-    private struct OriginQuery {
-        var latitude: Double?
-        var longitude: Double?
-        var sentUserLocation: Bool
-        var note: String?
-    }
-
-    private func resolveOriginQuery() async -> OriginQuery {
-        let location = await env.location.awaitLocation(timeout: 12)
-
-        guard let location else {
-            switch env.location.authorizationStatus {
-            case .denied, .restricted:
-                return OriginQuery(
-                    latitude: nil,
-                    longitude: nil,
-                    sentUserLocation: false,
-                    note: "Location access is off — distances use the job site instead of your current position."
-                )
-            default:
-                return OriginQuery(
-                    latitude: nil,
-                    longitude: nil,
-                    sentUserLocation: false,
-                    note: "Couldn't get GPS — distances use the job site."
-                )
-            }
-        }
-
-        if let jobLatitude, let jobLongitude {
-            let jobLocation = CLLocation(latitude: jobLatitude, longitude: jobLongitude)
-            let meters = location.distance(from: jobLocation)
-            if meters > Self.maxOriginDistanceFromJobMeters {
-                let miles = meters / 1609.344
-                return OriginQuery(
-                    latitude: nil,
-                    longitude: nil,
-                    sentUserLocation: false,
-                    note: String(
-                        format: "Your GPS is %.0f mi from the job (common in Simulator) — ranking from the job site instead.",
-                        miles
-                    )
-                )
-            }
-        } else {
-            #if targetEnvironment(simulator)
-            // Simulator defaults to Apple Park; without job coords we can't validate, so prefer job-site ranking.
-            return OriginQuery(
-                latitude: nil,
-                longitude: nil,
-                sentUserLocation: false,
-                note: "Simulator GPS ignored — ranking from the job site. Set a custom simulated location near the job to rank from your position."
-            )
-            #endif
-        }
-
-        return OriginQuery(
-            latitude: location.coordinate.latitude,
-            longitude: location.coordinate.longitude,
-            sentUserLocation: true,
-            note: nil
-        )
     }
 
     private static func nearerSupplier(_ lhs: PartsRunOptionDTO, _ rhs: PartsRunOptionDTO) -> Bool {
