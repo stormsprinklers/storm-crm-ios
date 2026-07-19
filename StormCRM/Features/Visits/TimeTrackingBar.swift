@@ -82,62 +82,62 @@ struct TimeTrackingBar: View {
                     .foregroundStyle(StormTheme.sky)
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 8) {
-                    timeStep(
-                        label: "On my way",
-                        systemImage: "car.fill",
-                        isActive: isEnRoute,
-                        activeTint: StormTheme.sky,
-                        counter: enRouteSeconds.map(VisitTimeTrackingLogic.formatDuration(totalSeconds:)),
-                        timestamp: enRouteEvent?.occurredAt,
-                        timestampLabel: enRouteEvent == nil ? nil : "Left at",
-                        disabled: isCompleted || workStarted,
-                        action: "EN_ROUTE"
-                    )
+            // Equal-width columns — no horizontal scroll on phone widths.
+            HStack(alignment: .top, spacing: 6) {
+                timeStep(
+                    label: "On my way",
+                    systemImage: "car.fill",
+                    isActive: isEnRoute,
+                    activeTint: StormTheme.sky,
+                    counter: enRouteSeconds.map(VisitTimeTrackingLogic.formatDuration(totalSeconds:)),
+                    timestamp: enRouteEvent?.occurredAt,
+                    timestampLabel: enRouteEvent == nil ? nil : "Left at",
+                    disabled: isCompleted || workStarted,
+                    action: "EN_ROUTE"
+                )
 
-                    if isPaused {
-                        timeStep(
-                            label: "Resume",
-                            systemImage: "play.fill",
-                            isActive: true,
-                            activeTint: .orange,
-                            counter: VisitTimeTrackingLogic.formatDuration(totalSeconds: onTheJobSeconds),
-                            timestamp: startEvent?.occurredAt,
-                            timestampLabel: startEvent == nil ? nil : "Started at",
-                            secondaryTimestamp: pauseEvent?.occurredAt,
-                            secondaryTimestampLabel: pauseEvent == nil ? nil : "Paused at",
-                            disabled: isCompleted,
-                            action: "RESUME"
-                        )
-                    } else {
-                        timeStep(
-                            label: isWorking ? "Pause" : "Start my time",
-                            systemImage: isWorking ? "pause.fill" : "play.fill",
-                            isActive: isWorking,
-                            activeTint: StormTheme.success,
-                            counter: (isWorking || workStarted)
-                                ? VisitTimeTrackingLogic.formatDuration(totalSeconds: onTheJobSeconds)
-                                : nil,
-                            timestamp: startEvent?.occurredAt,
-                            timestampLabel: startEvent == nil ? nil : "Started at",
-                            disabled: isCompleted,
-                            action: isWorking ? "PAUSE" : "START"
-                        )
-                    }
-
+                if isPaused {
                     timeStep(
-                        label: "Finish visit",
-                        systemImage: "checkmark.square.fill",
-                        isActive: isCompleted && finishEvent != nil,
-                        activeTint: StormTheme.coral,
-                        timestamp: finishEvent?.occurredAt,
-                        timestampLabel: finishEvent == nil ? nil : "Finished at",
-                        disabled: !canFinish,
-                        action: "FINISH"
+                        label: "Resume",
+                        systemImage: "play.fill",
+                        isActive: true,
+                        activeTint: .orange,
+                        counter: VisitTimeTrackingLogic.formatDuration(totalSeconds: onTheJobSeconds),
+                        timestamp: startEvent?.occurredAt,
+                        timestampLabel: startEvent == nil ? nil : "Started at",
+                        secondaryTimestamp: pauseEvent?.occurredAt,
+                        secondaryTimestampLabel: pauseEvent == nil ? nil : "Paused at",
+                        disabled: isCompleted,
+                        action: "RESUME"
                     )
+                } else {
+                timeStep(
+                    label: isWorking ? "Pause" : "Start",
+                    accessibilityLabel: isWorking ? "Pause" : "Start my time",
+                    systemImage: isWorking ? "pause.fill" : "play.fill",
+                    isActive: isWorking,
+                    activeTint: StormTheme.success,
+                    counter: (isWorking || workStarted)
+                        ? VisitTimeTrackingLogic.formatDuration(totalSeconds: onTheJobSeconds)
+                        : nil,
+                    timestamp: startEvent?.occurredAt,
+                    timestampLabel: startEvent == nil ? nil : "Started at",
+                    disabled: isCompleted,
+                    action: isWorking ? "PAUSE" : "START"
+                )
                 }
-                .padding(.vertical, 2)
+
+                timeStep(
+                    label: "Finish",
+                    accessibilityLabel: "Finish visit",
+                    systemImage: "checkmark.square.fill",
+                    isActive: isCompleted && finishEvent != nil,
+                    activeTint: StormTheme.coral,
+                    timestamp: finishEvent?.occurredAt,
+                    timestampLabel: finishEvent == nil ? nil : "Finished at",
+                    disabled: !canFinish,
+                    action: "FINISH"
+                )
             }
         }
         .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { date in
@@ -152,6 +152,7 @@ struct TimeTrackingBar: View {
     @ViewBuilder
     private func timeStep(
         label: String,
+        accessibilityLabel: String? = nil,
         systemImage: String,
         isActive: Bool,
         activeTint: Color,
@@ -167,21 +168,29 @@ struct TimeTrackingBar: View {
             Button {
                 Task { await onAction(action) }
             } label: {
-                Label(label, systemImage: systemImage)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 10)
+                VStack(spacing: 4) {
+                    Image(systemName: systemImage)
+                        .font(.body.weight(.semibold))
+                    Text(label)
+                        .font(.caption2.weight(.semibold))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.85)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 10)
             }
             .buttonStyle(TimeTrackingStepButtonStyle(isActive: isActive, activeTint: activeTint))
             .disabled(disabled)
+            .accessibilityLabel(accessibilityLabel ?? label)
 
             if let counter {
                 Text(counter)
-                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .font(.caption.weight(.semibold).monospacedDigit())
                     .foregroundStyle(StormTheme.navy)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
 
             if let timestamp, let formatted = VisitTimeTrackingLogic.formatEventTimestamp(timestamp) {
@@ -189,6 +198,8 @@ struct TimeTrackingBar: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
             }
 
             if let secondaryTimestamp,
@@ -197,9 +208,11 @@ struct TimeTrackingBar: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
             }
         }
-        .frame(minWidth: 108, maxWidth: 132)
+        .frame(maxWidth: .infinity)
     }
 }
 
