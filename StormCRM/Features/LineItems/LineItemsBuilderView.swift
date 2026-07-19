@@ -254,8 +254,8 @@ struct LineItemsBuilderView: View {
                 discounts = visit.discounts ?? []
                 let computedSub = items.reduce(0.0) { $0 + $1.total }
                 subtotal = visit.subtotal ?? computedSub
-                total = visit.total ?? max(0, computedSub)
-                discountTotal = max(0, subtotal - total)
+                discountTotal = visitDiscountTotal(subtotal: subtotal, discounts: discounts)
+                total = visit.total ?? max(0, subtotal - discountTotal)
                 optionId = nil
             case .estimate(let id, let preferredOptionId):
                 let estimate: EstimateDetailDTO = try await env.apiClient.get(path: APIPath.estimate(id))

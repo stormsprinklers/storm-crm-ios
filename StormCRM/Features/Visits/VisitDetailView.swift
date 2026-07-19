@@ -363,17 +363,26 @@ struct VisitDetailView: View {
                                     owner: .visit(id: visitId),
                                     items: visit.lineItems ?? [],
                                     discounts: visit.discounts ?? [],
-                                    subtotal: visit.subtotal ?? (visit.lineItems ?? []).reduce(0) { $0 + $1.total },
-                                    discountTotal: max(
-                                        0,
-                                        (visit.subtotal ?? (visit.lineItems ?? []).reduce(0) { $0 + $1.total })
-                                            - (visit.total ?? 0)
-                                    ),
-                                    total: visit.total
-                                        ?? max(
-                                            0,
-                                            (visit.subtotal ?? (visit.lineItems ?? []).reduce(0) { $0 + $1.total })
-                                        ),
+                                    subtotal: {
+                                        let items = visit.lineItems ?? []
+                                        return visit.subtotal ?? visitSubtotal(from: items)
+                                    }(),
+                                    discountTotal: {
+                                        let items = visit.lineItems ?? []
+                                        let discounts = visit.discounts ?? []
+                                        let subtotal = visit.subtotal ?? visitSubtotal(from: items)
+                                        return visitDiscountTotal(subtotal: subtotal, discounts: discounts)
+                                    }(),
+                                    total: {
+                                        let items = visit.lineItems ?? []
+                                        let discounts = visit.discounts ?? []
+                                        let subtotal = visit.subtotal ?? visitSubtotal(from: items)
+                                        let discountTotal = visitDiscountTotal(
+                                            subtotal: subtotal,
+                                            discounts: discounts
+                                        )
+                                        return visit.total ?? max(0, subtotal - discountTotal)
+                                    }(),
                                     onUpdated: { await reloadVisit() }
                                 )
 

@@ -23,6 +23,17 @@ struct LineItemsSummarySection: View {
         items.filter(\.isMaterial)
     }
 
+    /// Only real discount records count — never infer a phantom discount from subtotal/total gaps.
+    private var hasActiveDiscounts: Bool {
+        !discounts.isEmpty
+    }
+
+    private var activeDiscountTotal: Double {
+        guard hasActiveDiscounts else { return 0 }
+        if discountTotal > 0 { return discountTotal }
+        return visitDiscountTotal(subtotal: subtotal, discounts: discounts)
+    }
+
     var body: some View {
         StormCard {
             VStack(alignment: .leading, spacing: 12) {
@@ -44,7 +55,7 @@ struct LineItemsSummarySection: View {
                     }
                 }
 
-                if items.isEmpty && discounts.isEmpty {
+                if items.isEmpty && !hasActiveDiscounts {
                     Text(canEdit ? "Tap the pencil to add services, materials, and discounts." : "No line items.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -55,18 +66,20 @@ struct LineItemsSummarySection: View {
                     ForEach(materialItems) { item in
                         summaryRow(item)
                     }
-                    ForEach(discounts) { discount in
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(discount.name)
-                                    .font(.subheadline.weight(.medium))
-                                Text(discount.type.uppercased() == "PERCENT"
-                                      ? "\(discount.amount.formatted())% off"
-                                      : discount.amount.formatted(.currency(code: "USD")))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    if hasActiveDiscounts {
+                        ForEach(discounts) { discount in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(discount.name)
+                                        .font(.subheadline.weight(.medium))
+                                    Text(discount.type.uppercased() == "PERCENT"
+                                          ? "\(discount.amount.formatted())% off"
+                                          : discount.amount.formatted(.currency(code: "USD")))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
                             }
-                            Spacer()
                         }
                     }
 
@@ -77,11 +90,11 @@ struct LineItemsSummarySection: View {
                         Text(subtotal, format: .currency(code: "USD"))
                     }
                     .font(.subheadline)
-                    if discountTotal > 0 {
+                    if hasActiveDiscounts, activeDiscountTotal > 0 {
                         HStack {
                             Text("Discounts")
                             Spacer()
-                            Text(-discountTotal, format: .currency(code: "USD"))
+                            Text(-activeDiscountTotal, format: .currency(code: "USD"))
                         }
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
