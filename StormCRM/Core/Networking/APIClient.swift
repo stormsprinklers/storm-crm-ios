@@ -5,12 +5,26 @@ final class APIClient {
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
+    private let refreshGate = RefreshGate()
+
+    /// Called on the main actor when the refresh token is rejected and the local session was cleared.
+    var onSessionInvalidated: (@MainActor () -> Void)?
 
     init(tokenStore: TokenStore, session: URLSession = .shared) {
         self.tokenStore = tokenStore
         self.session = session
         self.decoder = JSONCoding.makeDecoder()
         self.encoder = JSONCoding.makeEncoder()
+    }
+
+    /// Refresh access/refresh tokens, coalescing concurrent callers onto one network request.
+    /// Critical now that every tab stays mounted and may 401 at once.
+    @discardableResult
+    func refreshSessionTokens() async throws -> LoginResponse {
+        try await refreshGate.run { [weak self] in
+            guard let self else { throw APIError.unauthorized }
+            return try await self.performTokenRefresh()
+        }
     }
 
     func get<T: Decodable>(
@@ -221,7 +235,7 @@ final class APIClient {
             guard let http = response as? HTTPURLResponse else { throw APIError.server("No response") }
 
             if http.statusCode == 401, retryOn401, request.value(forHTTPHeaderField: "Authorization") != nil {
-                try await refreshTokens()
+                _ = try await refreshSessionTokens()
                 var retry = request
                 if let token = tokenStore.accessToken {
                     retry.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -250,20 +264,48 @@ final class APIClient {
         }
     }
 
-    private func refreshTokens() async throws {
+    private func performTokenRefresh() async throws -> LoginResponse {
         guard let refreshToken = tokenStore.tokens?.refreshToken else {
             throw APIError.unauthorized
         }
-        let response: LoginResponse = try await post(
-            path: APIPath.mobileRefresh,
-            body: RefreshRequest(refreshToken: refreshToken),
-            authenticated: false
-        )
-        tokenStore.save(
-            accessToken: response.accessToken,
-            refreshToken: response.refreshToken,
-            expiresIn: response.expiresIn
-        )
+        do {
+            let response: LoginResponse = try await post(
+                path: APIPath.mobileRefresh,
+                body: RefreshRequest(refreshToken: refreshToken),
+                authenticated: false
+            )
+            tokenStore.save(
+                accessToken: response.accessToken,
+                refreshToken: response.refreshToken,
+                expiresIn: response.expiresIn
+            )
+            return response
+        } catch {
+            if Self.shouldInvalidateSession(after: error) {
+                tokenStore.clear()
+                let callback = onSessionInvalidated
+                await MainActor.run {
+                    callback?()
+                }
+            }
+            throw error
+        }
+    }
+
+    private static func shouldInvalidateSession(after error: Error) -> Bool {
+        guard let apiError = error as? APIError else { return false }
+        switch apiError {
+        case .unauthorized:
+            return true
+        case .server(let msg), .badRequest(let msg), .forbidden(let msg):
+            let lower = msg.lowercased()
+            return lower.contains("refresh token")
+                || lower.contains("invalid refresh")
+                || lower.contains("token revoked")
+                || lower.contains("refresh_token")
+        default:
+            return false
+        }
     }
 
     private func parseError(data: Data, status: Int) -> APIError {
@@ -275,5 +317,46 @@ final class APIClient {
         }
         if status == 401 { return .unauthorized }
         return .server("Request failed (\(status))")
+    }
+}
+
+/// Ensures only one refresh request runs; concurrent 401 retries await the same result.
+private final class RefreshGate: @unchecked Sendable {
+    private final class InFlight {
+        let task: Task<LoginResponse, Error>
+        init(_ task: Task<LoginResponse, Error>) { self.task = task }
+    }
+
+    private let lock = NSLock()
+    private var inFlight: InFlight?
+
+    func run(_ operation: @escaping @Sendable () async throws -> LoginResponse) async throws -> LoginResponse {
+        let box: InFlight
+        lock.lock()
+        if let existing = inFlight {
+            lock.unlock()
+            return try await existing.task.value
+        }
+        let created = InFlight(Task {
+            try await operation()
+        })
+        inFlight = created
+        box = created
+        lock.unlock()
+
+        do {
+            let value = try await box.task.value
+            clearIfCurrent(box)
+            return value
+        } catch {
+            clearIfCurrent(box)
+            throw error
+        }
+    }
+
+    private func clearIfCurrent(_ box: InFlight) {
+        lock.lock()
+        if inFlight === box { inFlight = nil }
+        lock.unlock()
     }
 }

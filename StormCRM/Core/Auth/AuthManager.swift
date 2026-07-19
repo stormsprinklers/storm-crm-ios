@@ -178,23 +178,27 @@ final class AuthManager: ObservableObject {
         try await refreshSession()
     }
 
+    /// Clears local auth when the server rejects the refresh token (no remote logout call).
+    func handleSessionInvalidated() {
+        tokenStore.clear()
+        user = nil
+        persistUser(nil)
+        pendingMfa = nil
+        isAuthenticated = false
+    }
+
     private func refreshSession() async throws {
-        guard let refreshToken = tokenStore.tokens?.refreshToken else {
-            throw APIError.unauthorized
+        do {
+            let response = try await apiClient.refreshSessionTokens()
+            user = response.user
+            persistUser(response.user)
+            isAuthenticated = true
+        } catch {
+            if tokenStore.tokens == nil {
+                handleSessionInvalidated()
+            }
+            throw error
         }
-        let response: LoginResponse = try await apiClient.post(
-            path: APIPath.mobileRefresh,
-            body: RefreshRequest(refreshToken: refreshToken),
-            authenticated: false
-        )
-        tokenStore.save(
-            accessToken: response.accessToken,
-            refreshToken: response.refreshToken,
-            expiresIn: response.expiresIn
-        )
-        user = response.user
-        persistUser(response.user)
-        isAuthenticated = true
     }
 }
 
