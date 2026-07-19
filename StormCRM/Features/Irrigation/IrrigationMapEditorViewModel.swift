@@ -124,7 +124,7 @@ final class IrrigationMapEditorViewModel: ObservableObject {
                 body: body
             )
             applyProperty(response.property)
-            successMessage = publish ? "Published to portal" : "Map saved"
+            successMessage = publish ? "Saved and published to portal" : "Map saved"
 
             let programResponse: IrrigationProgramResponse = try await api.get(
                 path: APIPath.irrigationProgram(customerId: customerId, propertyId: propertyId)
@@ -138,6 +138,7 @@ final class IrrigationMapEditorViewModel: ObservableObject {
     func saveProgramSettings(api: APIClient) async {
         isSaving = true
         error = nil
+        successMessage = nil
         defer { isSaving = false }
         do {
             let override = Double(etoOverride.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -152,7 +153,15 @@ final class IrrigationMapEditorViewModel: ObservableObject {
                 body: body
             )
             programGuide = response.guide
-            successMessage = "Program settings updated"
+
+            // Saving settings should also publish the map to the customer portal.
+            let mapBody = buildPatchRequest(publish: true)
+            let mapResponse: IrrigationMapResponse = try await api.patch(
+                path: APIPath.irrigationMap(customerId: customerId, propertyId: propertyId),
+                body: mapBody
+            )
+            applyProperty(mapResponse.property)
+            successMessage = "Settings saved and published to portal"
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }

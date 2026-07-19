@@ -138,7 +138,7 @@ struct IrrigationProgramSettingsForm: View {
             }
 
             HStack {
-                Button(isSaving ? "Saving…" : "Save settings") { onSave() }
+                Button(isSaving ? "Saving…" : "Save & publish") { onSave() }
                     .buttonStyle(StormPrimaryButtonStyle())
                     .disabled(isSaving)
                 Button("Refresh weather") { onRefreshWeather() }
