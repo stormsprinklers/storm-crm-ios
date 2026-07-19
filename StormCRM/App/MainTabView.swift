@@ -32,20 +32,31 @@ struct MainTabView: View {
         }
     }
 
+    /// Keep every tab root mounted so NavigationStacks (e.g. an open visit on Schedule)
+    /// survive switching away and back. A `switch` would recreate the tab and pop to root.
     @ViewBuilder
     private var tabContent: some View {
-        switch env.selectedTab {
-        case .dashboard:
-            DashboardView()
-        case .schedule:
-            ScheduleView()
-        case .customers:
-            CustomersListView()
-        case .messages:
-            MessagesHubView()
-        case .more:
-            MoreView()
+        ZStack {
+            tabPane(.dashboard) { DashboardView() }
+            tabPane(.schedule) { ScheduleView() }
+            tabPane(.customers) { CustomersListView() }
+            tabPane(.messages) { MessagesHubView() }
+            tabPane(.more) { MoreView() }
         }
+    }
+
+    @ViewBuilder
+    private func tabPane<Content: View>(
+        _ tab: MainTab,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let selected = env.selectedTab == tab
+        content()
+            .opacity(selected ? 1 : 0)
+            .allowsHitTesting(selected)
+            .accessibilityHidden(!selected)
+            .zIndex(selected ? 1 : 0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
