@@ -164,14 +164,12 @@ struct AsyncLogoImage: View {
     }
 }
 
+/// Compact app mark used when a remote company logo is unavailable.
 struct StormLogoMark: View {
     var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "drop.fill")
-                .foregroundStyle(StormTheme.coral)
-            Text("Storm Sprinklers")
-                .font(.title3.weight(.bold))
-                .foregroundStyle(StormTheme.navy)
-        }
+        Image(systemName: "dot.radiowaves.left.and.right")
+            .font(.system(size: 34, weight: .semibold))
+            .foregroundStyle(StormTheme.coral)
+            .accessibilityLabel("Radar")
     }
 }

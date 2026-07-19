@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Storm CRM</string>
+	<string>Radar</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -43,7 +43,7 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Share your location for accurate driving directions, ETA when heading to a job, and nearby parts suppliers.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Place and receive calls through Storm CRM.</string>
+	<string>Place and receive calls through Radar.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Attach photos and videos to SMS messages and visits.</string>
 	<key>UIBackgroundModes</key>

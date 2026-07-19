@@ -2,7 +2,6 @@ import SwiftUI
 
 struct LoginView: View {
     @EnvironmentObject private var auth: AuthManager
-    @EnvironmentObject private var branding: CompanyBranding
     @State private var email = ""
     @State private var password = ""
     @State private var mfaCode = ""
@@ -13,9 +12,9 @@ struct LoginView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     VStack(spacing: 12) {
-                        AsyncLogoImage(urlString: branding.logoUrl, height: 56)
-                        Text(branding.companyName)
-                            .font(.title2.weight(.semibold))
+                        StormLogoMark()
+                        Text("Radar")
+                            .font(.largeTitle.weight(.bold))
                             .foregroundStyle(StormTheme.navy)
                         Text("Field technician app")
                             .font(.subheadline)
