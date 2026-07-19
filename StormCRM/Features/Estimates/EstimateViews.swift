@@ -153,7 +153,13 @@ struct EstimateDetailView: View {
     @State private var error: String?
     @State private var actionMessage: String?
     @State private var showCopyNewVisitConfirm = false
-    @State private var showApprovalSheet = false
+    @State private var approvalSheet: ApprovalSheetContext?
+
+    private struct ApprovalSheetContext: Identifiable {
+        let id = UUID()
+        let total: Double
+        let canApprove: Bool
+    }
 
     var body: some View {
         Group {
@@ -220,17 +226,16 @@ struct EstimateDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
-        .sheet(isPresented: $showApprovalSheet) {
+        .fullScreenCover(item: $approvalSheet) { context in
             EstimateApprovalSheet(
-                estimateTotal: estimate?.total ?? 0,
+                estimateTotal: context.total,
+                canApprove: context.canApprove,
                 isSaving: $isSaving
             ) { png in
                 await approveWithSignature(pngData: png)
             }
+            .environmentObject(env)
             .environmentObject(env.branding)
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-            .interactiveDismissDisabled(isSaving)
         }
         .confirmationDialog(
             "Schedule a new visit with these line items?",
@@ -333,17 +338,25 @@ struct EstimateDetailView: View {
 
                     if !estimate.isApproved {
                         Button {
-                            showApprovalSheet = true
+                            error = nil
+                            approvalSheet = ApprovalSheetContext(
+                                total: estimate.total,
+                                canApprove: !estimate.lineItems.isEmpty
+                            )
                         } label: {
-                            Label("Approve", systemImage: "checkmark.seal.fill")
+                            Label("Approve with signature", systemImage: "checkmark.seal.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(StormPrimaryButtonStyle())
-                        .disabled(isSaving || estimate.lineItems.isEmpty)
+                        .disabled(isSaving)
 
-                        Text("Customer signature is collected in the approval popup.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        Text(
+                            estimate.lineItems.isEmpty
+                                ? "Add line items first, then collect the customer signature."
+                                : "Opens a popup to collect the customer signature."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     } else if let signedAt = estimate.signedAt {
                         Text("Signed \(APIDateFormatting.displayString(from: signedAt))")
                             .font(.caption)
@@ -413,8 +426,8 @@ struct EstimateDetailView: View {
         }
     }
 
-    @discardableResult
-    private func approveWithSignature(pngData: Data) async -> Bool {
+    /// Returns `nil` on success, otherwise an error message for the approval popup.
+    private func approveWithSignature(pngData: Data) async -> String? {
         isSaving = true
         error = nil
         actionMessage = nil
@@ -425,17 +438,20 @@ struct EstimateDetailView: View {
         struct Body: Encodable { let signature: String }
 
         do {
-            estimate = try await env.apiClient.post(
+            // Accept any 2xx body shape, then reload the estimate detail.
+            let _: EmptyResponse = try await env.apiClient.post(
                 path: APIPath.estimateSignature(estimateId),
                 body: Body(signature: dataUrl)
             )
+            await load()
             actionMessage = "Estimate approved with signature"
-            showApprovalSheet = false
+            approvalSheet = nil
             await onUpdated()
-            return true
+            return nil
         } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
-            return false
+            let message = (error as? APIError)?.message ?? error.localizedDescription
+            self.error = message
+            return message
         }
     }
 

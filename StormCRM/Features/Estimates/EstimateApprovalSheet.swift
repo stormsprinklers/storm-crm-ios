@@ -7,9 +7,10 @@ struct EstimateApprovalSheet: View {
     @Environment(\.openURL) private var openURL
 
     let estimateTotal: Double
+    let canApprove: Bool
     @Binding var isSaving: Bool
-    /// Called with PNG bytes when the user confirms approval. Return true to dismiss.
-    var onApprove: (Data) async -> Bool
+    /// Called with PNG bytes when the user confirms approval. Return `nil` on success, or an error message.
+    var onApprove: (Data) async -> String?
 
     @State private var hasSignatureInk = false
     @State private var localError: String?
@@ -22,6 +23,12 @@ struct EstimateApprovalSheet: View {
                     .font(.title3.weight(.semibold))
                     .foregroundStyle(StormTheme.navy)
                     .frame(maxWidth: .infinity, alignment: .leading)
+
+                if !canApprove {
+                    Text("Add at least one line item before approving.")
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                }
 
                 Text("Customer signature")
                     .font(.subheadline.weight(.medium))
@@ -41,6 +48,7 @@ struct EstimateApprovalSheet: View {
                     Button("Clear") {
                         signatureController.clear()
                         hasSignatureInk = false
+                        localError = nil
                     }
                     .buttonStyle(StormSecondaryButtonStyle())
                     .disabled(!hasSignatureInk || isSaving)
@@ -52,6 +60,7 @@ struct EstimateApprovalSheet: View {
                     Text(localError)
                         .font(.caption)
                         .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 termsFooter
@@ -62,13 +71,13 @@ struct EstimateApprovalSheet: View {
                     Task { await approve() }
                 } label: {
                     Label(
-                        isSaving ? "Approving…" : "Approve",
+                        isSaving ? "Approving…" : "Approve with signature",
                         systemImage: "checkmark.seal.fill"
                     )
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(StormPrimaryButtonStyle())
-                .disabled(isSaving || !hasSignatureInk)
+                .disabled(isSaving || !hasSignatureInk || !canApprove)
             }
             .padding()
             .background(StormTheme.page.ignoresSafeArea())
@@ -80,6 +89,7 @@ struct EstimateApprovalSheet: View {
                         .disabled(isSaving)
                 }
             }
+            .interactiveDismissDisabled(isSaving)
         }
     }
 
@@ -114,16 +124,21 @@ struct EstimateApprovalSheet: View {
     }
 
     private func approve() async {
+        guard canApprove else {
+            localError = "Add at least one line item before approving."
+            return
+        }
         guard let png = signatureController.pngData() else {
             localError = "Customer signature is required"
             return
         }
         localError = nil
-        let succeeded = await onApprove(png)
-        if succeeded {
-            signatureController.clear()
-            hasSignatureInk = false
-            dismiss()
+        if let message = await onApprove(png) {
+            localError = message
+            return
         }
+        signatureController.clear()
+        hasSignatureInk = false
+        dismiss()
     }
 }
