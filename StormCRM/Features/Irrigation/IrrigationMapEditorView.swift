@@ -20,27 +20,22 @@ struct IrrigationMapEditorView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        Group {
             if viewModel.isLoading {
                 ProgressView("Loading map…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    headerBar
-                        .padding(.horizontal)
-                        .padding(.top, 8)
-
-                    mapSection
-                        .padding(.horizontal)
-
-                    Text("Tap to place points · Pinch to zoom · Double-tap to reset zoom")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal)
-                }
-
+                // Single scroll so the map sits at the top and moves with the rest of the page.
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        headerBar
+
+                        mapSection
+
+                        Text("Tap to place points · Pinch to zoom · Double-tap to reset zoom")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+
                         zoneTabs
                         drawControls
                         markerControls
@@ -132,13 +127,7 @@ struct IrrigationMapEditorView: View {
                     .disabled(viewModel.isCapturingAerial)
                 }
 
-                Button(viewModel.isSaving ? "Saving…" : "Save draft") {
-                    Task { await viewModel.save(api: env.apiClient, publish: false) }
-                }
-                .buttonStyle(StormSecondaryButtonStyle())
-                .disabled(viewModel.isSaving)
-
-                Button("Publish") {
+                Button(viewModel.isSaving ? "Saving…" : "Save & publish") {
                     Task { await viewModel.save(api: env.apiClient, publish: true) }
                 }
                 .buttonStyle(StormPrimaryButtonStyle())

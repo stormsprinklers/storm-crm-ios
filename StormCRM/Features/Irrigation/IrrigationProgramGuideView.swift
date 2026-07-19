@@ -85,10 +85,20 @@ private struct ProgramSetupCard: View {
                 }
 
                 if let starts = program.startTimes, !starts.isEmpty {
-                    Text("Start Times: \(starts.joined(separator: " · "))")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
-                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(alignment: .top, spacing: 6) {
+                        Text("Start Times")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(Color.black.opacity(0.85))
+                        Text(starts.joined(separator: " · "))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Color.black.opacity(0.9))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.white.opacity(0.92))
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 }
 
                 if program.isEstablishment == true {
