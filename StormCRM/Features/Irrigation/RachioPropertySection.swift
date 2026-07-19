@@ -286,6 +286,7 @@ private struct RachioLinkDeviceSheet: View {
     @Binding var devicesLoading: Bool
     @Binding var devicesError: String?
     @Binding var linking: Bool
+    var linkError: String?
     var onLoadDevices: () async -> Void
     var onLink: () async -> Void
 
@@ -323,6 +324,14 @@ private struct RachioLinkDeviceSheet: View {
                                 Text(device.pickerLabel).tag(device.id)
                             }
                         }
+                    }
+                }
+
+                if let linkError {
+                    Section {
+                        Text(linkError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
                 }
             }
