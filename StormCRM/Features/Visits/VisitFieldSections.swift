@@ -201,12 +201,12 @@ struct LineItemsSection: View {
                             if let description = item.description, !description.isEmpty {
                                 Text(description).font(.caption).foregroundStyle(.secondary)
                             }
-                            Text("Qty \(item.quantity, format: .number) × \(item.unitPrice, format: .currency(code: "USD"))")
+                            Text(item.qtyPriceLabel)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text(item.total, format: .currency(code: "USD"))
+                        Text(item.displayTotal, format: .currency(code: "USD"))
                     }
                     .padding(.vertical, 2)
                 }

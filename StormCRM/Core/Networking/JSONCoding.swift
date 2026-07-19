@@ -27,7 +27,16 @@ struct FlexibleDouble: Codable, Hashable {
             return
         }
         if let text = try? container.decode(String.self) {
-            value = Double(text)
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let number = Double(trimmed) {
+                value = number
+                return
+            }
+            let cleaned = trimmed
+                .replacingOccurrences(of: "$", with: "")
+                .replacingOccurrences(of: ",", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            value = Double(cleaned)
             return
         }
         value = nil
@@ -51,7 +60,13 @@ extension KeyedDecodingContainer {
         if let text = try? decode(String.self, forKey: key) {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }
-            return Double(trimmed)
+            if let value = Double(trimmed) { return value }
+            // Currency-formatted strings from some CRM payloads ("$1,250.00").
+            let cleaned = trimmed
+                .replacingOccurrences(of: "$", with: "")
+                .replacingOccurrences(of: ",", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return Double(cleaned)
         }
         if let nested = try? decode(FlexibleDouble.self, forKey: key) {
             return nested.value

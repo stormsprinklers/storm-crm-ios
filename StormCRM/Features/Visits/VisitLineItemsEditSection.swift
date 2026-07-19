@@ -129,41 +129,13 @@ struct VisitLineItemsEditSection: View {
     }
 
     private func addFromPriceBook(_ item: PriceBookItemDTO) async {
-        let expectedUnitPrice = item.resolvedUnitPrice
-        struct Body: Encodable {
-            let priceBookItemId: String
-            let name: String
-            let description: String?
-            let unitPrice: Double
-            let quantity: Double
-        }
-        struct PatchBody: Encodable {
-            let lineItemId: String
-            let quantity: Double
-            let unitPrice: Double
-        }
         do {
-            let visit: VisitDetailDTO = try await env.apiClient.post(
-                path: APIPath.visitLineItems(visitId),
-                body: Body(
-                    priceBookItemId: item.id,
-                    name: item.name,
-                    description: item.description,
-                    unitPrice: expectedUnitPrice,
-                    quantity: 1
-                )
+            try await PriceBookLineItemAdding.add(
+                api: env.apiClient,
+                owner: .visit(id: visitId),
+                item: item,
+                optionId: nil
             )
-            if let added = PriceBookLineItemAdding.matchingLineItem(in: visit.lineItems ?? [], for: item),
-               PriceBookLineItemAdding.needsPriceCorrection(lineItem: added, expectedUnitPrice: expectedUnitPrice) {
-                let _: VisitDetailDTO = try await env.apiClient.patch(
-                    path: APIPath.visitLineItems(visitId),
-                    body: PatchBody(
-                        lineItemId: added.id,
-                        quantity: added.quantity,
-                        unitPrice: expectedUnitPrice
-                    )
-                )
-            }
             await onUpdated()
         } catch {
             self.error = (error as? APIError)?.message
