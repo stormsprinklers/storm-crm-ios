@@ -8,6 +8,7 @@ options:
 packages:
   TwilioVoice:
     url: https://github.com/twilio/twilio-voice-ios
+    # Pin file for Xcode Cloud: SwiftPM/Package.resolved (currently 6.13.6).
     from: 6.13.0
 settings:
   base:
