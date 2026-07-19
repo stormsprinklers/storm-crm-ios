@@ -214,33 +214,58 @@ private struct ServiceInstallMetricColumns: View {
 
     var body: some View {
         let split = columns
-        let rowCount = max(split.service.count, split.install.count, 1)
+        let showService = !split.service.isEmpty
+        let showInstall = !split.install.isEmpty
 
+        if showService && showInstall {
+            dualColumnLayout(service: split.service, install: split.install)
+        } else if showService {
+            singleColumnLayout(lane: .service, metrics: split.service)
+        } else if showInstall {
+            singleColumnLayout(lane: .install, metrics: split.install)
+        }
+    }
+
+    @ViewBuilder
+    private func dualColumnLayout(service: [ReportMetric], install: [ReportMetric]) -> some View {
+        let rowCount = max(service.count, install.count, 1)
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
-                Text(KpiMetricLane.service.title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(StormTheme.sky)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Text(KpiMetricLane.install.title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(StormTheme.sky)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                columnHeader(KpiMetricLane.service.title)
+                columnHeader(KpiMetricLane.install.title)
             }
 
             ForEach(0..<rowCount, id: \.self) { index in
                 HStack(alignment: .top, spacing: 12) {
-                    KpiMetricCell(metric: index < split.service.count ? split.service[index] : nil)
-                    KpiMetricCell(metric: index < split.install.count ? split.install[index] : nil)
+                    KpiMetricCell(metric: index < service.count ? service[index] : nil)
+                    KpiMetricCell(metric: index < install.count ? install[index] : nil)
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func singleColumnLayout(lane: KpiMetricLane, metrics: [ReportMetric]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            columnHeader(lane.title)
+            ForEach(metrics, id: \.label) { metric in
+                KpiMetricCell(metric: metric)
+            }
+        }
+    }
+
+    private func columnHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(StormTheme.sky)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 private struct PersonCardsSection: View {
     let title: String
     let people: [KpiPersonCard]
+    var preferInstallForAmbiguous: Bool = false
 
     var body: some View {
         if !people.isEmpty {
@@ -258,7 +283,10 @@ private struct PersonCardsSection: View {
                                 ))
                                 Spacer()
                             }
-                            ServiceInstallMetricColumns(metrics: person.metrics)
+                            ServiceInstallMetricColumns(
+                                metrics: person.metrics,
+                                preferInstallForAmbiguous: preferInstallForAmbiguous
+                            )
                         }
                     }
                 }
@@ -312,6 +340,13 @@ private struct KpiDashboardReportView: View {
                 }
 
                 PersonCardsSection(title: "Technicians", people: report.technicians)
+                if let installers = report.installers, !installers.isEmpty {
+                    PersonCardsSection(
+                        title: "Installers",
+                        people: installers,
+                        preferInstallForAmbiguous: true
+                    )
+                }
                 PersonCardsSection(title: "CSRs", people: report.csrs)
                 CrewCardsSection(crews: report.crews)
                 PersonCardsSection(title: "Sales", people: report.salespeople)
