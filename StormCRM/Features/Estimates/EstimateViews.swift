@@ -153,8 +153,7 @@ struct EstimateDetailView: View {
     @State private var error: String?
     @State private var actionMessage: String?
     @State private var showCopyNewVisitConfirm = false
-    @State private var hasSignatureInk = false
-    @StateObject private var signatureController = EstimateSignatureController()
+    @State private var showApprovalSheet = false
 
     var body: some View {
         Group {
@@ -221,6 +220,18 @@ struct EstimateDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
+        .sheet(isPresented: $showApprovalSheet) {
+            EstimateApprovalSheet(
+                estimateTotal: estimate?.total ?? 0,
+                isSaving: $isSaving
+            ) { png in
+                await approveWithSignature(pngData: png)
+            }
+            .environmentObject(env.branding)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .interactiveDismissDisabled(isSaving)
+        }
         .confirmationDialog(
             "Schedule a new visit with these line items?",
             isPresented: $showCopyNewVisitConfirm,
@@ -321,37 +332,18 @@ struct EstimateDetailView: View {
                     }
 
                     if !estimate.isApproved {
-                        VStack(alignment: .leading, spacing: 10) {
-                            EstimateSignaturePad(hasInk: $hasSignatureInk, controller: signatureController)
-                                .frame(height: 200)
-
-                            HStack {
-                                Button("Clear") {
-                                    signatureController.clear()
-                                    hasSignatureInk = false
-                                }
-                                .buttonStyle(StormSecondaryButtonStyle())
-                                .disabled(!hasSignatureInk || isSaving)
-
-                                Spacer(minLength: 0)
-
-                                Button {
-                                    Task { await approveWithSignature() }
-                                } label: {
-                                    Label(
-                                        isSaving ? "Approving…" : "Approve with signature",
-                                        systemImage: "checkmark.seal.fill"
-                                    )
-                                    .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(StormPrimaryButtonStyle())
-                                .disabled(isSaving || !hasSignatureInk || estimate.lineItems.isEmpty)
-                            }
-
-                            Text("Customer must sign before the estimate can be approved.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        Button {
+                            showApprovalSheet = true
+                        } label: {
+                            Label("Approve", systemImage: "checkmark.seal.fill")
+                                .frame(maxWidth: .infinity)
                         }
+                        .buttonStyle(StormPrimaryButtonStyle())
+                        .disabled(isSaving || estimate.lineItems.isEmpty)
+
+                        Text("Customer signature is collected in the approval popup.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     } else if let signedAt = estimate.signedAt {
                         Text("Signed \(APIDateFormatting.displayString(from: signedAt))")
                             .font(.caption)
@@ -421,17 +413,14 @@ struct EstimateDetailView: View {
         }
     }
 
-    private func approveWithSignature() async {
-        guard let png = signatureController.pngData() else {
-            error = "Customer signature is required"
-            return
-        }
+    @discardableResult
+    private func approveWithSignature(pngData: Data) async -> Bool {
         isSaving = true
         error = nil
         actionMessage = nil
         defer { isSaving = false }
 
-        let base64 = png.base64EncodedString()
+        let base64 = pngData.base64EncodedString()
         let dataUrl = "data:image/png;base64,\(base64)"
         struct Body: Encodable { let signature: String }
 
@@ -441,11 +430,12 @@ struct EstimateDetailView: View {
                 body: Body(signature: dataUrl)
             )
             actionMessage = "Estimate approved with signature"
-            signatureController.clear()
-            hasSignatureInk = false
+            showApprovalSheet = false
             await onUpdated()
+            return true
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
+            return false
         }
     }
 

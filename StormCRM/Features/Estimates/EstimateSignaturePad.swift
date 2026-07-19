@@ -8,6 +8,7 @@ struct EstimateSignaturePad: UIViewRepresentable {
 
     func makeUIView(context: Context) -> SignatureCanvasView {
         let view = SignatureCanvasView()
+        view.isExclusiveTouch = true
         view.onInkChanged = { hasInk in
             DispatchQueue.main.async {
                 self.hasInk = hasInk
@@ -47,6 +48,8 @@ final class SignatureCanvasView: UIView {
 
     private var strokes: [[CGPoint]] = []
     private var currentStroke: [CGPoint] = []
+    private weak var enclosingScrollView: UIScrollView?
+    private var restoredScrollEnabled: Bool?
 
     var hasInk: Bool { !strokes.isEmpty || currentStroke.count > 1 }
 
@@ -54,6 +57,8 @@ final class SignatureCanvasView: UIView {
         super.init(frame: frame)
         backgroundColor = .white
         isMultipleTouchEnabled = false
+        isExclusiveTouch = true
+        isUserInteractionEnabled = true
         layer.cornerRadius = 12
         layer.borderWidth = 1
         layer.borderColor = UIColor.separator.cgColor
@@ -111,6 +116,7 @@ final class SignatureCanvasView: UIView {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        disableEnclosingScroll()
         guard let point = touches.first?.location(in: self) else { return }
         currentStroke = [point]
     }
@@ -124,10 +130,12 @@ final class SignatureCanvasView: UIView {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         finishStroke()
+        restoreEnclosingScroll()
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         finishStroke()
+        restoreEnclosingScroll()
     }
 
     private func finishStroke() {
@@ -137,5 +145,29 @@ final class SignatureCanvasView: UIView {
         currentStroke = []
         setNeedsDisplay()
         onInkChanged?(hasInk)
+    }
+
+    /// Keep the parent SwiftUI/UIKit ScrollView from stealing the drawing gesture.
+    private func disableEnclosingScroll() {
+        guard enclosingScrollView == nil else { return }
+        var walker: UIView? = superview
+        while let view = walker {
+            if let scroll = view as? UIScrollView {
+                enclosingScrollView = scroll
+                restoredScrollEnabled = scroll.isScrollEnabled
+                scroll.isScrollEnabled = false
+                scroll.panGestureRecognizer.isEnabled = false
+                return
+            }
+            walker = view.superview
+        }
+    }
+
+    private func restoreEnclosingScroll() {
+        guard let scroll = enclosingScrollView else { return }
+        scroll.panGestureRecognizer.isEnabled = true
+        scroll.isScrollEnabled = restoredScrollEnabled ?? true
+        enclosingScrollView = nil
+        restoredScrollEnabled = nil
     }
 }
