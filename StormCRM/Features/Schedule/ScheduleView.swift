@@ -257,17 +257,9 @@ struct ScheduleView: View {
             .customerDetailDestination()
             .refreshable { await reload() }
             .task { await loadInitial() }
-            .onChange(of: env.deepLinkNavigation) { _, navigation in
-                guard let navigation else { return }
-                switch navigation {
-                case .visit(let visitId):
-                    navigationPath.append(visitId)
-                case .estimate(let estimateId):
-                    navigationPath.append(CustomerHistoryDestination.estimate(estimateId))
-                case .customer:
-                    break
-                }
-                env.deepLinkNavigation = nil
+            .onAppear { consumePendingDeepLink() }
+            .onChange(of: env.deepLinkNavigation) { _, _ in
+                consumePendingDeepLink()
             }
             .onChange(of: selectedDate) { _, _ in
                 Task { await viewModel.load(api: env.apiClient, around: selectedDate, offlineSync: env.offlineSync) }
@@ -390,6 +382,19 @@ struct ScheduleView: View {
     }
 
     // MARK: - Actions
+
+    private func consumePendingDeepLink() {
+        guard let navigation = env.deepLinkNavigation else { return }
+        switch navigation {
+        case .visit(let visitId):
+            navigationPath.append(visitId)
+        case .estimate(let estimateId):
+            navigationPath.append(CustomerHistoryDestination.estimate(estimateId))
+        case .customer:
+            break
+        }
+        env.deepLinkNavigation = nil
+    }
 
     private func loadInitial() async {
         await viewModel.load(api: env.apiClient, around: selectedDate, offlineSync: env.offlineSync)
