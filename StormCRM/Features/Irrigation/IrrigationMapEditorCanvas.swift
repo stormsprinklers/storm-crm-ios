@@ -58,7 +58,7 @@ struct IrrigationMapEditorCanvas: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(StormTheme.ice, lineWidth: 1)
         )
-        .accessibilityHint("Tap to place points. Pinch to zoom. Double-tap to reset zoom.")
+        .accessibilityHint("Tap to place points. Tap the first point to close. Pinch to zoom. Double-tap to reset zoom.")
     }
 
     private func tapPlaceGesture(layout: MapImageLayout) -> some Gesture {
@@ -157,18 +157,39 @@ struct IrrigationMapEditorCanvas: View {
 
     private func drawDraft(context: inout GraphicsContext, layout: MapImageLayout) {
         guard !draftPoints.isEmpty else { return }
+        let canClose = draftPoints.count >= 3
         var path = Path()
         if let first = draftPoints.first {
             path.move(to: layout.cgPoint(from: first))
             for point in draftPoints.dropFirst() {
                 path.addLine(to: layout.cgPoint(from: point))
             }
+            if canClose {
+                // Preview the closing edge back to the origin.
+                path.addLine(to: layout.cgPoint(from: first))
+            }
         }
         context.stroke(path, with: .color(StormTheme.coral), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-        for point in draftPoints {
+        for (index, point) in draftPoints.enumerated() {
             let center = layout.cgPoint(from: point)
-            let dot = Path(ellipseIn: CGRect(x: center.x - 5, y: center.y - 5, width: 10, height: 10))
+            let isOrigin = index == 0
+            let radius: CGFloat = (isOrigin && canClose) ? 9 : 5
+            let dot = Path(ellipseIn: CGRect(
+                x: center.x - radius,
+                y: center.y - radius,
+                width: radius * 2,
+                height: radius * 2
+            ))
             context.fill(dot, with: .color(StormTheme.coral))
+            if isOrigin && canClose {
+                let ring = Path(ellipseIn: CGRect(
+                    x: center.x - 14,
+                    y: center.y - 14,
+                    width: 28,
+                    height: 28
+                ))
+                context.stroke(ring, with: .color(StormTheme.coral), lineWidth: 2)
+            }
         }
     }
 

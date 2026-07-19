@@ -238,7 +238,11 @@ struct IrrigationMapEditorView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Draw zone \(viewModel.zones[safe: viewModel.activeZoneIndex]?.name ?? "")")
                     .font(.subheadline.bold())
-                Text("Tap the map to place corners. Need at least 3 points.")
+                Text(
+                    draftPoints.count >= 3
+                        ? "Tap the first point to close the polygon, or use Complete."
+                        : "Tap the map to place corners. Need at least 3 points, then tap the first point to close."
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -380,7 +384,21 @@ struct IrrigationMapEditorView: View {
             viewModel.placeMarker(type: placement, at: point)
             return
         }
+        // Close by retapping near the origin once we have a valid polygon.
+        if draftPoints.count >= 3,
+           let origin = draftPoints.first,
+           Self.isNearPolygonOrigin(point, origin: origin) {
+            completePolygon()
+            return
+        }
         draftPoints.append(point)
+    }
+
+    /// Hit radius in normalized image space (~16–20pt on a phone-width map).
+    private static let polygonOriginHitRadius = 0.05
+
+    private static func isNearPolygonOrigin(_ point: ImagePoint, origin: ImagePoint) -> Bool {
+        hypot(point.x - origin.x, point.y - origin.y) <= polygonOriginHitRadius
     }
 
     private func completePolygon() {
