@@ -99,9 +99,16 @@ struct PriceBookBrowseAddView: View {
             }
         }
         .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $search, prompt: "Search")
         .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Back", systemImage: "chevron.backward")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showCreate = true

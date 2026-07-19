@@ -69,6 +69,15 @@ struct DiscountBrowseAddView: View {
         }
         .navigationTitle("Discounts")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button {
+                    dismiss()
+                } label: {
+                    Label("Back", systemImage: "chevron.backward")
+                }
+            }
+        }
         .task { await loadCatalog() }
         .overlay { if isLoading { ProgressView() } }
     }
