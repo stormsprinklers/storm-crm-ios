@@ -11,6 +11,53 @@ struct MobileDashboardDTO: Decodable {
         let unreadSms: Int
         let missedTransfers: Int
         let timerLeftRunning: Bool
+
+        init(unreadSms: Int, missedTransfers: Int, timerLeftRunning: Bool) {
+            self.unreadSms = unreadSms
+            self.missedTransfers = missedTransfers
+            self.timerLeftRunning = timerLeftRunning
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            unreadSms = Self.decodeCount(in: container, keys: [.unreadSms, .unansweredSms, .unreadSMS, .unreadCount])
+            missedTransfers = Self.decodeCount(in: container, keys: [.missedTransfers, .missedTransferCount])
+            timerLeftRunning = (try? container.decode(Bool.self, forKey: .timerLeftRunning)) ?? false
+        }
+
+        func withUnreadSms(_ value: Int) -> AlertsDTO {
+            AlertsDTO(
+                unreadSms: max(0, value),
+                missedTransfers: missedTransfers,
+                timerLeftRunning: timerLeftRunning
+            )
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case unreadSms
+            case unansweredSms
+            case unreadSMS
+            case unreadCount
+            case missedTransfers
+            case missedTransferCount
+            case timerLeftRunning
+        }
+
+        private static func decodeCount(in container: KeyedDecodingContainer<CodingKeys>, keys: [CodingKeys]) -> Int {
+            for key in keys {
+                guard container.contains(key) else { continue }
+                if (try? container.decodeNil(forKey: key)) == true { continue }
+                if let value = try? container.decode(Int.self, forKey: key) { return max(0, value) }
+                if let value = try? container.decode(Double.self, forKey: key) { return max(0, Int(value)) }
+                if let value = try? container.decode(Bool.self, forKey: key) { return value ? 1 : 0 }
+                if let text = try? container.decode(String.self, forKey: key) {
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if let value = Int(trimmed) { return max(0, value) }
+                    if let value = Double(trimmed) { return max(0, Int(value)) }
+                }
+            }
+            return 0
+        }
     }
 
     let clock: ClockDTO?
@@ -20,6 +67,24 @@ struct MobileDashboardDTO: Decodable {
     let todayVisits: [VisitDTO]
     let remainingToday: Int
     let alerts: AlertsDTO
+
+    init(
+        clock: ClockDTO?,
+        openSegment: TechTimeSegmentDTO?,
+        activeVisit: VisitDTO?,
+        nextJob: VisitDTO?,
+        todayVisits: [VisitDTO],
+        remainingToday: Int,
+        alerts: AlertsDTO
+    ) {
+        self.clock = clock
+        self.openSegment = openSegment
+        self.activeVisit = activeVisit
+        self.nextJob = nextJob
+        self.todayVisits = todayVisits
+        self.remainingToday = remainingToday
+        self.alerts = alerts
+    }
 }
 
 struct TechTimeSegmentDTO: Codable, Identifiable, Equatable {

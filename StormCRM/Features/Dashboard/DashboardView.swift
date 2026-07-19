@@ -143,7 +143,7 @@ struct DashboardView: View {
                         greetingSection(user: user)
                     }
 
-                    if let alerts = techDashboard.dashboard?.alerts {
+                    if let alerts = techDashboard.displayAlerts {
                         alertsSection(alerts)
                     }
 
@@ -161,15 +161,21 @@ struct DashboardView: View {
             .navigationTitle("Dashboard")
             .refreshable {
                 async let dashboard: Void = viewModel.refresh(api: env.apiClient, user: auth.user, offlineSync: env.offlineSync)
-                async let tech: Void = techDashboard.load(api: env.apiClient)
+                async let tech: Void = techDashboard.load(api: env.apiClient, userRole: auth.user?.role)
                 async let clockLoad: Void = clock.load(api: env.apiClient)
                 _ = await (dashboard, tech, clockLoad)
             }
             .task {
                 async let dashboard: Void = viewModel.load(api: env.apiClient, user: auth.user, offlineSync: env.offlineSync)
-                async let tech: Void = techDashboard.load(api: env.apiClient)
+                async let tech: Void = techDashboard.load(api: env.apiClient, userRole: auth.user?.role)
                 async let clockLoad: Void = clock.load(api: env.apiClient)
                 _ = await (dashboard, tech, clockLoad)
+            }
+            .onChange(of: env.selectedTab) { _, tab in
+                guard tab == .dashboard else { return }
+                Task {
+                    await techDashboard.load(api: env.apiClient, userRole: auth.user?.role)
+                }
             }
             .navigationDestination(for: VisitDTO.self) { job in
                 VisitDetailView(visitId: job.id)

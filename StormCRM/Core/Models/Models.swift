@@ -681,6 +681,8 @@ struct ConversationDTO: Decodable, Identifiable {
     let lastMessageAt: String?
     let customer: CustomerSummary?
     let previewMessages: [MessageDTO]?
+    let unreadCount: Int?
+    let hasUnread: Bool?
 
     var previewText: String? {
         previewMessages?.first?.body
@@ -690,6 +692,17 @@ struct ConversationDTO: Decodable, Identifiable {
         customer?.name ?? title ?? participantPhone ?? "Conversation"
     }
 
+    /// Best-effort unread signal for dashboard alerts when the API omits an explicit flag.
+    var appearsUnread: Bool {
+        if let unreadCount { return unreadCount > 0 }
+        if let hasUnread { return hasUnread }
+        // Preview payload is typically the latest message; inbound-last means needs attention.
+        if let latest = previewMessages?.first {
+            return !latest.isOutbound
+        }
+        return false
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
@@ -697,6 +710,7 @@ struct ConversationDTO: Decodable, Identifiable {
         participantPhone = try container.decodeIfPresent(String.self, forKey: .participantPhone)
         customer = try container.decodeIfPresent(CustomerSummary.self, forKey: .customer)
         previewMessages = try container.decodeIfPresent([MessageDTO].self, forKey: .messages)
+            ?? container.decodeIfPresent([MessageDTO].self, forKey: .previewMessages)
         if let text = try container.decodeIfPresent(String.self, forKey: .lastMessageAt) {
             lastMessageAt = text
         } else if let date = try container.decodeIfPresent(Date.self, forKey: .lastMessageAt) {
@@ -704,10 +718,20 @@ struct ConversationDTO: Decodable, Identifiable {
         } else {
             lastMessageAt = nil
         }
+        if let count = try container.decodeIfPresent(Int.self, forKey: .unreadCount) {
+            unreadCount = max(0, count)
+        } else if let flag = try container.decodeIfPresent(Bool.self, forKey: .unreadCount) {
+            unreadCount = flag ? 1 : 0
+        } else {
+            unreadCount = nil
+        }
+        hasUnread = try container.decodeIfPresent(Bool.self, forKey: .hasUnread)
+            ?? container.decodeIfPresent(Bool.self, forKey: .isUnread)
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, participantPhone, lastMessageAt, customer, messages
+        case id, title, participantPhone, lastMessageAt, customer, messages, previewMessages
+        case unreadCount, hasUnread, isUnread
     }
 }
 
