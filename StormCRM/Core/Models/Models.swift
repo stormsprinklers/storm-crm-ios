@@ -585,7 +585,7 @@ struct PartsRunOptionDTO: Decodable, Identifiable {
         phone = try container.decodeIfPresent(String.self, forKey: .phone)
         mapsUrl = try container.decodeIfPresent(String.self, forKey: .mapsUrl)
         driveDistanceMiles = try container.decodeFlexibleDouble(forKey: .driveDistanceMiles)
-            ?? container.decodeFlexibleDouble(forKey: .distanceMiles)
+            ?? (try container.decodeFlexibleDouble(forKey: .distanceMiles))
         isOpenNow = try container.decodeIfPresent(Bool.self, forKey: .isOpenNow)
             ?? container.decodeIfPresent(Bool.self, forKey: .openNow)
 
