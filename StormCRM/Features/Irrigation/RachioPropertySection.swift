@@ -14,6 +14,7 @@ struct RachioPropertySection: View {
     @State private var message: String?
     @State private var error: String?
 
+    @State private var showLinkSheet = false
     @State private var devices: [RachioDeviceSummaryDTO] = []
     @State private var selectedDeviceId = ""
     @State private var devicesLoading = false
@@ -44,111 +45,126 @@ struct RachioPropertySection: View {
             }
         }
         .task(id: propertyId) { await load() }
-        .task(id: linked) {
-            guard !linked, canManage else { return }
-            await loadDevices()
+        .sheet(isPresented: $showLinkSheet) {
+            RachioLinkDeviceSheet(
+                devices: $devices,
+                selectedDeviceId: $selectedDeviceId,
+                devicesLoading: $devicesLoading,
+                devicesError: $devicesError,
+                linking: $linking,
+                linkError: error,
+                onLoadDevices: { await loadDevices() },
+                onLink: { await linkDevice() }
+            )
+            .environmentObject(env)
         }
     }
 
     private var sectionContent: some View {
         VStack(alignment: .leading, spacing: 10) {
-                StormSectionHeader(title: "Rachio", systemImage: "drop.circle")
+            if !isOnline {
+                Text("Rachio controls need an internet connection.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
 
-                if !isOnline {
-                    Text("Rachio controls need an internet connection.")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                }
-
-                if let error {
-                    Text(error).font(.caption).foregroundStyle(.red)
-                } else if !linked {
+            if let error {
+                Text(error).font(.caption).foregroundStyle(.red)
+            } else if !linked {
+                if canManage, isOnline {
+                    Button {
+                        showLinkSheet = true
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image("RachioLogo")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 28, height: 28)
+                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            Text("Rachio")
+                                .font(.body.weight(.semibold))
+                            Text("+")
+                                .font(.title3.weight(.bold))
+                        }
+                        .foregroundStyle(StormTheme.navy)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(StormTheme.ice.opacity(0.55))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(StormTheme.sky.opacity(0.35), lineWidth: 1)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Rachio plus, link device")
+                } else {
                     Text("No Rachio device linked to this property.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-
-                    if canManage, isOnline {
-                        rachioLinker
-                    }
-                } else {
-                    if let deviceName {
-                        Text(deviceName).font(.subheadline.weight(.medium))
-                    }
-                    if let message {
-                        Text(message).font(.caption).foregroundStyle(StormTheme.success)
-                    }
-                    ForEach(zones) { zone in
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(zone.name ?? "Zone \(zone.zoneNumber.map(String.init) ?? "?")")
-                                    .font(.subheadline)
-                                if zone.enabled == false {
-                                    Text("Disabled").font(.caption2).foregroundStyle(.secondary)
-                                }
-                            }
-                            Spacer()
-                            if canControl, isOnline {
-                                Button("Run 3m") {
-                                    Task { await runZone(zone.id, minutes: 3) }
-                                }
-                                .buttonStyle(StormSecondaryButtonStyle())
-                                .disabled(runningZoneId == zone.id)
-                            }
-                        }
-                    }
-                    if canControl || canManage {
-                        HStack(spacing: 10) {
-                            if canControl, isOnline {
-                                Button("Stop all watering") {
-                                    Task { await stopAll() }
-                                }
-                                .buttonStyle(StormSecondaryButtonStyle())
-                            }
-
-                            if canManage, isOnline {
-                                Button("Unlink") {
-                                    Task { await unlinkDevice() }
-                                }
-                                .buttonStyle(StormSecondaryButtonStyle())
-                                .disabled(unlinking)
-                            }
-                        }
-                    }
                 }
-        }
-    }
-
-    @ViewBuilder
-    private var rachioLinker: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if devicesLoading {
-                ProgressView("Loading Rachio devices…")
-                    .font(.caption)
-            } else if let devicesError {
-                Text(devicesError)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            } else if devices.isEmpty {
-                Text("No Rachio devices found on your company account.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             } else {
-                Picker("Rachio device", selection: $selectedDeviceId) {
-                    Text("Select a device").tag("")
-                    ForEach(devices) { device in
-                        Text(device.pickerLabel).tag(device.id)
+                HStack(spacing: 10) {
+                    Image("RachioLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 24, height: 24)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Rachio")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(StormTheme.navy)
+                        if let deviceName {
+                            Text(deviceName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+
+                if let message {
+                    Text(message).font(.caption).foregroundStyle(StormTheme.success)
+                }
+                ForEach(zones) { zone in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(zone.name ?? "Zone \(zone.zoneNumber.map(String.init) ?? "?")")
+                                .font(.subheadline)
+                            if zone.enabled == false {
+                                Text("Disabled").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if canControl, isOnline {
+                            Button("Run 3m") {
+                                Task { await runZone(zone.id, minutes: 3) }
+                            }
+                            .buttonStyle(StormSecondaryButtonStyle())
+                            .disabled(runningZoneId == zone.id)
+                        }
                     }
                 }
-                .pickerStyle(.menu)
+                if canControl || canManage {
+                    HStack(spacing: 10) {
+                        if canControl, isOnline {
+                            Button("Stop all watering") {
+                                Task { await stopAll() }
+                            }
+                            .buttonStyle(StormSecondaryButtonStyle())
+                        }
 
-                Button(linking ? "Linking…" : "Link device") {
-                    Task { await linkDevice() }
+                        if canManage, isOnline {
+                            Button("Unlink") {
+                                Task { await unlinkDevice() }
+                            }
+                            .buttonStyle(StormSecondaryButtonStyle())
+                            .disabled(unlinking)
+                        }
+                    }
                 }
-                .buttonStyle(StormPrimaryButtonStyle())
-                .disabled(linking || selectedDeviceId.isEmpty)
             }
         }
-        .padding(.top, 4)
     }
 
     private func load() async {
@@ -210,6 +226,7 @@ struct RachioPropertySection: View {
                 body: body
             )
             message = "Rachio device linked"
+            showLinkSheet = false
             await load()
         } catch {
             self.error = (error as? APIError)?.message
@@ -229,7 +246,6 @@ struct RachioPropertySection: View {
             deviceName = nil
             linked = false
             message = "Rachio device unlinked"
-            await loadDevices()
         } catch {
             self.error = (error as? APIError)?.message
         }
@@ -258,6 +274,72 @@ struct RachioPropertySection: View {
             message = "Watering stopped"
         } catch {
             self.error = (error as? APIError)?.message
+        }
+    }
+}
+
+/// Sheet opened from the Rachio + button to pick and link a company device.
+private struct RachioLinkDeviceSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Binding var devices: [RachioDeviceSummaryDTO]
+    @Binding var selectedDeviceId: String
+    @Binding var devicesLoading: Bool
+    @Binding var devicesError: String?
+    @Binding var linking: Bool
+    var onLoadDevices: () async -> Void
+    var onLink: () async -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: 12) {
+                        Image("RachioLogo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 36, height: 36)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        Text("Link a Rachio device to this property.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Section("Device") {
+                    if devicesLoading {
+                        ProgressView("Loading Rachio devices…")
+                    } else if let devicesError {
+                        Text(devicesError)
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    } else if devices.isEmpty {
+                        Text("No Rachio devices found on your company account.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Device", selection: $selectedDeviceId) {
+                            Text("Select a device").tag("")
+                            ForEach(devices) { device in
+                                Text(device.pickerLabel).tag(device.id)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Rachio")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(linking ? "Linking…" : "Link") {
+                        Task { await onLink() }
+                    }
+                    .disabled(linking || selectedDeviceId.isEmpty || devicesLoading)
+                }
+            }
+            .task { await onLoadDevices() }
         }
     }
 }
