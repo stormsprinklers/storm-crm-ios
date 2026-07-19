@@ -273,8 +273,7 @@ struct ScheduleView: View {
                 ScheduleJobCreateSheet(
                     start: context.start,
                     defaultAssignedUserId: context.assignedUserId,
-                    employees: employees,
-                    serviceAreas: serviceAreas
+                    employees: employees
                 ) {
                     await reload()
                 }
