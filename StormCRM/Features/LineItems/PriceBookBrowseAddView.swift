@@ -4,12 +4,13 @@ import SwiftUI
 struct PriceBookBrowseAddView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var priceBookPins: PriceBookPinStore
-    @Environment(\.dismiss) private var dismiss
 
     let owner: LineItemsOwner
     let itemType: String
     var optionId: String?
     var onAdded: () async -> Void
+    /// Dismisses the whole add sheet (not just a pushed category).
+    var closePicker: () -> Void
 
     @State private var tab: BrowseTab = .all
     @State private var search = ""
@@ -17,6 +18,7 @@ struct PriceBookBrowseAddView: View {
     @State private var frequent: [PriceBookItemDTO] = []
     @State private var searchResults: [PriceBookItemDTO] = []
     @State private var isLoading = false
+    @State private var isAdding = false
     @State private var error: String?
     @State private var showCreate = false
 
@@ -104,7 +106,7 @@ struct PriceBookBrowseAddView: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button {
-                    dismiss()
+                    closePicker()
                 } label: {
                     Label("Back", systemImage: "chevron.backward")
                 }
@@ -127,13 +129,14 @@ struct PriceBookBrowseAddView: View {
                 category: category,
                 itemType: itemType,
                 optionId: optionId,
-                onAdded: onAdded
+                onAdded: onAdded,
+                closePicker: closePicker
             )
         }
         .sheet(isPresented: $showCreate) {
             NavigationStack {
                 CreatePriceBookItemSheet(itemType: itemType) { created in
-                    await addItem(created)
+                    await addItem(created, keepOpen: false)
                 }
             }
         }
@@ -146,32 +149,11 @@ struct PriceBookBrowseAddView: View {
 
     @ViewBuilder
     private func itemRow(_ item: PriceBookItemDTO) -> some View {
-        Button {
-            Task { await addItem(item) }
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.name)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    if let description = item.description, !description.isEmpty {
-                        Text(description)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 6) {
-                    PriceBookFavoriteStarButton(item: item)
-                    Text(item.resolvedUnitPrice, format: .currency(code: "USD"))
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                }
-            }
-            .padding(.vertical, 4)
+        PriceBookAddItemRow(item: item) {
+            Task { await addItem(item, keepOpen: false) }
+        } onSwipeAdd: {
+            Task { await addItem(item, keepOpen: true) }
         }
-        .buttonStyle(.plain)
     }
 
     private func loadBrowse() async {
@@ -215,7 +197,10 @@ struct PriceBookBrowseAddView: View {
         }
     }
 
-    private func addItem(_ item: PriceBookItemDTO) async {
+    private func addItem(_ item: PriceBookItemDTO, keepOpen: Bool) async {
+        guard !isAdding else { return }
+        isAdding = true
+        defer { isAdding = false }
         do {
             try await PriceBookLineItemAdding.add(
                 api: env.apiClient,
@@ -224,7 +209,9 @@ struct PriceBookBrowseAddView: View {
                 optionId: optionId
             )
             await onAdded()
-            dismiss()
+            if !keepOpen {
+                closePicker()
+            }
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
@@ -234,17 +221,18 @@ struct PriceBookBrowseAddView: View {
 struct PriceBookCategoryItemsAddView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var priceBookPins: PriceBookPinStore
-    @Environment(\.dismiss) private var dismiss
     let owner: LineItemsOwner
     let category: PriceBookCategoryDTO
     let itemType: String
     var optionId: String?
     var onAdded: () async -> Void
+    var closePicker: () -> Void
 
     @State private var items: [PriceBookItemDTO] = []
     @State private var children: [PriceBookCategoryDTO] = []
     @State private var error: String?
     @State private var isLoading = false
+    @State private var isAdding = false
 
     var body: some View {
         List {
@@ -262,25 +250,11 @@ struct PriceBookCategoryItemsAddView: View {
             }
             Section(category.name) {
                 ForEach(items) { item in
-                    Button {
-                        Task { await add(item) }
-                    } label: {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(item.name).font(.body.weight(.semibold)).foregroundStyle(.primary)
-                                if let description = item.description, !description.isEmpty {
-                                    Text(description).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                                }
-                            }
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 6) {
-                                PriceBookFavoriteStarButton(item: item)
-                                Text(item.resolvedUnitPrice, format: .currency(code: "USD"))
-                                    .foregroundStyle(.primary)
-                            }
-                        }
+                    PriceBookAddItemRow(item: item) {
+                        Task { await add(item, keepOpen: false) }
+                    } onSwipeAdd: {
+                        Task { await add(item, keepOpen: true) }
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
@@ -308,7 +282,10 @@ struct PriceBookCategoryItemsAddView: View {
         }
     }
 
-    private func add(_ item: PriceBookItemDTO) async {
+    private func add(_ item: PriceBookItemDTO, keepOpen: Bool) async {
+        guard !isAdding else { return }
+        isAdding = true
+        defer { isAdding = false }
         do {
             try await PriceBookLineItemAdding.add(
                 api: env.apiClient,
@@ -317,9 +294,54 @@ struct PriceBookCategoryItemsAddView: View {
                 optionId: optionId
             )
             await onAdded()
-            dismiss()
+            if !keepOpen {
+                closePicker()
+            }
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+}
+
+/// Tap adds and closes the picker; swipe right reveals a green + that adds and stays open.
+private struct PriceBookAddItemRow: View {
+    let item: PriceBookItemDTO
+    var onTapAdd: () -> Void
+    var onSwipeAdd: () -> Void
+
+    var body: some View {
+        Button(action: onTapAdd) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.name)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    if let description = item.description, !description.isEmpty {
+                        Text(description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 8)
+                VStack(alignment: .trailing, spacing: 6) {
+                    PriceBookFavoriteStarButton(item: item)
+                    Text(item.resolvedUnitPrice, format: .currency(code: "USD"))
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            Button(action: onSwipeAdd) {
+                Image(systemName: "plus")
+                    .font(.body.weight(.bold))
+                    .foregroundStyle(.white)
+            }
+            .tint(.green)
+            .accessibilityLabel("Add and keep browsing")
         }
     }
 }
