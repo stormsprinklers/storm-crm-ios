@@ -93,9 +93,10 @@ struct PropertyLocationEmbedsView: View {
                         Text("Street view")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        GoogleMapsEmbedWebView(url: url)
+                        GoogleMapsEmbedWebView(url: url, isInteractive: false)
                             .frame(height: 220)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .allowsHitTesting(false)
                     }
                 }
 
@@ -104,9 +105,10 @@ struct PropertyLocationEmbedsView: View {
                         Text("Map")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        GoogleMapsEmbedWebView(url: url)
+                        GoogleMapsEmbedWebView(url: url, isInteractive: false)
                             .frame(height: 180)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .allowsHitTesting(false)
                     }
                 }
 

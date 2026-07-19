@@ -19,11 +19,12 @@ private struct ZoomableMapContainer<Content: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let map = content()
+            let base = content()
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .scaleEffect(scale)
                 .offset(offset)
-                .gesture(zoomGesture)
+                // Pinch should not block parent ScrollView taps/pans.
+                .simultaneousGesture(zoomGesture)
                 .onTapGesture(count: 2) {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         resetZoom()
@@ -31,12 +32,11 @@ private struct ZoomableMapContainer<Content: View>: View {
                 }
                 .accessibilityHint("Pinch to zoom. Double-tap to reset.")
 
-            // Only attach a DragGesture while zoomed. A always-on drag recognizer steals
-            // vertical pans from the parent ScrollView even when the handler no-ops.
+            // Only attach pan while zoomed so an always-on DragGesture cannot steal scrolls.
             if scale > 1.01 {
-                map.highPriorityGesture(panGesture)
+                base.simultaneousGesture(panGesture)
             } else {
-                map
+                base
             }
         }
         .frame(maxWidth: .infinity)

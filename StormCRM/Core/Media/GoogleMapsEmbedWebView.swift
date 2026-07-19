@@ -15,17 +15,27 @@ struct GoogleMapsEmbedWebView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView()
+        let config = WKWebViewConfiguration()
+        config.allowsInlineMediaPlayback = true
+        let webView = WKWebView(frame: .zero, configuration: config)
         webView.scrollView.isScrollEnabled = false
+        webView.scrollView.bounces = false
+        webView.scrollView.delaysContentTouches = false
+        webView.scrollView.canCancelContentTouches = false
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
+        // Non-interactive embeds must never enter the gesture system — they sit inside
+        // ScrollViews and otherwise cause "System gesture gate timed out" / dead buttons.
         webView.isUserInteractionEnabled = isInteractive
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         webView.isUserInteractionEnabled = isInteractive
+        webView.scrollView.isScrollEnabled = false
+        webView.scrollView.delaysContentTouches = false
+        webView.scrollView.canCancelContentTouches = false
         guard context.coordinator.loadedURL != url else { return }
         context.coordinator.loadedURL = url
         webView.loadHTMLString(Self.iframeHTML(for: url, interactive: isInteractive), baseURL: nil)

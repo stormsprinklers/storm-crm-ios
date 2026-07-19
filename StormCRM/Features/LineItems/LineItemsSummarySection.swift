@@ -2,6 +2,8 @@ import SwiftUI
 
 /// Compact line-items card with pencil → full builder (shared by visit + estimate).
 struct LineItemsSummarySection: View {
+    @EnvironmentObject private var env: AppEnvironment
+
     let owner: LineItemsOwner
     let items: [LineItemDTO]
     let discounts: [DiscountDTO]
@@ -99,6 +101,7 @@ struct LineItemsSummarySection: View {
                     await onUpdated()
                 }
             }
+            .environmentObject(env)
         }
     }
 

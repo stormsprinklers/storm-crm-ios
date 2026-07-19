@@ -185,28 +185,32 @@ struct VisitDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let visitId: String
     @StateObject private var viewModel = VisitDetailViewModel()
-    @State private var showPayment = false
+    @State private var activeSheet: VisitActiveSheet?
     @State private var showFinishBillingPrompt = false
     @State private var finishBillingAmount: Double = 0
-    @State private var showPartsRun = false
     @State private var showDeleteConfirm = false
     @State private var newNote = ""
+
+    private enum VisitActiveSheet: Identifiable {
+        case payment(amount: Double)
+        case partsRun
+
+        var id: String {
+            switch self {
+            case .payment: return "payment"
+            case .partsRun: return "partsRun"
+            }
+        }
+    }
 
     var body: some View {
         Group {
             if let visit = viewModel.visit {
-                ZStack(alignment: .top) {
-                    // Decorative only — WKWebView must not compete with the page ScrollView.
-                    VisitStreetViewHeader(addressQuery: formattedJobAddress(visit))
-                        .allowsHitTesting(false)
+                ScrollView {
+                    VStack(spacing: 0) {
+                        Color.clear.frame(height: 72)
 
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            Color.clear
-                                .frame(height: 72)
-                                .allowsHitTesting(false)
-
-                            VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 16) {
                                 let subtotal = visitSubtotal(from: visit.lineItems ?? [])
                                 let discountTotal = visitDiscountTotal(
                                     subtotal: subtotal,
@@ -249,8 +253,9 @@ struct VisitDetailView: View {
                                     Spacer(minLength: 0)
                                     if paymentSummary.hasBalanceDue {
                                         Button {
-                                            finishBillingAmount = paymentSummary.balanceDue ?? total
-                                            showPayment = true
+                                            let amount = paymentSummary.balanceDue ?? total
+                                            finishBillingAmount = amount
+                                            activeSheet = .payment(amount: amount)
                                         } label: {
                                             Label {
                                                 Text(paymentAmountDue(for: visit), format: .currency(code: "USD"))
@@ -264,7 +269,7 @@ struct VisitDetailView: View {
                                             .foregroundStyle(.white)
                                             .clipShape(Capsule())
                                         }
-                                        .buttonStyle(.plain)
+                                        .buttonStyle(.borderless)
                                     }
                                 }
 
@@ -278,7 +283,7 @@ struct VisitDetailView: View {
                                 }
 
                                 Button {
-                                    showPartsRun = true
+                                    activeSheet = .partsRun
                                 } label: {
                                     Label("Parts run", systemImage: "shippingbox.fill")
                                         .font(.body.weight(.semibold))
@@ -394,13 +399,19 @@ struct VisitDetailView: View {
                                 }
                             }
                             .padding()
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .background {
                                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                                     .fill(StormTheme.page)
                                     .shadow(color: StormTheme.navy.opacity(0.08), radius: 12, y: -4)
                             }
+                            .contentShape(Rectangle())
                         }
-                    }
+                }
+                .background(alignment: .top) {
+                    // Background only — keeps the header out of the hit-test tree entirely.
+                    VisitStreetViewHeader(addressQuery: formattedJobAddress(visit))
+                        .allowsHitTesting(false)
                 }
                 .background(StormTheme.navy.opacity(0.08).ignoresSafeArea())
             } else if let error = viewModel.error {
@@ -426,20 +437,21 @@ struct VisitDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showPayment) {
-            PaymentSheet(
-                visitId: visitId,
-                amountDue: viewModel.visit.map { paymentAmountDue(for: $0) } ?? finishBillingAmount
-            ) {
-                Task { await reloadVisit() }
-            }
-        }
-        .sheet(isPresented: $showPartsRun) {
-            PartsRunSheet(visitId: visitId) {
-                await viewModel.load(
-                    api: env.apiClient,
-                    visitId: visitId
-                )
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .payment(let amount):
+                PaymentSheet(visitId: visitId, amountDue: amount) {
+                    Task { await reloadVisit() }
+                }
+                .environmentObject(env)
+            case .partsRun:
+                PartsRunSheet(visitId: visitId) {
+                    await viewModel.load(
+                        api: env.apiClient,
+                        visitId: visitId
+                    )
+                }
+                .environmentObject(env)
             }
         }
         .refreshable {
@@ -457,7 +469,9 @@ struct VisitDetailView: View {
             isPresented: $showFinishBillingPrompt,
             titleVisibility: .visible
         ) {
-            Button("Collect payment now") { showPayment = true }
+            Button("Collect payment now") {
+                activeSheet = .payment(amount: finishBillingAmount)
+            }
             Button("Send invoice to customer") {
                 Task { await sendInvoiceAfterFinish() }
             }

@@ -327,62 +327,36 @@ func visitSubtotal(from items: [LineItemDTO]) -> Double {
 
 // MARK: - Visit layout sections
 
+/// Decorative visit header. Intentionally avoids `WKWebView` — an embed here sat under the
+/// action buttons and caused system gesture-gate timeouts that swallowed taps (Payment, Parts run).
 struct VisitStreetViewHeader: View {
-    @EnvironmentObject private var env: AppEnvironment
     let addressQuery: String?
 
-    @State private var streetEmbedURL: URL?
-    @State private var isLoading = false
-
     var body: some View {
-        Group {
-            if let streetEmbedURL {
-                GoogleMapsEmbedWebView(url: streetEmbedURL)
-            } else if isLoading {
-                ZStack {
-                    StormTheme.navy.opacity(0.15)
-                    ProgressView()
-                        .tint(.white)
-                }
-            } else {
-                ZStack {
-                    LinearGradient(
-                        colors: [StormTheme.navy, StormTheme.sky.opacity(0.85)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                    Image(systemName: "house.fill")
-                        .font(.title2)
-                        .foregroundStyle(.white.opacity(0.5))
+        ZStack {
+            LinearGradient(
+                colors: [StormTheme.navy, StormTheme.sky.opacity(0.85)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            VStack(spacing: 6) {
+                Image(systemName: "house.fill")
+                    .font(.title2)
+                    .foregroundStyle(.white.opacity(0.55))
+                if let addressQuery, !addressQuery.isEmpty {
+                    Text(addressQuery)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .padding(.horizontal, 24)
                 }
             }
         }
         .frame(maxWidth: .infinity)
         .frame(height: 112)
         .clipped()
-        .task(id: addressQuery) { await load() }
-    }
-
-    private func load() async {
-        guard let addressQuery, !addressQuery.isEmpty else {
-            streetEmbedURL = nil
-            return
-        }
-        isLoading = streetEmbedURL == nil
-        defer { isLoading = false }
-        do {
-            let embeds: MapsEmbedResponse = try await env.apiClient.get(
-                path: APIPath.mapsEmbed,
-                query: [URLQueryItem(name: "q", value: addressQuery)]
-            )
-            if let street = embeds.streetEmbed {
-                streetEmbedURL = URL(string: street)
-            } else {
-                streetEmbedURL = nil
-            }
-        } catch {
-            streetEmbedURL = nil
-        }
+        .accessibilityHidden(true)
     }
 }
 
