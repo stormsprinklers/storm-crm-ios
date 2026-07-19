@@ -120,11 +120,17 @@ final class AppEnvironment: ObservableObject {
 
         self.apiClient = apiClient
 
-        self.auth = AuthManager(tokenStore: tokenStore, apiClient: apiClient)
+        let auth = AuthManager(tokenStore: tokenStore, apiClient: apiClient)
+
+        self.auth = auth
+
+        apiClient.onSessionInvalidated = { [weak auth] in
+            auth?.handleSessionInvalidated()
+        }
 
         self.branding = CompanyBranding()
 
-        self.voice = VoiceManager(apiClient: apiClient, auth: self.auth)
+        self.voice = VoiceManager(apiClient: apiClient, auth: auth)
 
         self.offlineSync = OfflineSyncManager(modelContainer: modelContainer)
 
