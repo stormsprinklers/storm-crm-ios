@@ -118,6 +118,9 @@ struct PriceBookBrowseAddView: View {
                 .accessibilityLabel("Create new \(title.lowercased().dropLast())")
             }
         }
+        // Register once on the browse root. Nested category screens must not also
+        // declare this type — duplicates log "navigationDestination was declared
+        // earlier on the stack" and only the root destination is used.
         .navigationDestination(for: PriceBookCategoryDTO.self) { category in
             PriceBookCategoryItemsAddView(
                 owner: owner,
@@ -282,15 +285,6 @@ struct PriceBookCategoryItemsAddView: View {
             }
         }
         .navigationTitle(category.name)
-        .navigationDestination(for: PriceBookCategoryDTO.self) { child in
-            PriceBookCategoryItemsAddView(
-                owner: owner,
-                category: child,
-                itemType: itemType,
-                optionId: optionId,
-                onAdded: onAdded
-            )
-        }
         .task { await load() }
         .overlay { if isLoading { ProgressView() } }
     }
