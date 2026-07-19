@@ -234,9 +234,9 @@ private enum PaymentCollectMethod: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .manualCard: return "Open Stripe Checkout on this device (Apple Pay, card, Klarna, …)"
-        case .qrCode: return "Customer scans a Stripe Checkout link"
-        case .sendLink: return "Email / text a Stripe Checkout link"
+        case .manualCard: return "Open secure checkout on this device"
+        case .qrCode: return "Customer scans to open the payment link"
+        case .sendLink: return "Email / text the pay link to the customer"
         case .cashCheck: return "Record cash or check and notify admins"
         }
     }
@@ -534,7 +534,7 @@ struct PaymentSheet: View {
             if let urlString = response.url ?? response.payLink, let url = URL(string: urlString) {
                 checkoutURL = url
             } else {
-                error = "No checkout URL returned. Check that Stripe is configured on the server."
+                error = "No checkout URL returned. Check that card payments are configured on the server."
             }
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
@@ -558,7 +558,7 @@ struct PaymentSheet: View {
             )
             payLink = response.url ?? response.payLink
             if payLink == nil {
-                error = "Could not create a Stripe payment link."
+                error = "Could not create a payment link."
             }
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
