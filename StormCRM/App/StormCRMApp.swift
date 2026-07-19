@@ -28,6 +28,7 @@ struct StormCRMApp: App {
                 .environmentObject(appEnvironment.branding)
                 .environmentObject(appEnvironment.offlineSync)
                 .environmentObject(appEnvironment.priceBookPins)
+                .environmentObject(appEnvironment.appearance)
                 .modelContainer(modelContainer)
                 .tint(StormTheme.coral)
                 .onOpenURL { url in
@@ -51,6 +52,7 @@ struct StormCRMApp: App {
 struct RootView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var appearanceSettings: AppearanceSettings
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -84,5 +86,6 @@ struct RootView: View {
             }
         }
         .background(StormTheme.page.ignoresSafeArea())
+        .preferredColorScheme(appearanceSettings.appearance.preferredColorScheme)
     }
 }

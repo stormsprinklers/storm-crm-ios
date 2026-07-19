@@ -4,6 +4,7 @@ struct MoreView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var offlineSync: OfflineSyncManager
+    @EnvironmentObject private var appearanceSettings: AppearanceSettings
 
     @State private var showSignOutConfirm = false
     @State private var showPendingSyncAlert = false
@@ -17,6 +18,18 @@ struct MoreView: View {
                         LabeledContent("Email", value: user.email)
                         LabeledContent("Role", value: user.role.replacingOccurrences(of: "_", with: " "))
                     }
+                }
+
+                Section {
+                    Picker(selection: $appearanceSettings.appearance) {
+                        ForEach(AppAppearance.allCases) { option in
+                            Text(option.title).tag(option)
+                        }
+                    } label: {
+                        Label("Appearance", systemImage: "moon.circle")
+                    }
+                } footer: {
+                    Text("Choose System to match your iPhone Light/Dark setting. Light or Dark locks the app to that look.")
                 }
 
                 Section("Tools") {

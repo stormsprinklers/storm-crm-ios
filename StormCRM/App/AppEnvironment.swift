@@ -86,6 +86,8 @@ final class AppEnvironment: ObservableObject {
 
     let offlineSync: OfflineSyncManager
 
+    let appearance = AppearanceSettings()
+
 
 
     @Published var selectedTab: MainTab = .dashboard

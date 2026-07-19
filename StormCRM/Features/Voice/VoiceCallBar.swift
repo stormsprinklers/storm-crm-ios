@@ -34,7 +34,7 @@ struct VoiceCallBar: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-            .background(StormTheme.navy)
+            .background(StormTheme.brandNavy)
             .shadow(radius: 4)
             .transition(.move(edge: .top))
         } else if let error = voice.lastError, !error.isEmpty {

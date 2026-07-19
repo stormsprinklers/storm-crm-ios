@@ -1,12 +1,35 @@
 import SwiftUI
+import UIKit
 
 /// Storm Sprinklers brand tokens — aligned with crm/src/lib/branding.ts
 enum StormTheme {
-    static let navy = Color(hex: "#102341")!
+    /// Adaptive ink for text/chrome (light navy in light mode, near-white in dark).
+    static let navy = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.93, green: 0.95, blue: 0.98, alpha: 1)
+            : UIColor(red: 16 / 255, green: 35 / 255, blue: 65 / 255, alpha: 1) // #102341
+    })
+
+    /// Fixed brand navy for filled surfaces (voice bar, outbound bubbles, hero gradients).
+    static let brandNavy = Color(hex: "#102341")!
+
     static let sky = Color(hex: "#4C9BC8")!
     static let coral = Color(hex: "#F17388")!
-    static let ice = Color(hex: "#C2E4F0")!
-    static let page = Color(hex: "#F8FAFC")!
+
+    /// Soft fill / borders — muted in dark mode.
+    static let ice = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.18, green: 0.27, blue: 0.36, alpha: 1)
+            : UIColor(red: 194 / 255, green: 228 / 255, blue: 240 / 255, alpha: 1) // #C2E4F0
+    })
+
+    /// App page background — follows light/dark appearance.
+    static let page = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.07, green: 0.10, blue: 0.16, alpha: 1)
+            : UIColor(red: 248 / 255, green: 250 / 255, blue: 252 / 255, alpha: 1) // #F8FAFC
+    })
+
     static let success = Color(hex: "#16A34A")!
 }
 
@@ -36,7 +59,7 @@ struct StormCard<Content: View>: View {
                     .stroke(StormTheme.ice.opacity(0.8), lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 12))
-            .shadow(color: StormTheme.navy.opacity(0.06), radius: 8, y: 2)
+            .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
     }
 }
 
