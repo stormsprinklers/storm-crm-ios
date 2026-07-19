@@ -16,6 +16,14 @@ struct LineItemsBuilderView: View {
     @State private var isLoading = true
     @State private var error: String?
     @State private var optionId: String?
+    @State private var browseAddType: BrowseAddSheet?
+    @State private var showDiscountBrowse = false
+
+    private enum BrowseAddSheet: String, Identifiable {
+        case service = "SERVICE"
+        case material = "MATERIAL"
+        var id: String { rawValue }
+    }
 
     private var serviceItems: [LineItemDTO] {
         items.filter { !$0.isMaterial }.sorted { $0.sortOrder < $1.sortOrder }
@@ -37,14 +45,14 @@ struct LineItemsBuilderView: View {
                 title: "Services",
                 sectionItems: serviceItems,
                 addLabel: "Add Services",
-                browseType: "SERVICE"
+                browseType: .service
             )
 
             sectionBlock(
                 title: "Materials",
                 sectionItems: materialItems,
                 addLabel: "Add Materials",
-                browseType: "MATERIAL"
+                browseType: .material
             )
 
             discountsSection
@@ -70,7 +78,6 @@ struct LineItemsBuilderView: View {
                 }
             }
         }
-        .environment(\.editMode, .constant(.active))
         .listStyle(.insetGrouped)
         .navigationTitle("Line items")
         .navigationBarTitleDisplayMode(.inline)
@@ -82,6 +89,9 @@ struct LineItemsBuilderView: View {
                         dismiss()
                     }
                 }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                EditButton()
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") {
@@ -96,6 +106,22 @@ struct LineItemsBuilderView: View {
         .overlay {
             if isLoading { ProgressView() }
         }
+        .sheet(item: $browseAddType) { sheet in
+            NavigationStack {
+                PriceBookBrowseAddView(owner: owner, itemType: sheet.rawValue, optionId: optionId) {
+                    await reload()
+                }
+            }
+            .environmentObject(env)
+        }
+        .sheet(isPresented: $showDiscountBrowse) {
+            NavigationStack {
+                DiscountBrowseAddView(owner: owner, optionId: optionId) {
+                    await reload()
+                }
+            }
+            .environmentObject(env)
+        }
     }
 
     @ViewBuilder
@@ -103,7 +129,7 @@ struct LineItemsBuilderView: View {
         title: String,
         sectionItems: [LineItemDTO],
         addLabel: String,
-        browseType: String
+        browseType: BrowseAddSheet
     ) -> some View {
         Section {
             ForEach(sectionItems) { item in
@@ -135,11 +161,15 @@ struct LineItemsBuilderView: View {
             .onMove { indices, newOffset in
                 Task { await reorder(sectionItems: sectionItems, from: indices, to: newOffset) }
             }
-
-            NavigationLink {
-                PriceBookBrowseAddView(owner: owner, itemType: browseType, optionId: optionId) {
-                    await reload()
+            .onDelete { indexSet in
+                let ids = indexSet.map { sectionItems[$0].id }
+                Task {
+                    for id in ids { await deleteItem(id) }
                 }
+            }
+
+            Button {
+                browseAddType = browseType
             } label: {
                 Label {
                     Text(addLabel).foregroundStyle(.secondary)
@@ -148,6 +178,7 @@ struct LineItemsBuilderView: View {
                         .foregroundStyle(.green)
                 }
             }
+            .buttonStyle(.borderless)
         } header: {
             Text(title)
         }
@@ -178,11 +209,15 @@ struct LineItemsBuilderView: View {
                     Spacer()
                 }
             }
-
-            NavigationLink {
-                DiscountBrowseAddView(owner: owner, optionId: optionId) {
-                    await reload()
+            .onDelete { indexSet in
+                let ids = indexSet.map { discounts[$0].id }
+                Task {
+                    for id in ids { await deleteDiscount(id) }
                 }
+            }
+
+            Button {
+                showDiscountBrowse = true
             } label: {
                 Label {
                     Text("Add Discounts").foregroundStyle(.secondary)
@@ -191,6 +226,7 @@ struct LineItemsBuilderView: View {
                         .foregroundStyle(.green)
                 }
             }
+            .buttonStyle(.borderless)
         } header: {
             Text("Discounts")
         }
