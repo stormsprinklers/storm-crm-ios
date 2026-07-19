@@ -234,9 +234,9 @@ private enum PaymentCollectMethod: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
-        case .manualCard: return "Open secure card checkout on this device"
-        case .qrCode: return "Customer scans to open the payment link"
-        case .sendLink: return "Email / text the pay link to the customer"
+        case .manualCard: return "Open Stripe Checkout on this device (Apple Pay, card, Klarna, …)"
+        case .qrCode: return "Customer scans a Stripe Checkout link"
+        case .sendLink: return "Email / text a Stripe Checkout link"
         case .cashCheck: return "Record cash or check and notify admins"
         }
     }
@@ -530,8 +530,8 @@ struct PaymentSheet: View {
                 path: APIPath.paymentsCheckout,
                 body: Body(visitId: visitId, mobileReturn: true, platform: "ios")
             )
-            payLink = response.payLink
-            if let urlString = response.url, let url = URL(string: urlString) {
+            payLink = response.url ?? response.payLink
+            if let urlString = response.url ?? response.payLink, let url = URL(string: urlString) {
                 checkoutURL = url
             } else {
                 error = "No checkout URL returned. Check that Stripe is configured on the server."
@@ -545,15 +545,20 @@ struct PaymentSheet: View {
         isLoading = true
         error = nil
         defer { isLoading = false }
-        struct Body: Encodable { let send: Bool }
+        struct Body: Encodable {
+            let visitId: String
+            let mobileReturn: Bool
+            let platform: String
+        }
         do {
-            let response: VisitInvoiceResponse = try await env.apiClient.post(
-                path: APIPath.visitInvoice(visitId),
-                body: Body(send: false)
+            // Prefer Stripe Checkout session.url (Apple Pay / Klarna / branded domain when ready).
+            let response: CheckoutResponse = try await env.apiClient.post(
+                path: APIPath.paymentsCheckout,
+                body: Body(visitId: visitId, mobileReturn: true, platform: "ios")
             )
-            payLink = response.payLink
+            payLink = response.url ?? response.payLink
             if payLink == nil {
-                error = "Could not create a payment link."
+                error = "Could not create a Stripe payment link."
             }
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription

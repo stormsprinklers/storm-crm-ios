@@ -95,32 +95,49 @@ struct EstimateApprovalSheet: View {
 
     private var termsFooter: some View {
         Group {
-            if let url = branding.termsOfServiceURL {
-                (
-                    Text("All services are subject to our ")
-                        .foregroundStyle(.secondary)
-                    + Text("Terms of Service")
-                        .foregroundStyle(StormTheme.sky)
-                        .underline()
-                )
-                .font(.caption)
-                .fixedSize(horizontal: false, vertical: true)
-                .onTapGesture { openURL(url) }
-                .accessibilityAddTraits(.isLink)
+            if branding.termsOfServiceURL != nil || branding.privacyPolicyURL != nil {
+                VStack(alignment: .leading, spacing: 4) {
+                    if let url = branding.termsOfServiceURL {
+                        legalLinkRow(prefix: "All services are subject to our ", label: "Terms of Service", url: url)
+                    } else {
+                        inactiveTermsRow
+                    }
+                    if let url = branding.privacyPolicyURL {
+                        legalLinkRow(prefix: "See also our ", label: "Privacy Policy", url: url)
+                    }
+                }
             } else {
-                (
-                    Text("All services are subject to our ")
-                        .foregroundStyle(.secondary)
-                    + Text("Terms of Service")
-                        .foregroundStyle(.secondary)
-                        .underline()
-                )
-                .font(.caption)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityLabel("Terms of Service (not configured yet)")
-                .accessibilityHint("Company terms of service link is not set up yet")
+                inactiveTermsRow
             }
         }
+    }
+
+    private var inactiveTermsRow: some View {
+        (
+            Text("All services are subject to our ")
+                .foregroundStyle(.secondary)
+            + Text("Terms of Service")
+                .foregroundStyle(.secondary)
+                .underline()
+        )
+        .font(.caption)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityLabel("Terms of Service (not configured yet)")
+        .accessibilityHint("Company terms of service link is not set up yet")
+    }
+
+    private func legalLinkRow(prefix: String, label: String, url: URL) -> some View {
+        (
+            Text(prefix)
+                .foregroundStyle(.secondary)
+            + Text(label)
+                .foregroundStyle(StormTheme.sky)
+                .underline()
+        )
+        .font(.caption)
+        .fixedSize(horizontal: false, vertical: true)
+        .onTapGesture { openURL(url) }
+        .accessibilityAddTraits(.isLink)
     }
 
     private func approve() async {

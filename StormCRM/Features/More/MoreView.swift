@@ -72,6 +72,21 @@ struct MoreView: View {
                     }
                 }
 
+                if env.branding.termsOfServiceURL != nil || env.branding.privacyPolicyURL != nil {
+                    Section("Legal") {
+                        if let url = env.branding.termsOfServiceURL {
+                            Link(destination: url) {
+                                Label("Terms of Service", systemImage: "doc.text")
+                            }
+                        }
+                        if let url = env.branding.privacyPolicyURL {
+                            Link(destination: url) {
+                                Label("Privacy Policy", systemImage: "hand.raised")
+                            }
+                        }
+                    }
+                }
+
                 Section {
                     Button("Sign out", role: .destructive) {
                         if offlineSync.pendingCount > 0 {
