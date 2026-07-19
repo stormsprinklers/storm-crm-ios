@@ -105,12 +105,24 @@ struct VisitPaymentsSection: View {
                         .buttonStyle(StormSecondaryButtonStyle())
                         .disabled(!canBill || isSendingInvoice)
 
-                        if let link = payLink, let url = URL(string: link) {
-                            ShareLink(item: url) {
-                                Label("Share pay link", systemImage: "square.and.arrow.up")
-                                    .frame(maxWidth: .infinity)
+                        if payLink != nil {
+                            // Resend via CRM email/SMS — not the system share sheet.
+                            Button {
+                                Task { await sendInvoice() }
+                            } label: {
+                                HStack {
+                                    if isSendingInvoice {
+                                        ProgressView().controlSize(.small)
+                                    }
+                                    Label(
+                                        isSendingInvoice ? "Sending…" : "Text or email pay link",
+                                        systemImage: "paperplane.fill"
+                                    )
+                                }
+                                .frame(maxWidth: .infinity)
                             }
                             .buttonStyle(StormSecondaryButtonStyle())
+                            .disabled(!canBill || isSendingInvoice)
                         } else {
                             Button {
                                 Task { await preparePayLink() }
@@ -372,9 +384,10 @@ struct PaymentSheet: View {
     @ViewBuilder
     private func methodDetail(_ method: PaymentCollectMethod) -> some View {
         VStack(spacing: 16) {
-            if isLoading {
+            // Keep an already-built QR visible while text/email send is in flight.
+            if isLoading, !(method == .qrCode && payLink != nil) {
                 ProgressView(loadingLabel(for: method))
-            } else if let error {
+            } else if let error, !(method == .qrCode && payLink != nil) {
                 Text(error)
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
@@ -392,7 +405,7 @@ struct PaymentSheet: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 case .qrCode:
-                    if let payLink, let url = URL(string: payLink) {
+                    if let payLink {
                         Text("Have the customer scan this code to pay.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -411,11 +424,37 @@ struct PaymentSheet: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .multilineTextAlignment(.center)
-                        ShareLink(item: url) {
-                            Label("Share link", systemImage: "square.and.arrow.up")
-                                .frame(maxWidth: .infinity)
+                        if let error {
+                            Text(error)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .multilineTextAlignment(.center)
+                        }
+                        if let statusMessage {
+                            Text(statusMessage)
+                                .font(.caption)
+                                .foregroundStyle(StormTheme.success)
+                                .multilineTextAlignment(.center)
+                        }
+                        // Send via CRM email/SMS — not the system share sheet.
+                        Button {
+                            Task { await sendPaymentLink(fromQR: true) }
+                        } label: {
+                            HStack {
+                                if isLoading {
+                                    ProgressView().controlSize(.small)
+                                }
+                                Label(
+                                    isLoading ? "Sending…" : "Text or email link",
+                                    systemImage: "paperplane.fill"
+                                )
+                            }
+                            .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(StormSecondaryButtonStyle())
+                        .disabled(isLoading)
+                    } else if isLoading {
+                        ProgressView(loadingLabel(for: method))
                     }
                 case .sendLink:
                     Image(systemName: "checkmark.circle.fill")
@@ -521,15 +560,16 @@ struct PaymentSheet: View {
         }
     }
 
-    private func sendPaymentLink() async {
+    private func sendPaymentLink(fromQR: Bool = false) async {
         isLoading = true
         error = nil
+        statusMessage = nil
         defer { isLoading = false }
         struct Body: Encodable { let send: Bool }
         let body = Body(send: true)
 
         if !env.offlineSync.isOnline {
-            queueSendLink()
+            queueSendLink(fromQR: fromQR)
             return
         }
 
@@ -538,7 +578,9 @@ struct PaymentSheet: View {
                 path: APIPath.visitInvoice(visitId),
                 body: body
             )
-            payLink = response.payLink
+            if let link = response.payLink {
+                payLink = link
+            }
             var parts: [String] = []
             if response.emailSent == true { parts.append("email") }
             if response.smsSent == true { parts.append("SMS") }
@@ -548,16 +590,21 @@ struct PaymentSheet: View {
                 statusMessage = "Payment link sent via \(parts.joined(separator: " and "))."
             }
             onCompleted()
+            // From the dedicated send-link method, show the success screen.
+            // From QR, stay on the QR view so the code remains usable.
+            if !fromQR {
+                selectedMethod = .sendLink
+            }
         } catch {
             if isLikelyOffline(error) {
-                queueSendLink()
+                queueSendLink(fromQR: fromQR)
             } else {
                 self.error = (error as? APIError)?.message ?? error.localizedDescription
             }
         }
     }
 
-    private func queueSendLink() {
+    private func queueSendLink(fromQR: Bool = false) {
         struct SendBody: Encodable { let send: Bool }
         guard let payload = try? JSONCoding.makeEncoder().encode(SendBody(send: true)) else {
             error = "Could not save payment link request offline."
@@ -572,6 +619,9 @@ struct PaymentSheet: View {
         )
         statusMessage = "Payment link request saved offline — it will send when you're back online."
         onCompleted()
+        if !fromQR {
+            selectedMethod = .sendLink
+        }
     }
 
     private func recordManualPayment(method: String) async {
