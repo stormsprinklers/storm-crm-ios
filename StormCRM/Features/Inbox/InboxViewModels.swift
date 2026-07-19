@@ -54,7 +54,8 @@ final class InboxListViewModel: ObservableObject {
                 path = APIPath.smsConversations
                 query = [URLQueryItem(name: "scope", value: scope.apiScope)]
             }
-            conversations = try await api.get(path: path, query: query)
+            let response: ConversationsListResponse = try await api.get(path: path, query: query)
+            conversations = response.conversations
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }

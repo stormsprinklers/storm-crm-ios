@@ -35,19 +35,13 @@ final class TechDashboardViewModel: ObservableObject {
         }
     }
 
-    /// Prefer the inbox list the user can open over the raw dashboard counter, which can stay
-    /// stuck at 1 when a conversation is not visible/eligible on mobile.
+    /// When the inbox list loads, prefer its explicit unread counts over the dashboard counter.
+    /// Returns `nil` only if the inbox request fails (keep the dashboard value, which no longer
+    /// treats `unansweredSms` as unread).
     private func reconciledUnreadSms(api: APIClient, userRole: String?) async -> Int? {
         let conversations: [ConversationDTO]
         do {
-            if UserRoles.isFieldRole(userRole ?? "") {
-                conversations = try await api.get(path: APIPath.mobileInboxSms)
-            } else {
-                conversations = try await api.get(
-                    path: APIPath.smsConversations,
-                    query: [URLQueryItem(name: "scope", value: InboxScope.customers.apiScope)]
-                )
-            }
+            conversations = try await fetchInboxConversations(api: api, userRole: userRole)
         } catch {
             return nil
         }
@@ -56,12 +50,24 @@ final class TechDashboardViewModel: ObservableObject {
             return 0
         }
 
-        let unread = conversations.reduce(0) { partial, conversation in
+        return conversations.reduce(0) { partial, conversation in
             if let count = conversation.unreadCount {
                 return partial + max(0, count)
             }
             return partial + (conversation.appearsUnread ? 1 : 0)
         }
-        return unread
+    }
+
+    private func fetchInboxConversations(api: APIClient, userRole: String?) async throws -> [ConversationDTO] {
+        let response: ConversationsListResponse
+        if UserRoles.isFieldRole(userRole ?? "") {
+            response = try await api.get(path: APIPath.mobileInboxSms)
+        } else {
+            response = try await api.get(
+                path: APIPath.smsConversations,
+                query: [URLQueryItem(name: "scope", value: InboxScope.customers.apiScope)]
+            )
+        }
+        return response.conversations
     }
 }

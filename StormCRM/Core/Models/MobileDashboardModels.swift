@@ -20,7 +20,9 @@ struct MobileDashboardDTO: Decodable {
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            unreadSms = Self.decodeCount(in: container, keys: [.unreadSms, .unansweredSms, .unreadSMS, .unreadCount])
+            // Only true unread keys — `unansweredSms` means "needs reply" and was falsely
+            // showing "1 unread customer text" after threads were already opened.
+            unreadSms = Self.decodeCount(in: container, keys: [.unreadSms, .unreadSMS])
             missedTransfers = Self.decodeCount(in: container, keys: [.missedTransfers, .missedTransferCount])
             timerLeftRunning = (try? container.decode(Bool.self, forKey: .timerLeftRunning)) ?? false
         }
@@ -35,9 +37,7 @@ struct MobileDashboardDTO: Decodable {
 
         private enum CodingKeys: String, CodingKey {
             case unreadSms
-            case unansweredSms
             case unreadSMS
-            case unreadCount
             case missedTransfers
             case missedTransferCount
             case timerLeftRunning
