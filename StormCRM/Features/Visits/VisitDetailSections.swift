@@ -336,36 +336,82 @@ extension Double {
 
 // MARK: - Visit layout sections
 
-/// Decorative visit header. Intentionally avoids `WKWebView` — an embed here sat under the
-/// action buttons and caused system gesture-gate timeouts that swallowed taps (Payment, Parts run).
+/// Visit header street preview. Uses a still Street View image (no WebKit) so it never
+/// steals gestures from Payment / Parts run controls layered above it.
 struct VisitStreetViewHeader: View {
+    @EnvironmentObject private var env: AppEnvironment
     let addressQuery: String?
 
+    @State private var embeds: MapsEmbedResponse?
+    @State private var didFail = false
+
+    private var streetViewURL: URL? {
+        if let direct = embeds?.streetImage, let url = URL(string: direct) {
+            return url
+        }
+        guard let embed = embeds?.streetEmbed, let embedURL = URL(string: embed) else { return nil }
+        return GoogleMapsStaticImage.streetViewURL(fromEmbed: embedURL, width: 640, height: 280)
+    }
+
     var body: some View {
+        ZStack {
+            placeholder
+
+            if let streetViewURL {
+                GoogleMapsStaticImageView(url: streetViewURL, height: 160)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 160)
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .task(id: addressQuery) { await load() }
+    }
+
+    private var placeholder: some View {
         ZStack {
             LinearGradient(
                 colors: [StormTheme.brandNavy, StormTheme.sky.opacity(0.85)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
-            VStack(spacing: 6) {
-                Image(systemName: "house.fill")
-                    .font(.title2)
-                    .foregroundStyle(.white.opacity(0.55))
-                if let addressQuery, !addressQuery.isEmpty {
-                    Text(addressQuery)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.white.opacity(0.75))
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                        .padding(.horizontal, 24)
+            if embeds == nil, !didFail, let addressQuery, !addressQuery.isEmpty {
+                ProgressView()
+                    .tint(.white)
+            } else {
+                VStack(spacing: 6) {
+                    Image(systemName: "house.fill")
+                        .font(.title2)
+                        .foregroundStyle(.white.opacity(0.55))
+                    if let addressQuery, !addressQuery.isEmpty {
+                        Text(addressQuery)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.75))
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .padding(.horizontal, 24)
+                    }
                 }
             }
         }
-        .frame(maxWidth: .infinity)
-        .frame(height: 112)
-        .clipped()
-        .accessibilityHidden(true)
+    }
+
+    private func load() async {
+        guard let addressQuery, !addressQuery.isEmpty else { return }
+        didFail = false
+        do {
+            embeds = try await env.apiClient.get(
+                path: APIPath.mapsEmbed,
+                query: [URLQueryItem(name: "q", value: addressQuery)]
+            )
+            if streetViewURL == nil {
+                didFail = true
+            }
+        } catch {
+            didFail = true
+            embeds = nil
+        }
     }
 }
 

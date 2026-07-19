@@ -208,7 +208,8 @@ struct VisitDetailView: View {
             if let visit = viewModel.visit {
                 ScrollView {
                     VStack(spacing: 0) {
-                        Color.clear.frame(height: 72)
+                        // Leaves the still Street View header visible above the content card.
+                        Color.clear.frame(height: 120)
 
                         VStack(alignment: .leading, spacing: 16) {
                                 let subtotal = visitSubtotal(from: visit.lineItems ?? [])
