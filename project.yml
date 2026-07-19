@@ -8,7 +8,9 @@ options:
 packages:
   TwilioVoice:
     url: https://github.com/twilio/twilio-voice-ios
+    # Keep in sync with SwiftPM/Package.resolved (Xcode Cloud uses that pin).
     from: 6.13.0
+    # Prefer the resolved pin (currently 6.13.6) in CI.
 settings:
   base:
     SWIFT_VERSION: "5.9"
