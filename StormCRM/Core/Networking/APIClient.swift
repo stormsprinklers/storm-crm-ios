@@ -309,11 +309,21 @@ final class APIClient {
     }
 
     private func parseError(data: Data, status: Int) -> APIError {
-        if let body = try? decoder.decode(APIErrorBody.self, from: data), let msg = body.error, !msg.isEmpty {
-            if status == 401 { return .server(msg) }
-            if status == 403 { return .forbidden(msg) }
-            if status == 400 { return .badRequest(msg) }
-            return .server(msg)
+        if let body = try? decoder.decode(APIErrorBody.self, from: data) {
+            if body.code == "CARD_REQUIRED",
+               let setupUrl = body.setupUrl?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !setupUrl.isEmpty {
+                return .cardRequired(
+                    message: body.error ?? "A card on file is required to continue.",
+                    setupUrl: setupUrl
+                )
+            }
+            if let msg = body.error, !msg.isEmpty {
+                if status == 401 { return .server(msg) }
+                if status == 403 { return .forbidden(msg) }
+                if status == 400 { return .badRequest(msg) }
+                return .server(msg)
+            }
         }
         if status == 401 { return .unauthorized }
         return .server("Request failed (\(status))")

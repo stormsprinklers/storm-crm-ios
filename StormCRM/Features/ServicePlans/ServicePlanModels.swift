@@ -199,4 +199,28 @@ struct CreateMaintenanceEnrollmentBody: Encodable {
     let startDate: String
     let autoRenew: Bool
     let selectedAddonIds: [String]
+    let mobileReturn: Bool
+    let platform: String
+
+    init(
+        customerId: String,
+        propertyId: String,
+        templateId: String,
+        billingFrequency: String,
+        startDate: String,
+        autoRenew: Bool,
+        selectedAddonIds: [String],
+        mobileReturn: Bool = true,
+        platform: String = "ios"
+    ) {
+        self.customerId = customerId
+        self.propertyId = propertyId
+        self.templateId = templateId
+        self.billingFrequency = billingFrequency
+        self.startDate = startDate
+        self.autoRenew = autoRenew
+        self.selectedAddonIds = selectedAddonIds
+        self.mobileReturn = mobileReturn
+        self.platform = platform
+    }
 }

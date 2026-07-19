@@ -26,6 +26,7 @@ private enum MaintenancePlanPaymentSetup: String, CaseIterable, Identifiable {
 struct EnrollMaintenancePlanFromVisitView: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     let visitId: String
     let customerId: String
@@ -45,6 +46,7 @@ struct EnrollMaintenancePlanFromVisitView: View {
     @State private var isLoading = false
     @State private var isSaving = false
     @State private var error: String?
+    @State private var cardSetupURL: URL?
 
     private var selectedTemplate: MaintenancePlanTemplateDTO? {
         templates.first { $0.id == templateId }
@@ -154,6 +156,13 @@ struct EnrollMaintenancePlanFromVisitView: View {
             if let error {
                 Section {
                     Text(error).foregroundStyle(.red).font(.caption)
+                    if cardSetupURL != nil {
+                        Button("Add card on file") {
+                            if let url = cardSetupURL {
+                                openURL(url)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -275,14 +284,25 @@ struct EnrollMaintenancePlanFromVisitView: View {
             selectedAddonIds: Array(selectedAddonIds)
         )
         do {
+            cardSetupURL = nil
             let enrollment: MaintenanceEnrollmentDTO = try await env.apiClient.post(
                 path: APIPath.maintenancePlanEnrollments,
                 body: body
             )
             onEnrolled(enrollment.id)
             dismiss()
+        } catch let apiError as APIError {
+            if case .cardRequired(let message, let setupUrl) = apiError {
+                error = message
+                cardSetupURL = URL(string: setupUrl)
+                if let url = cardSetupURL {
+                    openURL(url)
+                }
+            } else {
+                self.error = apiError.message
+            }
         } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            self.error = error.localizedDescription
         }
     }
 }

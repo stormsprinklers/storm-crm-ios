@@ -224,6 +224,14 @@ final class AppEnvironment: ObservableObject {
 
             }
 
+        } else if url.host == "card-setup-return" {
+            let customerId = components?.queryItems?.first(where: { $0.name == "customerId" })?.value
+            if let customerId {
+                pendingCustomerId = customerId
+                deepLinkNavigation = .customer(customerId)
+                selectedTab = .customers
+            }
+
         } else if url.host == "inbox" {
 
             selectedTab = .messages

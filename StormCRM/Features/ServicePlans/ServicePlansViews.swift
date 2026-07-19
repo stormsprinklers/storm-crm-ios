@@ -161,6 +161,7 @@ struct EnrollmentRow: View {
 struct EnrollServicePlanView: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
 
     let customerId: String
     let properties: [CustomerPropertyDTO]
@@ -177,6 +178,7 @@ struct EnrollServicePlanView: View {
     @State private var isLoading = false
     @State private var isSaving = false
     @State private var error: String?
+    @State private var cardSetupURL: URL?
 
     private var selectedTemplate: MaintenancePlanTemplateDTO? {
         templates.first { $0.id == templateId }
@@ -263,6 +265,11 @@ struct EnrollServicePlanView: View {
             if let error {
                 Section {
                     Text(error).foregroundStyle(.red).font(.caption)
+                    if cardSetupURL != nil {
+                        Button("Add card on file") {
+                            if let url = cardSetupURL { openURL(url) }
+                        }
+                    }
                 }
             }
         }
@@ -309,6 +316,7 @@ struct EnrollServicePlanView: View {
     private func submit() async {
         isSaving = true
         error = nil
+        cardSetupURL = nil
         defer { isSaving = false }
         let body = CreateMaintenanceEnrollmentBody(
             customerId: customerId,
@@ -326,20 +334,30 @@ struct EnrollServicePlanView: View {
             )
             onEnrolled(enrollment.id)
             dismiss()
+        } catch let apiError as APIError {
+            if case .cardRequired(let message, let setupUrl) = apiError {
+                error = message
+                cardSetupURL = URL(string: setupUrl)
+                if let url = cardSetupURL { openURL(url) }
+            } else {
+                self.error = apiError.message
+            }
         } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            self.error = error.localizedDescription
         }
     }
 }
 
 struct ServicePlanEnrollmentDetailView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @Environment(\.openURL) private var openURL
     let enrollmentId: String
     let userRole: String
     let onUpdated: () -> Void
 
     @State private var enrollment: MaintenanceEnrollmentDTO?
     @State private var error: String?
+    @State private var cardSetupURL: URL?
     @State private var isLoading = false
     @State private var isActivating = false
 
@@ -451,7 +469,15 @@ struct ServicePlanEnrollmentDetailView: View {
                 }
 
                 if let error {
-                    Text(error).font(.caption).foregroundStyle(.red)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                        if cardSetupURL != nil {
+                            Button("Add card on file") {
+                                if let url = cardSetupURL { openURL(url) }
+                            }
+                            .buttonStyle(StormSecondaryButtonStyle())
+                        }
+                    }
                 }
             }
             .padding()
@@ -476,14 +502,29 @@ struct ServicePlanEnrollmentDetailView: View {
 
     private func acceptEnrollment() async {
         isActivating = true
+        error = nil
+        cardSetupURL = nil
         defer { isActivating = false }
+        struct Body: Encodable {
+            let mobileReturn: Bool
+            let platform: String
+        }
         do {
             enrollment = try await env.apiClient.post(
-                path: APIPath.maintenancePlanEnrollmentAccept(enrollmentId)
+                path: APIPath.maintenancePlanEnrollmentAccept(enrollmentId),
+                body: Body(mobileReturn: true, platform: "ios")
             )
             onUpdated()
+        } catch let apiError as APIError {
+            if case .cardRequired(let message, let setupUrl) = apiError {
+                error = message
+                cardSetupURL = URL(string: setupUrl)
+                if let url = cardSetupURL { openURL(url) }
+            } else {
+                self.error = apiError.message
+            }
         } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            self.error = error.localizedDescription
         }
     }
 }

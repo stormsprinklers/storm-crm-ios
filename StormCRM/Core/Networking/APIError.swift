@@ -6,6 +6,8 @@ enum APIError: LocalizedError {
     case forbidden(String)
     case badRequest(String)
     case server(String)
+    /// Maintenance enrollment (and similar) blocked until a card is saved via Stripe Setup Checkout.
+    case cardRequired(message: String, setupUrl: String)
     case decoding(Error)
     case network(Error)
 
@@ -16,6 +18,7 @@ enum APIError: LocalizedError {
         case .forbidden(let msg): return msg
         case .badRequest(let msg): return msg
         case .server(let msg): return msg
+        case .cardRequired(let msg, _): return msg
         case .decoding(let err):
             if let decoding = err as? DecodingError {
                 return "Invalid response: \(Self.describe(decoding))"
@@ -26,6 +29,13 @@ enum APIError: LocalizedError {
     }
 
     var errorDescription: String? { message }
+
+    var setupUrl: URL? {
+        if case .cardRequired(_, let raw) = self {
+            return URL(string: raw)
+        }
+        return nil
+    }
 
     private static func describe(_ error: DecodingError) -> String {
         switch error {
@@ -45,4 +55,6 @@ enum APIError: LocalizedError {
 
 struct APIErrorBody: Decodable {
     let error: String?
+    let code: String?
+    let setupUrl: String?
 }
