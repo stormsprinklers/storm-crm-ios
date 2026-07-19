@@ -213,27 +213,12 @@ struct PriceBookBrowseAddView: View {
     }
 
     private func addItem(_ item: PriceBookItemDTO) async {
-        struct Body: Encodable {
-            let priceBookItemId: String
-            let name: String
-            let description: String?
-            let unitPrice: Double
-            let quantity: Double
-            let unit: String?
-            let optionId: String?
-        }
         do {
-            let _: EmptyResponse = try await env.apiClient.post(
-                path: owner.lineItemsPath,
-                body: Body(
-                    priceBookItemId: item.id,
-                    name: item.name,
-                    description: item.description,
-                    unitPrice: item.resolvedUnitPrice,
-                    quantity: 1,
-                    unit: item.unit,
-                    optionId: optionId
-                )
+            try await PriceBookLineItemAdding.add(
+                api: env.apiClient,
+                owner: owner,
+                item: item,
+                optionId: optionId
             )
             await onAdded()
             dismiss()
@@ -330,27 +315,12 @@ struct PriceBookCategoryItemsAddView: View {
     }
 
     private func add(_ item: PriceBookItemDTO) async {
-        struct Body: Encodable {
-            let priceBookItemId: String
-            let name: String
-            let description: String?
-            let unitPrice: Double
-            let quantity: Double
-            let unit: String?
-            let optionId: String?
-        }
         do {
-            let _: EmptyResponse = try await env.apiClient.post(
-                path: owner.lineItemsPath,
-                body: Body(
-                    priceBookItemId: item.id,
-                    name: item.name,
-                    description: item.description,
-                    unitPrice: item.resolvedUnitPrice,
-                    quantity: 1,
-                    unit: item.unit,
-                    optionId: optionId
-                )
+            try await PriceBookLineItemAdding.add(
+                api: env.apiClient,
+                owner: owner,
+                item: item,
+                optionId: optionId
             )
             await onAdded()
             dismiss()

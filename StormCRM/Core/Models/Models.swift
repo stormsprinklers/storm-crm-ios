@@ -326,6 +326,13 @@ struct LineItemDTO: Decodable, Identifiable {
         return "Qty \(qty) @\(price)/\(unit)"
     }
 
+    /// Prefer server total; fall back to qty × unit price when total was persisted as 0.
+    var displayTotal: Double {
+        if total > 0 { return total }
+        let computed = quantity * unitPrice
+        return computed > 0 ? computed : total
+    }
+
     var isMaterial: Bool {
         itemType?.uppercased() == "MATERIAL"
     }

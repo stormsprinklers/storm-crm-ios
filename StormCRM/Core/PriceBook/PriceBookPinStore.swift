@@ -15,7 +15,9 @@ private struct PinnedPriceBookItemRecord: Codable {
         id = item.id
         name = item.name
         description = item.description
-        unitPrice = item.unitPrice
+        // Persist the sell price the UI shows — list payloads often leave unitPrice at 0
+        // and put the real amount in priceBreakdown / lastCalculatedPrice.
+        unitPrice = item.resolvedUnitPrice
         unit = item.unit
         type = item.type
         categoryId = item.categoryId

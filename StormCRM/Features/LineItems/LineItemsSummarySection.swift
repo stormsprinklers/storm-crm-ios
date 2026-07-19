@@ -127,7 +127,7 @@ struct LineItemsSummarySection: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Text(item.total, format: .currency(code: "USD"))
+            Text(item.displayTotal, format: .currency(code: "USD"))
                 .font(.subheadline.weight(.semibold))
         }
     }

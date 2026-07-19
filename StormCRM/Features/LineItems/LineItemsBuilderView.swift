@@ -165,7 +165,7 @@ struct LineItemsBuilderView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 8)
-                        Text(item.total, format: .currency(code: "USD"))
+                        Text(item.displayTotal, format: .currency(code: "USD"))
                     }
                 }
             }
@@ -253,7 +253,7 @@ struct LineItemsBuilderView: View {
                 let visit: VisitDetailDTO = try await env.apiClient.get(path: APIPath.visit(id))
                 items = visit.lineItems ?? []
                 discounts = visit.discounts ?? []
-                let computedSub = items.reduce(0.0) { $0 + $1.total }
+                let computedSub = items.reduce(0.0) { $0 + $1.displayTotal }
                 subtotal = visit.subtotal ?? computedSub
                 discountTotal = visitDiscountTotal(subtotal: subtotal, discounts: discounts)
                 total = visit.total ?? max(0, subtotal - discountTotal)

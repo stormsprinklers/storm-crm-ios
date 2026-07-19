@@ -109,7 +109,9 @@ struct PriceBookItemDTO: Decodable, Identifiable, Hashable {
     let sortOrder: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, description, unitPrice, lastCalculatedPrice, pricingMode, priceBreakdown, unit, type, categoryId, category, sku, sortOrder
+        case id, name, description, unitPrice, lastCalculatedPrice, pricingMode, priceBreakdown
+        case unit, type, categoryId, category, sku, sortOrder
+        case price, defaultPrice, sellPrice, amount
     }
 
     init(
@@ -147,7 +149,12 @@ struct PriceBookItemDTO: Decodable, Identifiable, Hashable {
         id = try container.decode(String.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         description = try container.decodeIfPresent(String.self, forKey: .description)
-        unitPrice = try container.decodeFlexibleDouble(forKey: .unitPrice) ?? 0
+        unitPrice = try container.decodeFlexibleDouble(forKey: .unitPrice)
+            ?? (try container.decodeFlexibleDouble(forKey: .price))
+            ?? (try container.decodeFlexibleDouble(forKey: .defaultPrice))
+            ?? (try container.decodeFlexibleDouble(forKey: .sellPrice))
+            ?? (try container.decodeFlexibleDouble(forKey: .amount))
+            ?? 0
         lastCalculatedPrice = try container.decodeFlexibleDouble(forKey: .lastCalculatedPrice)
         pricingMode = try container.decodeIfPresent(String.self, forKey: .pricingMode)
         priceBreakdown = try container.decodeIfPresent(PriceBookPriceBreakdownDTO.self, forKey: .priceBreakdown)
@@ -188,7 +195,89 @@ enum PriceBookLineItemAdding {
     }
 
     static func needsPriceCorrection(lineItem: LineItemDTO, expectedUnitPrice: Double) -> Bool {
-        expectedUnitPrice > 0 && lineItem.unitPrice == 0
+        expectedUnitPrice > 0 && (lineItem.unitPrice == 0 || lineItem.total == 0)
+    }
+
+    /// Adds a price-book item, then patches unit price when the API persists $0.
+    static func add(
+        api: APIClient,
+        owner: LineItemsOwner,
+        item: PriceBookItemDTO,
+        optionId: String?
+    ) async throws {
+        let expectedUnitPrice = item.resolvedUnitPrice
+        struct Body: Encodable {
+            let priceBookItemId: String
+            let name: String
+            let description: String?
+            let unitPrice: Double
+            let quantity: Double
+            let unit: String?
+            let optionId: String?
+
+            enum CodingKeys: String, CodingKey {
+                case priceBookItemId, name, description, unitPrice, quantity, unit, optionId
+            }
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(priceBookItemId, forKey: .priceBookItemId)
+                try container.encode(name, forKey: .name)
+                try container.encodeIfPresent(description, forKey: .description)
+                try container.encode(unitPrice, forKey: .unitPrice)
+                try container.encode(quantity, forKey: .quantity)
+                try container.encodeIfPresent(unit, forKey: .unit)
+                try container.encodeIfPresent(optionId, forKey: .optionId)
+            }
+        }
+        struct PatchBody: Encodable {
+            let lineItemId: String
+            let quantity: Double
+            let unitPrice: Double
+        }
+
+        let _: EmptyResponse = try await api.post(
+            path: owner.lineItemsPath,
+            body: Body(
+                priceBookItemId: item.id,
+                name: item.name,
+                description: item.description,
+                unitPrice: expectedUnitPrice,
+                quantity: 1,
+                unit: item.unit,
+                optionId: optionId
+            )
+        )
+
+        guard expectedUnitPrice > 0 else { return }
+
+        let lineItems = try await fetchLineItems(api: api, owner: owner)
+        guard let added = matchingLineItem(in: lineItems, for: item),
+              needsPriceCorrection(lineItem: added, expectedUnitPrice: expectedUnitPrice)
+        else { return }
+
+        let _: EmptyResponse = try await api.patch(
+            path: owner.lineItemsPath,
+            body: PatchBody(
+                lineItemId: added.id,
+                quantity: added.quantity > 0 ? added.quantity : 1,
+                unitPrice: expectedUnitPrice
+            )
+        )
+    }
+
+    private static func fetchLineItems(api: APIClient, owner: LineItemsOwner) async throws -> [LineItemDTO] {
+        switch owner {
+        case .visit(let id):
+            let visit: VisitDetailDTO = try await api.get(path: APIPath.visit(id))
+            return visit.lineItems ?? []
+        case .estimate(let id, let optionId):
+            let estimate: EstimateDetailDTO = try await api.get(path: APIPath.estimate(id))
+            if let optionId {
+                return estimate.lineItems.filter { $0.optionId == optionId || $0.optionId == nil }
+            }
+            return estimate.lineItems
+        }
     }
 }
 
