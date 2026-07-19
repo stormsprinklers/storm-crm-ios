@@ -196,11 +196,15 @@ struct VisitDetailView: View {
         Group {
             if let visit = viewModel.visit {
                 ZStack(alignment: .top) {
+                    // Decorative only — WKWebView must not compete with the page ScrollView.
                     VisitStreetViewHeader(addressQuery: formattedJobAddress(visit))
+                        .allowsHitTesting(false)
 
                     ScrollView {
                         VStack(spacing: 0) {
-                            Color.clear.frame(height: 72)
+                            Color.clear
+                                .frame(height: 72)
+                                .allowsHitTesting(false)
 
                             VStack(alignment: .leading, spacing: 16) {
                                 let subtotal = visitSubtotal(from: visit.lineItems ?? [])

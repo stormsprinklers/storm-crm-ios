@@ -19,18 +19,25 @@ private struct ZoomableMapContainer<Content: View>: View {
 
     var body: some View {
         GeometryReader { geometry in
-            content()
+            let map = content()
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .scaleEffect(scale)
                 .offset(offset)
                 .gesture(zoomGesture)
-                .simultaneousGesture(panGesture)
                 .onTapGesture(count: 2) {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         resetZoom()
                     }
                 }
                 .accessibilityHint("Pinch to zoom. Double-tap to reset.")
+
+            // Only attach a DragGesture while zoomed. A always-on drag recognizer steals
+            // vertical pans from the parent ScrollView even when the handler no-ops.
+            if scale > 1.01 {
+                map.highPriorityGesture(panGesture)
+            } else {
+                map
+            }
         }
         .frame(maxWidth: .infinity)
         .frame(height: height)
@@ -51,9 +58,8 @@ private struct ZoomableMapContainer<Content: View>: View {
     }
 
     private var panGesture: some Gesture {
-        DragGesture()
+        DragGesture(minimumDistance: 4)
             .onChanged { value in
-                guard scale > 1 else { return }
                 offset = CGSize(
                     width: steadyOffset.width + value.translation.width,
                     height: steadyOffset.height + value.translation.height
