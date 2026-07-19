@@ -142,7 +142,7 @@ struct ScheduleWeekStrip: View {
             .background {
                 if isSelected {
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(StormTheme.navy)
+                        .fill(StormTheme.brandNavy)
                 } else if isToday {
                     RoundedRectangle(cornerRadius: 10)
                         .stroke(StormTheme.sky, lineWidth: 1.5)

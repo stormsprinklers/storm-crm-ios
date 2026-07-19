@@ -344,7 +344,7 @@ struct VisitStreetViewHeader: View {
     var body: some View {
         ZStack {
             LinearGradient(
-                colors: [StormTheme.navy, StormTheme.sky.opacity(0.85)],
+                colors: [StormTheme.brandNavy, StormTheme.sky.opacity(0.85)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )

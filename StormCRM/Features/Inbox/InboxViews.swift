@@ -392,7 +392,7 @@ struct SmsMessageBubble: View {
     }
 
     private var bubbleBackground: Color {
-        message.isOutbound ? StormTheme.navy : Color(.systemBackground)
+        message.isOutbound ? StormTheme.brandNavy : Color(.systemBackground)
     }
 
     private var bubbleForeground: Color {
