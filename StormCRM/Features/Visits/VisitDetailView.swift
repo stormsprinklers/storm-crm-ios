@@ -445,7 +445,11 @@ struct VisitDetailView: View {
                 }
                 .environmentObject(env)
             case .partsRun:
-                PartsRunSheet(visitId: visitId) {
+                PartsRunSheet(
+                    visitId: visitId,
+                    jobLatitude: viewModel.visit?.property?.latitude,
+                    jobLongitude: viewModel.visit?.property?.longitude
+                ) {
                     await viewModel.load(
                         api: env.apiClient,
                         visitId: visitId

@@ -564,6 +564,70 @@ struct PartsRunOptionDTO: Decodable, Identifiable {
     let driveDistanceMiles: Double?
     let isOpenNow: Bool?
     let mapsUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case supplierId, id, name, address, city, phone
+        case driveMinutes, driveTimeMinutes, durationMinutes, driveSeconds, durationSeconds
+        case driveDistanceMiles, distanceMiles
+        case isOpenNow, openNow, mapsUrl
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let sid = try container.decodeIfPresent(String.self, forKey: .supplierId) {
+            supplierId = sid
+        } else {
+            supplierId = try container.decode(String.self, forKey: .id)
+        }
+        name = try container.decode(String.self, forKey: .name)
+        address = try container.decodeIfPresent(String.self, forKey: .address)
+        city = try container.decodeIfPresent(String.self, forKey: .city)
+        phone = try container.decodeIfPresent(String.self, forKey: .phone)
+        mapsUrl = try container.decodeIfPresent(String.self, forKey: .mapsUrl)
+        driveDistanceMiles = try container.decodeFlexibleDouble(forKey: .driveDistanceMiles)
+            ?? container.decodeFlexibleDouble(forKey: .distanceMiles)
+        isOpenNow = try container.decodeIfPresent(Bool.self, forKey: .isOpenNow)
+            ?? container.decodeIfPresent(Bool.self, forKey: .openNow)
+
+        let rawMinutes = Self.decodeInt(in: container, keys: [.driveMinutes, .driveTimeMinutes, .durationMinutes])
+        let rawSeconds = Self.decodeInt(in: container, keys: [.driveSeconds, .durationSeconds])
+        driveMinutes = Self.normalizedDriveMinutes(
+            rawMinutes: rawMinutes,
+            rawSeconds: rawSeconds,
+            miles: driveDistanceMiles
+        )
+    }
+
+    /// Prefer true minutes; convert seconds when the API (or a mislabeled field) sent seconds.
+    private static func normalizedDriveMinutes(rawMinutes: Int?, rawSeconds: Int?, miles: Double?) -> Int? {
+        if let rawSeconds {
+            return max(1, Int((Double(rawSeconds) / 60.0).rounded()))
+        }
+        guard let rawMinutes else { return nil }
+        // City driving is rarely > ~20 min/mile. Values like 1070 with ~8 mi are almost certainly seconds.
+        if let miles, miles > 0.3, Double(rawMinutes) / miles > 25 {
+            return max(1, Int((Double(rawMinutes) / 60.0).rounded()))
+        }
+        // Absolute sanity: > 12h for a "nearby supplier" list is almost always seconds.
+        if rawMinutes > 12 * 60, miles == nil || (miles ?? 0) < 80 {
+            return max(1, Int((Double(rawMinutes) / 60.0).rounded()))
+        }
+        return max(0, rawMinutes)
+    }
+
+    private static func decodeInt(in container: KeyedDecodingContainer<CodingKeys>, keys: [CodingKeys]) -> Int? {
+        for key in keys {
+            guard container.contains(key) else { continue }
+            if (try? container.decodeNil(forKey: key)) == true { continue }
+            if let value = try? container.decode(Int.self, forKey: key) { return value }
+            if let value = try? container.decode(Double.self, forKey: key) { return Int(value.rounded()) }
+            if let text = try? container.decode(String.self, forKey: key),
+               let value = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return Int(value.rounded())
+            }
+        }
+        return nil
+    }
 }
 
 
