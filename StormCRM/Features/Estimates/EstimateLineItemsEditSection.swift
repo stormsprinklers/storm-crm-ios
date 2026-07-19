@@ -87,52 +87,22 @@ struct EstimateLineItemsEditSection: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Text(item.total, format: .currency(code: "USD"))
+            Text(item.displayTotal, format: .currency(code: "USD"))
                 .font(.subheadline.weight(.semibold))
         }
     }
 
     private func addFromPriceBook(_ item: PriceBookItemDTO) async {
-        let expectedUnitPrice = item.resolvedUnitPrice
         isSaving = true
         error = nil
         defer { isSaving = false }
-        struct Body: Encodable {
-            let priceBookItemId: String
-            let name: String
-            let description: String?
-            let unitPrice: Double
-            let quantity: Double
-            let unit: String?
-        }
-        struct PatchBody: Encodable {
-            let lineItemId: String
-            let quantity: Double
-            let unitPrice: Double
-        }
         do {
-            var updated: EstimateDetailDTO = try await env.apiClient.post(
-                path: APIPath.estimateLineItems(estimateId),
-                body: Body(
-                    priceBookItemId: item.id,
-                    name: item.name,
-                    description: item.description,
-                    unitPrice: expectedUnitPrice,
-                    quantity: 1,
-                    unit: item.unit
-                )
+            try await PriceBookLineItemAdding.add(
+                api: env.apiClient,
+                owner: .estimate(id: estimateId, optionId: nil),
+                item: item,
+                optionId: nil
             )
-            if let added = PriceBookLineItemAdding.matchingLineItem(in: updated.lineItems, for: item),
-               PriceBookLineItemAdding.needsPriceCorrection(lineItem: added, expectedUnitPrice: expectedUnitPrice) {
-                updated = try await env.apiClient.patch(
-                    path: APIPath.estimateLineItems(estimateId),
-                    body: PatchBody(
-                        lineItemId: added.id,
-                        quantity: added.quantity,
-                        unitPrice: expectedUnitPrice
-                    )
-                )
-            }
             await onUpdated()
         } catch {
             self.error = (error as? APIError)?.message

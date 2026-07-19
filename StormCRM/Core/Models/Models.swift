@@ -293,22 +293,41 @@ struct LineItemDTO: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, priceBookItemId, name, description, quantity, unitPrice, unit, itemType, sortOrder, total, optionId
         case priceBookItem
+        case price, amount, lineTotal, extendedPrice
     }
 
     private struct PriceBookRef: Decodable {
+        let id: String?
         let type: String?
         let unit: String?
+        let unitPrice: Double?
+
+        enum CodingKeys: String, CodingKey {
+            case id, type, unit, unitPrice, price
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decodeIfPresent(String.self, forKey: .id)
+            type = try container.decodeIfPresent(String.self, forKey: .type)
+            unit = try container.decodeIfPresent(String.self, forKey: .unit)
+            unitPrice = try container.decodeFlexibleDouble(forKey: .unitPrice)
+                ?? (try container.decodeFlexibleDouble(forKey: .price))
+        }
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
-        priceBookItemId = try container.decodeIfPresent(String.self, forKey: .priceBookItemId)
+        let nested = try container.decodeIfPresent(PriceBookRef.self, forKey: .priceBookItem)
+        priceBookItemId = try container.decodeIfPresent(String.self, forKey: .priceBookItemId) ?? nested?.id
         name = try container.decode(String.self, forKey: .name)
         description = try container.decodeIfPresent(String.self, forKey: .description)
         quantity = try container.decodeFlexibleDouble(forKey: .quantity) ?? 0
-        unitPrice = try container.decodeFlexibleDouble(forKey: .unitPrice) ?? 0
-        let nested = try container.decodeIfPresent(PriceBookRef.self, forKey: .priceBookItem)
+        unitPrice = try container.decodeFlexibleDouble(forKey: .unitPrice)
+            ?? (try container.decodeFlexibleDouble(forKey: .price))
+            ?? nested?.unitPrice
+            ?? 0
         let trimmedUnit = try container.decodeIfPresent(String.self, forKey: .unit)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         unit = (trimmedUnit?.isEmpty == false ? trimmedUnit : nil)
@@ -316,7 +335,17 @@ struct LineItemDTO: Decodable, Identifiable {
             ?? "each"
         itemType = try container.decodeIfPresent(String.self, forKey: .itemType) ?? nested?.type
         sortOrder = try container.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
-        total = try container.decodeFlexibleDouble(forKey: .total) ?? 0
+        let decodedTotal = try container.decodeFlexibleDouble(forKey: .total)
+            ?? (try container.decodeFlexibleDouble(forKey: .lineTotal))
+            ?? (try container.decodeFlexibleDouble(forKey: .extendedPrice))
+            ?? (try container.decodeFlexibleDouble(forKey: .amount))
+        if let decodedTotal {
+            total = decodedTotal
+        } else {
+            let qty = quantity
+            let price = unitPrice
+            total = qty > 0 && price > 0 ? qty * price : 0
+        }
         optionId = try container.decodeIfPresent(String.self, forKey: .optionId)
     }
 

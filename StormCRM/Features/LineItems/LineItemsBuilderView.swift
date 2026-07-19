@@ -264,22 +264,20 @@ struct LineItemsBuilderView: View {
                 if let optionId {
                     items = estimate.lineItems.filter { $0.optionId == optionId || $0.optionId == nil }
                     discounts = estimate.discounts.filter { $0.optionId == optionId || $0.optionId == nil }
-                    if let option = estimate.options.first(where: { $0.id == optionId }) {
-                        subtotal = option.subtotal
-                        discountTotal = option.discountTotal
-                        total = option.total
-                    } else {
-                        subtotal = estimate.subtotal
-                        discountTotal = estimate.discountTotal
-                        total = estimate.total
-                    }
                 } else {
                     items = estimate.lineItems
                     discounts = estimate.discounts
-                    subtotal = estimate.subtotal
-                    discountTotal = estimate.discountTotal
-                    total = estimate.total
                 }
+                let computedSub = items.reduce(0.0) { $0 + $1.displayTotal }
+                let option = optionId.flatMap { id in estimate.options.first(where: { $0.id == id }) }
+                // Prefer server option totals when present; fall back to qty×price when API left totals at $0.
+                subtotal = (option?.subtotal ?? estimate.subtotal).positiveOr(computedSub)
+                discountTotal = discounts.isEmpty
+                    ? 0
+                    : (option?.discountTotal ?? estimate.discountTotal).positiveOr(
+                        visitDiscountTotal(subtotal: subtotal, discounts: discounts)
+                    )
+                total = (option?.total ?? estimate.total).positiveOr(max(0, subtotal - discountTotal))
             }
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription

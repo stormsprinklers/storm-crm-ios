@@ -322,7 +322,14 @@ func visitDiscountTotal(subtotal: Double, discounts: [DiscountDTO]) -> Double {
 }
 
 func visitSubtotal(from items: [LineItemDTO]) -> Double {
-    items.reduce(0) { $0 + $1.total }
+    items.reduce(0) { $0 + $1.displayTotal }
+}
+
+extension Double {
+    /// Prefer `self` when positive; otherwise use the fallback (e.g. computed qty×price).
+    func positiveOr(_ fallback: Double) -> Double {
+        self > 0 ? self : fallback
+    }
 }
 
 // MARK: - Visit layout sections

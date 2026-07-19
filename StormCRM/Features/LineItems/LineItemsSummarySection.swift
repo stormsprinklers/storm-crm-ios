@@ -28,10 +28,22 @@ struct LineItemsSummarySection: View {
         !discounts.isEmpty
     }
 
+    private var computedSubtotal: Double {
+        items.reduce(0) { $0 + $1.displayTotal }
+    }
+
+    private var displaySubtotal: Double {
+        subtotal.positiveOr(computedSubtotal)
+    }
+
     private var activeDiscountTotal: Double {
         guard hasActiveDiscounts else { return 0 }
         if discountTotal > 0 { return discountTotal }
-        return visitDiscountTotal(subtotal: subtotal, discounts: discounts)
+        return visitDiscountTotal(subtotal: displaySubtotal, discounts: discounts)
+    }
+
+    private var displayGrandTotal: Double {
+        total.positiveOr(max(0, displaySubtotal - activeDiscountTotal))
     }
 
     var body: some View {
@@ -87,7 +99,7 @@ struct LineItemsSummarySection: View {
                     HStack {
                         Text("Subtotal")
                         Spacer()
-                        Text(subtotal, format: .currency(code: "USD"))
+                        Text(displaySubtotal, format: .currency(code: "USD"))
                     }
                     .font(.subheadline)
                     if hasActiveDiscounts, activeDiscountTotal > 0 {
@@ -102,7 +114,7 @@ struct LineItemsSummarySection: View {
                     HStack {
                         Text("Total").font(.subheadline.weight(.semibold))
                         Spacer()
-                        Text(total, format: .currency(code: "USD"))
+                        Text(displayGrandTotal, format: .currency(code: "USD"))
                             .font(.subheadline.weight(.semibold))
                     }
                 }

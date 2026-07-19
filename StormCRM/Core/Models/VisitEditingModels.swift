@@ -82,14 +82,31 @@ struct PriceBookCategoryDetailDTO: Decodable {
 
 struct PriceBookPriceBreakdownDTO: Decodable, Hashable {
     let total: Double?
+    let unitPrice: Double?
+    let sellPrice: Double?
+    let price: Double?
+    let amount: Double?
+    let calculatedPrice: Double?
 
     enum CodingKeys: String, CodingKey {
-        case total
+        case total, unitPrice, sellPrice, price, amount, calculatedPrice
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         total = try container.decodeFlexibleDouble(forKey: .total)
+        unitPrice = try container.decodeFlexibleDouble(forKey: .unitPrice)
+        sellPrice = try container.decodeFlexibleDouble(forKey: .sellPrice)
+        price = try container.decodeFlexibleDouble(forKey: .price)
+        amount = try container.decodeFlexibleDouble(forKey: .amount)
+        calculatedPrice = try container.decodeFlexibleDouble(forKey: .calculatedPrice)
+    }
+
+    /// First positive sell-price signal from the breakdown payload.
+    var resolvedTotal: Double? {
+        [total, sellPrice, unitPrice, calculatedPrice, price, amount]
+            .compactMap { $0 }
+            .first { $0 > 0 }
     }
 }
 
@@ -111,7 +128,7 @@ struct PriceBookItemDTO: Decodable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, name, description, unitPrice, lastCalculatedPrice, pricingMode, priceBreakdown
         case unit, type, categoryId, category, sku, sortOrder
-        case price, defaultPrice, sellPrice, amount
+        case price, defaultPrice, sellPrice, amount, basePrice, calculatedPrice, defaultUnitPrice
     }
 
     init(
@@ -154,6 +171,9 @@ struct PriceBookItemDTO: Decodable, Identifiable, Hashable {
             ?? (try container.decodeFlexibleDouble(forKey: .defaultPrice))
             ?? (try container.decodeFlexibleDouble(forKey: .sellPrice))
             ?? (try container.decodeFlexibleDouble(forKey: .amount))
+            ?? (try container.decodeFlexibleDouble(forKey: .basePrice))
+            ?? (try container.decodeFlexibleDouble(forKey: .calculatedPrice))
+            ?? (try container.decodeFlexibleDouble(forKey: .defaultUnitPrice))
             ?? 0
         lastCalculatedPrice = try container.decodeFlexibleDouble(forKey: .lastCalculatedPrice)
         pricingMode = try container.decodeIfPresent(String.self, forKey: .pricingMode)
@@ -176,7 +196,7 @@ struct PriceBookItemDTO: Decodable, Identifiable, Hashable {
 
     /// Best available sell price from list API (flat-rate, calculated, or manual).
     var resolvedUnitPrice: Double {
-        if let breakdownTotal = priceBreakdown?.total, breakdownTotal > 0 {
+        if let breakdownTotal = priceBreakdown?.resolvedTotal, breakdownTotal > 0 {
             return breakdownTotal
         }
         if let lastCalculatedPrice, lastCalculatedPrice > 0 {
@@ -187,15 +207,24 @@ struct PriceBookItemDTO: Decodable, Identifiable, Hashable {
 }
 
 enum PriceBookLineItemAdding {
+    /// Prefer the newest zero-priced match so re-adding the same book item still gets corrected.
     static func matchingLineItem(in items: [LineItemDTO], for priceBookItem: PriceBookItemDTO) -> LineItemDTO? {
-        if let linked = items.first(where: { $0.priceBookItemId == priceBookItem.id }) {
-            return linked
+        let byBookId = items.filter { $0.priceBookItemId == priceBookItem.id }
+        if let zeroPriced = byBookId.last(where: { $0.unitPrice == 0 }) {
+            return zeroPriced
         }
-        return items.last(where: { $0.name == priceBookItem.name })
+        if let last = byBookId.last {
+            return last
+        }
+        let byName = items.filter { $0.name == priceBookItem.name }
+        if let zeroPriced = byName.last(where: { $0.unitPrice == 0 }) {
+            return zeroPriced
+        }
+        return byName.last
     }
 
     static func needsPriceCorrection(lineItem: LineItemDTO, expectedUnitPrice: Double) -> Bool {
-        expectedUnitPrice > 0 && (lineItem.unitPrice == 0 || lineItem.total == 0)
+        expectedUnitPrice > 0 && lineItem.unitPrice == 0
     }
 
     /// Adds a price-book item, then patches unit price when the API persists $0.
@@ -216,7 +245,7 @@ enum PriceBookLineItemAdding {
             let optionId: String?
 
             enum CodingKeys: String, CodingKey {
-                case priceBookItemId, name, description, unitPrice, quantity, unit, optionId
+                case priceBookItemId, name, description, unitPrice, price, quantity, unit, optionId
             }
 
             func encode(to encoder: Encoder) throws {
@@ -225,6 +254,8 @@ enum PriceBookLineItemAdding {
                 try container.encode(name, forKey: .name)
                 try container.encodeIfPresent(description, forKey: .description)
                 try container.encode(unitPrice, forKey: .unitPrice)
+                // Some estimate handlers read `price` instead of `unitPrice`.
+                try container.encode(unitPrice, forKey: .price)
                 try container.encode(quantity, forKey: .quantity)
                 try container.encodeIfPresent(unit, forKey: .unit)
                 try container.encodeIfPresent(optionId, forKey: .optionId)
@@ -232,8 +263,22 @@ enum PriceBookLineItemAdding {
         }
         struct PatchBody: Encodable {
             let lineItemId: String
+            let name: String
             let quantity: Double
             let unitPrice: Double
+
+            enum CodingKeys: String, CodingKey {
+                case lineItemId, name, quantity, unitPrice, price
+            }
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(lineItemId, forKey: .lineItemId)
+                try container.encode(name, forKey: .name)
+                try container.encode(quantity, forKey: .quantity)
+                try container.encode(unitPrice, forKey: .unitPrice)
+                try container.encode(unitPrice, forKey: .price)
+            }
         }
 
         let _: EmptyResponse = try await api.post(
@@ -251,7 +296,7 @@ enum PriceBookLineItemAdding {
 
         guard expectedUnitPrice > 0 else { return }
 
-        let lineItems = try await fetchLineItems(api: api, owner: owner)
+        let lineItems = try await fetchLineItemsForCorrection(api: api, owner: owner)
         guard let added = matchingLineItem(in: lineItems, for: item),
               needsPriceCorrection(lineItem: added, expectedUnitPrice: expectedUnitPrice)
         else { return }
@@ -260,22 +305,22 @@ enum PriceBookLineItemAdding {
             path: owner.lineItemsPath,
             body: PatchBody(
                 lineItemId: added.id,
+                name: added.name,
                 quantity: added.quantity > 0 ? added.quantity : 1,
                 unitPrice: expectedUnitPrice
             )
         )
     }
 
-    private static func fetchLineItems(api: APIClient, owner: LineItemsOwner) async throws -> [LineItemDTO] {
+    /// Loads every line item for correction matching — do not filter by optionId, since the
+    /// server may assign a different option than the client preferred.
+    private static func fetchLineItemsForCorrection(api: APIClient, owner: LineItemsOwner) async throws -> [LineItemDTO] {
         switch owner {
         case .visit(let id):
             let visit: VisitDetailDTO = try await api.get(path: APIPath.visit(id))
             return visit.lineItems ?? []
-        case .estimate(let id, let optionId):
+        case .estimate(let id, _):
             let estimate: EstimateDetailDTO = try await api.get(path: APIPath.estimate(id))
-            if let optionId {
-                return estimate.lineItems.filter { $0.optionId == optionId || $0.optionId == nil }
-            }
             return estimate.lineItems
         }
     }
