@@ -131,6 +131,7 @@ struct LineItemsBuilderView: View {
                 }
             }
             .environmentObject(env)
+            .environmentObject(env.priceBookPins)
         }
     }
 

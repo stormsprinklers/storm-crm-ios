@@ -16,6 +16,7 @@ private enum PriceBookTypeFilter: String, CaseIterable, Identifiable {
 
 struct PriceBookPickerSheet: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var priceBookPins: PriceBookPinStore
     @Environment(\.dismiss) private var dismiss
     let onSelect: (PriceBookItemDTO) async -> Void
 
@@ -66,13 +67,15 @@ struct PriceBookPickerSheet: View {
                 Text(error).foregroundStyle(.red)
             }
 
-            if !env.priceBookPins.items.isEmpty {
+            if !priceBookPins.items.isEmpty {
                 Section("Pinned") {
-                    ForEach(env.priceBookPins.items) { item in
+                    ForEach(priceBookPins.items) { item in
                         PriceBookPickerRow(item: item) {
                             await select(item)
                         } onTogglePin: {
-                            env.priceBookPins.toggle(item)
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                priceBookPins.toggle(item)
+                            }
                         }
                     }
                 }
@@ -128,7 +131,9 @@ struct PriceBookPickerSheet: View {
                             PriceBookPickerRow(item: item) {
                                 await select(item)
                             } onTogglePin: {
-                                env.priceBookPins.toggle(item)
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    priceBookPins.toggle(item)
+                                }
                             }
                         }
                     }
@@ -196,6 +201,7 @@ struct PriceBookPickerSheet: View {
 
 private struct PriceBookCategoryBrowseView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var priceBookPins: PriceBookPinStore
 
     let categoryId: String
     let categoryName: String
@@ -310,13 +316,14 @@ private struct PriceBookCategoryRow: View {
 }
 
 private struct PriceBookPickerRow: View {
-    @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var priceBookPins: PriceBookPinStore
 
     let item: PriceBookItemDTO
     let onSelect: () async -> Void
     let onTogglePin: () -> Void
 
     var body: some View {
+        let pinned = priceBookPins.isPinned(item.id)
         HStack(alignment: .top, spacing: 10) {
             Button {
                 Task { await onSelect() }
@@ -355,13 +362,14 @@ private struct PriceBookPickerRow: View {
             .buttonStyle(.plain)
 
             Button(action: onTogglePin) {
-                Image(systemName: env.priceBookPins.isPinned(item.id) ? "pin.fill" : "pin")
+                Image(systemName: pinned ? "pin.fill" : "pin")
                     .font(.body)
-                    .foregroundStyle(env.priceBookPins.isPinned(item.id) ? StormTheme.coral : .secondary)
+                    .foregroundStyle(pinned ? StormTheme.coral : .secondary)
                     .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(env.priceBookPins.isPinned(item.id) ? "Unpin item" : "Pin item")
+            .buttonStyle(.borderless)
+            .accessibilityLabel(pinned ? "Unpin item" : "Pin item")
         }
     }
 }

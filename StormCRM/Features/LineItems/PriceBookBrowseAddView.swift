@@ -3,6 +3,7 @@ import SwiftUI
 /// Browse / search / favorites / frequently-used price book picker for adding line items.
 struct PriceBookBrowseAddView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var priceBookPins: PriceBookPinStore
     @Environment(\.dismiss) private var dismiss
 
     let owner: LineItemsOwner
@@ -36,7 +37,7 @@ struct PriceBookBrowseAddView: View {
     }
 
     private var favorites: [PriceBookItemDTO] {
-        env.priceBookPins.items.filter { ($0.type ?? itemType).uppercased() == itemType }
+        priceBookPins.items.filter { ($0.type ?? itemType).uppercased() == itemType }
     }
 
     private var isSearching: Bool {
@@ -152,13 +153,7 @@ struct PriceBookBrowseAddView: View {
                 }
                 Spacer(minLength: 8)
                 VStack(alignment: .trailing, spacing: 6) {
-                    Button {
-                        env.priceBookPins.toggle(item)
-                    } label: {
-                        Image(systemName: env.priceBookPins.isPinned(item.id) ? "star.fill" : "star")
-                            .foregroundStyle(StormTheme.sky)
-                    }
-                    .buttonStyle(.plain)
+                    PriceBookFavoriteStarButton(item: item)
                     Text(item.resolvedUnitPrice, format: .currency(code: "USD"))
                         .font(.subheadline)
                         .foregroundStyle(.primary)
@@ -243,6 +238,7 @@ struct PriceBookBrowseAddView: View {
 
 struct PriceBookCategoryItemsAddView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var priceBookPins: PriceBookPinStore
     @Environment(\.dismiss) private var dismiss
     let owner: LineItemsOwner
     let category: PriceBookCategoryDTO
@@ -283,13 +279,7 @@ struct PriceBookCategoryItemsAddView: View {
                             }
                             Spacer()
                             VStack(alignment: .trailing, spacing: 6) {
-                                Button {
-                                    env.priceBookPins.toggle(item)
-                                } label: {
-                                    Image(systemName: env.priceBookPins.isPinned(item.id) ? "star.fill" : "star")
-                                        .foregroundStyle(StormTheme.sky)
-                                }
-                                .buttonStyle(.plain)
+                                PriceBookFavoriteStarButton(item: item)
                                 Text(item.resolvedUnitPrice, format: .currency(code: "USD"))
                                     .foregroundStyle(.primary)
                             }
@@ -360,6 +350,29 @@ struct PriceBookCategoryItemsAddView: View {
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
+    }
+}
+
+/// Star control that observes `PriceBookPinStore` so favorites fill immediately on tap.
+struct PriceBookFavoriteStarButton: View {
+    @EnvironmentObject private var priceBookPins: PriceBookPinStore
+    let item: PriceBookItemDTO
+
+    var body: some View {
+        let pinned = priceBookPins.isPinned(item.id)
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                priceBookPins.toggle(item)
+            }
+        } label: {
+            Image(systemName: pinned ? "star.fill" : "star")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(pinned ? StormTheme.sky : Color.secondary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(pinned ? "Remove from favorites" : "Add to favorites")
     }
 }
 

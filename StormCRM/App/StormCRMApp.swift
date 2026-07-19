@@ -27,6 +27,7 @@ struct StormCRMApp: App {
                 .environmentObject(appEnvironment.auth)
                 .environmentObject(appEnvironment.branding)
                 .environmentObject(appEnvironment.offlineSync)
+                .environmentObject(appEnvironment.priceBookPins)
                 .modelContainer(modelContainer)
                 .tint(StormTheme.coral)
                 .onOpenURL { url in
