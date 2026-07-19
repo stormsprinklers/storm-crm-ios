@@ -253,11 +253,11 @@ struct VisitDetailView: View {
                                     Spacer(minLength: 0)
                                     if paymentSummary.hasBalanceDue {
                                         Button {
-                                            let amount = paymentSummary.balanceDue ?? total
-                                            finishBillingAmount = amount
+                                            let amount = paymentAmountDue(for: visit)
                                             activeSheet = .payment(amount: amount)
                                         } label: {
                                             Label {
+                                                // Always the live job total / balance — never a cached finish amount.
                                                 Text(paymentAmountDue(for: visit), format: .currency(code: "USD"))
                                             } icon: {
                                                 Image(systemName: "dollarsign.circle.fill")
@@ -467,14 +467,20 @@ struct VisitDetailView: View {
             titleVisibility: .visible
         ) {
             Button("Collect payment now") {
-                activeSheet = .payment(amount: finishBillingAmount)
+                if let visit = viewModel.visit {
+                    activeSheet = .payment(amount: paymentAmountDue(for: visit))
+                } else {
+                    activeSheet = .payment(amount: finishBillingAmount)
+                }
             }
             Button("Send invoice to customer") {
                 Task { await sendInvoiceAfterFinish() }
             }
             Button("Later", role: .cancel) {}
         } message: {
-            Text("This job has \(finishBillingAmount.formatted(.currency(code: "USD"))) outstanding. Collect now or send an invoice?")
+            Text(
+                "This job has \((viewModel.visit.map(paymentAmountDue(for:)) ?? finishBillingAmount).formatted(.currency(code: "USD"))) outstanding. Collect now or send an invoice?"
+            )
         }
         .confirmationDialog(
             "Are you sure you want to delete this visit?",
@@ -492,8 +498,8 @@ struct VisitDetailView: View {
         }
     }
 
+    /// Balance due from current line items and discounts (minus any payments already recorded).
     private func paymentAmountDue(for visit: VisitDetailDTO) -> Double {
-        if finishBillingAmount > 0 { return finishBillingAmount }
         let subtotal = visitSubtotal(from: visit.lineItems ?? [])
         let discountTotal = visitDiscountTotal(subtotal: subtotal, discounts: visit.discounts ?? [])
         let total = max(0, subtotal - discountTotal)
@@ -506,6 +512,10 @@ struct VisitDetailView: View {
             api: env.apiClient,
             visitId: visitId
         )
+        // Keep the finish-billing prompt amount in sync if line items changed underneath it.
+        if showFinishBillingPrompt, let visit = viewModel.visit {
+            finishBillingAmount = paymentAmountDue(for: visit)
+        }
     }
 
     private func handleTimeEvent(
