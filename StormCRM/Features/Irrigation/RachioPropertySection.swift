@@ -75,29 +75,25 @@ struct RachioPropertySection: View {
                     Button {
                         showLinkSheet = true
                     } label: {
-                        HStack(spacing: 10) {
+                        HStack(spacing: 12) {
                             Image("RachioLogo")
                                 .resizable()
                                 .scaledToFit()
-                                .frame(width: 28, height: 28)
-                                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                            Text("Rachio")
+                                .frame(width: 32, height: 32)
+                                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            Text("Add Rachio")
                                 .font(.body.weight(.semibold))
-                            Text("+")
-                                .font(.title3.weight(.bold))
                         }
-                        .foregroundStyle(StormTheme.navy)
+                        .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
-                        .background(StormTheme.ice.opacity(0.55))
+                        .padding(.horizontal, 14)
+                        // Match Rachio brand mark background (#001A25).
+                        .background(Color(red: 0, green: 26 / 255, blue: 37 / 255))
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .stroke(StormTheme.sky.opacity(0.35), lineWidth: 1)
-                        )
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Rachio plus, link device")
+                    .accessibilityLabel("Add Rachio device")
                 } else {
                     Text("No Rachio device linked to this property.")
                         .font(.caption)
