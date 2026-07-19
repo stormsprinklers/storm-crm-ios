@@ -177,6 +177,13 @@ struct LineItemsBuilderView: View {
 
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.name).font(.body.weight(.medium))
+                            if let description = item.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+                               !description.isEmpty {
+                                Text(description)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
                             Text(item.qtyPriceLabel)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -593,27 +600,66 @@ struct LineItemDetailEditView: View {
     var onSaved: () async -> Void
 
     @State private var name: String = ""
+    @State private var descriptionText: String = ""
     @State private var quantity: String = ""
     @State private var unitPrice: String = ""
     @State private var error: String?
     @State private var isSaving = false
 
+    private var previewTotal: Double {
+        let qty = Double(quantity.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        let price = Double(unitPrice.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        return qty * price
+    }
+
     var body: some View {
         Form {
-            Section {
-                TextField("Name", text: $name)
-                TextField("Qty", text: $quantity)
-                    .keyboardType(.decimalPad)
-                TextField("Unit price", text: $unitPrice)
-                    .keyboardType(.decimalPad)
-                Text("Unit: \(item.unit)")
-                    .foregroundStyle(.secondary)
+            Section("Item") {
+                LabeledContent("Title") {
+                    TextField("Title", text: $name)
+                        .multilineTextAlignment(.trailing)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Description")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    TextField(
+                        "Shown on invoices and receipts",
+                        text: $descriptionText,
+                        axis: .vertical
+                    )
+                    .lineLimit(3...10)
+                    Text("A short preview appears on the line item; the full text is included on invoices and receipts.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
+
+            Section("Pricing") {
+                LabeledContent("Quantity") {
+                    TextField("0", text: $quantity)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Unit price") {
+                    TextField("0.00", text: $unitPrice)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                }
+                LabeledContent("Unit") {
+                    Text(item.unit).foregroundStyle(.secondary)
+                }
+                LabeledContent("Line total") {
+                    Text(previewTotal, format: .currency(code: "USD"))
+                        .fontWeight(.semibold)
+                }
+            }
+
             if let error {
                 Section { Text(error).foregroundStyle(.red) }
             }
         }
-        .navigationTitle(item.name)
+        .navigationTitle("Edit line item")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
@@ -623,30 +669,44 @@ struct LineItemDetailEditView: View {
         }
         .onAppear {
             name = item.name
+            descriptionText = item.description ?? ""
             quantity = formatEditableDecimal(item.quantity)
             unitPrice = formatEditableDecimal(item.unitPrice)
         }
     }
 
     private func save() async {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            error = "Title is required"
+            return
+        }
         guard let qty = Double(quantity.trimmingCharacters(in: .whitespacesAndNewlines)),
               let price = Double(unitPrice.trimmingCharacters(in: .whitespacesAndNewlines))
         else {
-            error = "Enter a valid quantity and price"
+            error = "Enter a valid quantity and unit price"
             return
         }
+        let trimmedDescription = descriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
         isSaving = true
         defer { isSaving = false }
         struct Body: Encodable {
             let lineItemId: String
             let name: String
+            let description: String?
             let quantity: Double
             let unitPrice: Double
         }
         do {
             let _: EmptyResponse = try await env.apiClient.patch(
                 path: owner.lineItemsPath,
-                body: Body(lineItemId: item.id, name: name, quantity: qty, unitPrice: price)
+                body: Body(
+                    lineItemId: item.id,
+                    name: trimmedName,
+                    description: trimmedDescription.isEmpty ? nil : trimmedDescription,
+                    quantity: qty,
+                    unitPrice: price
+                )
             )
             await onSaved()
             dismiss()

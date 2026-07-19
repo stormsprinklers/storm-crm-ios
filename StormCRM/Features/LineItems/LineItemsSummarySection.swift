@@ -134,6 +134,13 @@ struct LineItemsSummarySection: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.name).font(.subheadline.weight(.medium))
+                if let description = item.description?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !description.isEmpty {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
                 Text(item.qtyPriceLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
