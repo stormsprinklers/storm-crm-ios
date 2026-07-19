@@ -88,7 +88,7 @@ private struct ProgramSetupCard: View {
                 }
 
                 if let starts = program.startTimes, !starts.isEmpty {
-                    Text("Starts: \(starts.joined(separator: " · "))")
+                    Text("Start Times: \(starts.joined(separator: " · "))")
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.7))
                         .fixedSize(horizontal: false, vertical: true)
@@ -163,16 +163,17 @@ private struct ZoneSetupRow: View {
     }
 
     private var runtimeLabel: String {
+        // Do not append ×2/×3 for multiple starts — Start Times already lists each one.
+        if let minutes = zone.runtimePerEventMinutes {
+            return "\(Int(minutes.rounded())) min"
+        }
         if let cs = zone.cycleSoak,
            cs.enabled == true,
-           let count = cs.cycleCount,
-           count > 1,
-           let minutes = cs.minutesPerCycle {
-            let m = Int(minutes.rounded())
-            return "\(m) min × \(count)"
+           let perCycle = cs.minutesPerCycle {
+            let cycles = max(cs.cycleCount ?? 1, 1)
+            return "\(Int((perCycle * Double(cycles)).rounded())) min"
         }
-        let minutes = Int((zone.runtimePerEventMinutes ?? 0).rounded())
-        return "\(minutes) min"
+        return "0 min"
     }
 
     private var gallonsLabel: String {
