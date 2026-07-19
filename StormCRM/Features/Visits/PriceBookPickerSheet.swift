@@ -243,7 +243,9 @@ private struct PriceBookCategoryBrowseView: View {
                         PriceBookPickerRow(item: item) {
                             await onSelect(item)
                         } onTogglePin: {
-                            env.priceBookPins.toggle(item)
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                priceBookPins.toggle(item)
+                            }
                         }
                     }
                 }
