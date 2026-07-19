@@ -363,26 +363,10 @@ struct VisitDetailView: View {
                                     owner: .visit(id: visitId),
                                     items: visit.lineItems ?? [],
                                     discounts: visit.discounts ?? [],
-                                    subtotal: {
-                                        let items = visit.lineItems ?? []
-                                        return visit.subtotal ?? visitSubtotal(from: items)
-                                    }(),
-                                    discountTotal: {
-                                        let items = visit.lineItems ?? []
-                                        let discounts = visit.discounts ?? []
-                                        let subtotal = visit.subtotal ?? visitSubtotal(from: items)
-                                        return visitDiscountTotal(subtotal: subtotal, discounts: discounts)
-                                    }(),
-                                    total: {
-                                        let items = visit.lineItems ?? []
-                                        let discounts = visit.discounts ?? []
-                                        let subtotal = visit.subtotal ?? visitSubtotal(from: items)
-                                        let discountTotal = visitDiscountTotal(
-                                            subtotal: subtotal,
-                                            discounts: discounts
-                                        )
-                                        return visit.total ?? max(0, subtotal - discountTotal)
-                                    }(),
+                                    // Live from line items — visit.subtotal/total can lag after edits.
+                                    subtotal: subtotal,
+                                    discountTotal: discountTotal,
+                                    total: total,
                                     onUpdated: { await reloadVisit() }
                                 )
 

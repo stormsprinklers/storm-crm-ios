@@ -301,7 +301,9 @@ struct VisitPaymentSummary {
         let amountPaid = payments.reduce(0.0) { partial, payment in
             payment.refundedAt == nil ? partial + payment.amount : partial
         }
-        let effectiveTotal = max(invoice.total, computedTotal)
+        // Always bill from current line items / discounts. Invoice.total often lags after
+        // adds/deletes (e.g. still $125 after the only line item was removed).
+        let effectiveTotal = computedTotal
         let balanceDue = max(0, effectiveTotal - amountPaid)
         let isPaid = balanceDue <= 0
         return VisitPaymentSummary(
