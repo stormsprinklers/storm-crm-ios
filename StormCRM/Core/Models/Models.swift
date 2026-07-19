@@ -692,14 +692,10 @@ struct ConversationDTO: Decodable, Identifiable {
         customer?.name ?? title ?? participantPhone ?? "Conversation"
     }
 
-    /// Best-effort unread signal for dashboard alerts when the API omits an explicit flag.
+    /// Explicit unread only — never infer from "last message inbound" (that is unanswered, not unread).
     var appearsUnread: Bool {
         if let unreadCount { return unreadCount > 0 }
         if let hasUnread { return hasUnread }
-        // Preview payload is typically the latest message; inbound-last means needs attention.
-        if let latest = previewMessages?.first {
-            return !latest.isOutbound
-        }
         return false
     }
 
@@ -722,16 +718,52 @@ struct ConversationDTO: Decodable, Identifiable {
             unreadCount = max(0, count)
         } else if let flag = try container.decodeIfPresent(Bool.self, forKey: .unreadCount) {
             unreadCount = flag ? 1 : 0
+        } else if let flag = try container.decodeIfPresent(Bool.self, forKey: .unread) {
+            unreadCount = flag ? 1 : 0
         } else {
             unreadCount = nil
         }
         hasUnread = try container.decodeIfPresent(Bool.self, forKey: .hasUnread)
             ?? container.decodeIfPresent(Bool.self, forKey: .isUnread)
+            ?? container.decodeIfPresent(Bool.self, forKey: .unread)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, participantPhone, lastMessageAt, customer, messages, previewMessages
-        case unreadCount, hasUnread, isUnread
+        case unreadCount, hasUnread, isUnread, unread
+    }
+}
+
+/// Inbox list endpoints may return a bare array or a wrapped object.
+struct ConversationsListResponse: Decodable {
+    let conversations: [ConversationDTO]
+
+    init(conversations: [ConversationDTO]) {
+        self.conversations = conversations
+    }
+
+    init(from decoder: Decoder) throws {
+        if let array = try? decoder.singleValueContainer().decode([ConversationDTO].self) {
+            conversations = array
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let value = try container.decodeIfPresent([ConversationDTO].self, forKey: .conversations) {
+            conversations = value
+        } else if let value = try container.decodeIfPresent([ConversationDTO].self, forKey: .items) {
+            conversations = value
+        } else if let value = try container.decodeIfPresent([ConversationDTO].self, forKey: .data) {
+            conversations = value
+        } else if let value = try container.decodeIfPresent([ConversationDTO].self, forKey: .results) {
+            conversations = value
+        } else {
+            conversations = []
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case conversations, items, data, results
     }
 }
 
