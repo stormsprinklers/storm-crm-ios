@@ -710,14 +710,22 @@ private struct ManualPaymentResponse: Decodable {
 }
 
 enum QRCodeImage {
-    static func make(from string: String) -> UIImage? {
+    /// Brand coral modules on white — matches app accents while staying scannable.
+    static func make(from string: String, tint: UIColor = UIColor(StormTheme.coral)) -> UIImage? {
         let context = CIContext()
         let filter = CIFilter.qrCodeGenerator()
         filter.message = Data(string.utf8)
         filter.correctionLevel = "M"
         guard let output = filter.outputImage else { return nil }
         let scaled = output.transformed(by: CGAffineTransform(scaleX: 10, y: 10))
-        guard let cgImage = context.createCGImage(scaled, from: scaled.extent) else { return nil }
+        let colored = scaled.applyingFilter(
+            "CIFalseColor",
+            parameters: [
+                "inputColor0": CIColor(color: tint),
+                "inputColor1": CIColor(color: .white),
+            ]
+        )
+        guard let cgImage = context.createCGImage(colored, from: colored.extent) else { return nil }
         return UIImage(cgImage: cgImage)
     }
 }
