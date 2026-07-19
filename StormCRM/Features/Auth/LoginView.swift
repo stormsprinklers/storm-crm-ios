@@ -6,6 +6,11 @@ struct LoginView: View {
     @State private var password = ""
     @State private var mfaCode = ""
     @State private var isLoading = false
+    @State private var isPasswordVisible = false
+
+    private var forgotPasswordURL: URL? {
+        URL(string: "\(AppConfig.apiBaseURL)/forgot-password")
+    }
 
     var body: some View {
         NavigationStack {
@@ -49,15 +54,38 @@ struct LoginView: View {
                         .stroke(StormTheme.ice, lineWidth: 1)
                 )
 
-            SecureField("Password", text: $password)
-                .textContentType(.password)
-                .padding()
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(StormTheme.ice, lineWidth: 1)
-                )
+            HStack(spacing: 8) {
+                Group {
+                    if isPasswordVisible {
+                        TextField("Password", text: $password)
+                            .textContentType(.password)
+                            .autocapitalization(.none)
+                            .disableAutocorrection(true)
+                    } else {
+                        SecureField("Password", text: $password)
+                            .textContentType(.password)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button {
+                    isPasswordVisible.toggle()
+                } label: {
+                    Image(systemName: isPasswordVisible ? "eye.slash.fill" : "eye.fill")
+                        .foregroundStyle(StormTheme.navy.opacity(0.55))
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isPasswordVisible ? "Hide password" : "Show password")
+            }
+            .padding()
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(StormTheme.ice, lineWidth: 1)
+            )
 
             if let error = auth.lastError {
                 Text(error)
@@ -85,6 +113,14 @@ struct LoginView: View {
             }
             .buttonStyle(StormPrimaryButtonStyle())
             .disabled(email.isEmpty || password.isEmpty || isLoading)
+
+            if let forgotPasswordURL {
+                Link("Forgot Password?", destination: forgotPasswordURL)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(StormTheme.sky)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top, 2)
+            }
         }
         .padding()
         .background(Color(.systemBackground))
