@@ -126,13 +126,21 @@ struct LineItemsBuilderView: View {
             NavigationStack {
                 switch sheet {
                 case .service:
-                    PriceBookBrowseAddView(owner: owner, itemType: "SERVICE", optionId: optionId) {
-                        await reload()
-                    }
+                    PriceBookBrowseAddView(
+                        owner: owner,
+                        itemType: "SERVICE",
+                        optionId: optionId,
+                        onAdded: { await reload() },
+                        closePicker: { activeAddSheet = nil }
+                    )
                 case .material:
-                    PriceBookBrowseAddView(owner: owner, itemType: "MATERIAL", optionId: optionId) {
-                        await reload()
-                    }
+                    PriceBookBrowseAddView(
+                        owner: owner,
+                        itemType: "MATERIAL",
+                        optionId: optionId,
+                        onAdded: { await reload() },
+                        closePicker: { activeAddSheet = nil }
+                    )
                 case .discount:
                     DiscountBrowseAddView(owner: owner, optionId: optionId) {
                         await reload()
