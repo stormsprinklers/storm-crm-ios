@@ -103,6 +103,10 @@ struct ScheduleWeekStrip: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(Color(.systemBackground))
+        // Swipe the week bar left/right to change weeks.
+        .modifier(ScheduleHorizontalSwipe { delta in
+            onShiftWeek(delta)
+        })
     }
 
     private var weekTitle: String {
@@ -368,7 +372,10 @@ struct ScheduleView: View {
                         )
                     },
                     onEdit: { job in jobToEdit = job },
-                    onDelete: { job in jobToDelete = job }
+                    onDelete: { job in jobToDelete = job },
+                    onShiftDay: { delta in
+                        shiftDay(by: delta)
+                    }
                 )
                 if canEditSchedule {
                     Text("Tap an empty time to add a job.")
@@ -429,7 +436,16 @@ struct ScheduleView: View {
               let weekday = calendar.dateComponents([.weekday], from: selectedDate).weekday,
               let newSelected = calendar.date(bySetting: .weekday, value: weekday, of: newWeekStart)
         else { return }
-        selectedDate = calendar.startOfDay(for: newSelected)
+        withAnimation(.easeInOut(duration: 0.2)) {
+            selectedDate = calendar.startOfDay(for: newSelected)
+        }
+    }
+
+    private func shiftDay(by delta: Int) {
+        guard let newDate = calendar.date(byAdding: .day, value: delta, to: selectedDate) else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            selectedDate = calendar.startOfDay(for: newDate)
+        }
     }
 }
 
@@ -443,6 +459,7 @@ private struct ScheduleDayTimeline: View {
     var onTapSlot: (Date) -> Void
     var onEdit: (VisitDTO) -> Void
     var onDelete: (VisitDTO) -> Void
+    var onShiftDay: (Int) -> Void
 
     private let startHour = 6
     private let endHour = 21
@@ -469,6 +486,10 @@ private struct ScheduleDayTimeline: View {
             }
             .frame(height: contentHeight)
         }
+        // Swipe the day timeline left/right to change days (vertical scroll still works).
+        .modifier(ScheduleHorizontalSwipe { delta in
+            onShiftDay(delta)
+        })
     }
 
     @ViewBuilder
@@ -598,5 +619,23 @@ struct StatusBadge: View {
 
     var body: some View {
         StormBadge(text: status.visitDisplayLabel, style: .accent)
+    }
+}
+
+/// Horizontal swipe that ignores mostly-vertical drags so timeline scrolling still works.
+/// Swipe left → `+1` (next), swipe right → `-1` (previous).
+private struct ScheduleHorizontalSwipe: ViewModifier {
+    var onSwipe: (Int) -> Void
+
+    func body(content: Content) -> some View {
+        content.simultaneousGesture(
+            DragGesture(minimumDistance: 40, coordinateSpace: .local)
+                .onEnded { value in
+                    let dx = value.translation.width
+                    let dy = value.translation.height
+                    guard abs(dx) > 60, abs(dx) > abs(dy) * 1.4 else { return }
+                    onSwipe(dx < 0 ? 1 : -1)
+                }
+        )
     }
 }
