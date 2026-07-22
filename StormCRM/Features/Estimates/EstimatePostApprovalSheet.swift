@@ -10,7 +10,14 @@ struct EstimatePostApprovalSheet: View {
     let linkedVisitId: String?
     let optionId: String?
     let sourceVisit: VisitDetailDTO?
+    var initialMode: InitialMode = .choose
     var onFinished: () async -> Void
+
+    enum InitialMode {
+        case choose
+        case today
+        case schedule
+    }
 
     private enum Step {
         case timing
@@ -28,6 +35,7 @@ struct EstimatePostApprovalSheet: View {
     @State private var resultVisitId: String?
     @State private var depositDue: Double = 0
     @State private var showPayment = false
+    @State private var didAutoRunToday = false
 
     private var previewDeposit: Double {
         guard estimateTotal > threshold else { return 0 }
@@ -52,18 +60,26 @@ struct EstimatePostApprovalSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(step == .timing ? "Close" : "Back") {
-                        if step == .timing || step == .deposit {
-                            dismiss()
-                        } else {
+                    Button(step == .schedule && initialMode == .choose ? "Back" : "Close") {
+                        if step == .schedule && initialMode == .choose {
                             step = .timing
                             error = nil
+                        } else {
+                            dismiss()
                         }
                     }
                     .disabled(isSaving)
                 }
             }
-            .task { await loadDepositSettings() }
+            .task {
+                await loadDepositSettings()
+                if initialMode == .schedule {
+                    step = .schedule
+                } else if initialMode == .today, !didAutoRunToday {
+                    didAutoRunToday = true
+                    await submit(timing: "today")
+                }
+            }
             .sheet(isPresented: $showPayment) {
                 if let resultVisitId {
                     PaymentSheet(visitId: resultVisitId, amountDue: depositDue) {
@@ -82,46 +98,51 @@ struct EstimatePostApprovalSheet: View {
 
     private var navTitle: String {
         switch step {
-        case .timing: return "Schedule work"
-        case .schedule: return "Another day"
+        case .timing: return "Complete Today"
+        case .schedule: return "Schedule Visit"
         case .deposit: return "Collect deposit"
         }
     }
 
     private var timingStep: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Are you completing this work today, or another day?")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(StormTheme.navy)
+            if initialMode == .today {
+                ProgressView("Completing work today…")
+                Spacer(minLength: 0)
+            } else {
+                Text("Are you completing this work today, or another day?")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(StormTheme.navy)
 
-            Text("Estimate total: \(estimateTotal.formatted(.currency(code: "USD")))")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                Text("Estimate total: \(estimateTotal.formatted(.currency(code: "USD")))")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
 
-            if let error {
-                Text(error).font(.caption).foregroundStyle(.red)
+                if let error {
+                    Text(error).font(.caption).foregroundStyle(.red)
+                }
+
+                Button {
+                    Task { await submit(timing: "today") }
+                } label: {
+                    Label(isSaving ? "Saving…" : "Complete Today", systemImage: "sun.max.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(StormPrimaryButtonStyle())
+                .disabled(isSaving)
+
+                Button {
+                    error = nil
+                    step = .schedule
+                } label: {
+                    Label("Schedule Visit", systemImage: "calendar")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(StormSecondaryButtonStyle())
+                .disabled(isSaving)
+
+                Spacer(minLength: 0)
             }
-
-            Button {
-                Task { await submit(timing: "today") }
-            } label: {
-                Label(isSaving ? "Saving…" : "Completing today", systemImage: "sun.max.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(StormPrimaryButtonStyle())
-            .disabled(isSaving)
-
-            Button {
-                error = nil
-                step = .schedule
-            } label: {
-                Label("Another day", systemImage: "calendar")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(StormSecondaryButtonStyle())
-            .disabled(isSaving)
-
-            Spacer(minLength: 0)
         }
     }
 
@@ -167,7 +188,7 @@ struct EstimatePostApprovalSheet: View {
             Button {
                 Task { await submit(timing: "another_day") }
             } label: {
-                Label(isSaving ? "Scheduling…" : "Schedule visit", systemImage: "checkmark.circle.fill")
+                Label(isSaving ? "Scheduling…" : "Schedule Visit", systemImage: "checkmark.circle.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(StormPrimaryButtonStyle())

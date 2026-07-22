@@ -154,6 +154,7 @@ struct EstimateDetailView: View {
     @State private var actionMessage: String?
     @State private var approvalSheet: ApprovalSheetContext?
     @State private var showPostApproval = false
+    @State private var postApprovalMode: EstimatePostApprovalSheet.InitialMode = .choose
     @State private var pendingPostApproval = false
 
     private struct ApprovalSheetContext: Identifiable {
@@ -210,6 +211,11 @@ struct EstimateDetailView: View {
                             await load()
                             await onUpdated()
                         }
+                        if estimate.status == "APPROVED" || estimate.status == "CONVERTED" {
+                            approvedBanner(for: estimate)
+                        } else if estimate.status == "SENT" {
+                            waitingForApprovalBanner
+                        }
                         actionsSection(for: estimate)
                     }
                     .padding()
@@ -249,12 +255,51 @@ struct EstimateDetailView: View {
                 estimateTotal: estimate?.total ?? 0,
                 linkedVisitId: sourceVisitId ?? estimate?.visit?.id,
                 optionId: estimate?.selectedOptionId ?? estimate?.options.first?.id,
-                sourceVisit: sourceVisit
+                sourceVisit: sourceVisit,
+                initialMode: postApprovalMode
             ) {
                 await load()
                 await onUpdated()
             }
             .environmentObject(env)
+        }
+        .task(id: estimate?.status) {
+            guard estimate?.status == "SENT" else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                guard !Task.isCancelled else { break }
+                await load()
+                if estimate?.status != "SENT" { break }
+            }
+        }
+    }
+
+    private var waitingForApprovalBanner: some View {
+        StormCard {
+            Text("Waiting for customer approval — this screen updates when they sign.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func approvedBanner(for estimate: EstimateDetailDTO) -> some View {
+        StormCard {
+            HStack(spacing: 12) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title)
+                    .foregroundStyle(StormTheme.success)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(estimate.status == "CONVERTED" ? "Estimate converted" : "Estimate approved")
+                        .font(.headline)
+                        .foregroundStyle(StormTheme.navy)
+                    if let signedAt = estimate.signedAt {
+                        Text("Customer signed \(APIDateFormatting.displayString(from: signedAt))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
         }
     }
 
@@ -371,17 +416,28 @@ struct EstimateDetailView: View {
                     }
 
                     if estimate.canCopyToVisit {
-                        Text("Choose whether this work is done today or scheduled for another day.")
+                        Text("Complete the work today, or schedule a follow-up visit.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
                         Button {
+                            postApprovalMode = .today
                             showPostApproval = true
                         } label: {
-                            Label("Schedule work", systemImage: "calendar.badge.checkmark")
+                            Label("Complete Today", systemImage: "sun.max.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(StormPrimaryButtonStyle())
+                        .disabled(isSaving)
+
+                        Button {
+                            postApprovalMode = .schedule
+                            showPostApproval = true
+                        } label: {
+                            Label("Schedule Visit", systemImage: "calendar.badge.checkmark")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(StormSecondaryButtonStyle())
                         .disabled(isSaving)
                     }
                 }
@@ -438,6 +494,7 @@ struct EstimateDetailView: View {
             )
             await load()
             actionMessage = "Estimate approved with signature"
+            postApprovalMode = .choose
             pendingPostApproval = true
             approvalSheet = nil
             await onUpdated()
