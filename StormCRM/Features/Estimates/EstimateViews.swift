@@ -152,8 +152,9 @@ struct EstimateDetailView: View {
     @State private var isSaving = false
     @State private var error: String?
     @State private var actionMessage: String?
-    @State private var showCopyNewVisitConfirm = false
     @State private var approvalSheet: ApprovalSheetContext?
+    @State private var showPostApproval = false
+    @State private var pendingPostApproval = false
 
     private struct ApprovalSheetContext: Identifiable {
         let id = UUID()
@@ -226,7 +227,12 @@ struct EstimateDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
-        .fullScreenCover(item: $approvalSheet) { context in
+        .fullScreenCover(item: $approvalSheet, onDismiss: {
+            if pendingPostApproval {
+                pendingPostApproval = false
+                showPostApproval = true
+            }
+        }) { context in
             EstimateApprovalSheet(
                 estimateTotal: context.total,
                 canApprove: context.canApprove,
@@ -237,17 +243,18 @@ struct EstimateDetailView: View {
             .environmentObject(env)
             .environmentObject(env.branding)
         }
-        .confirmationDialog(
-            "Schedule a new visit with these line items?",
-            isPresented: $showCopyNewVisitConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("Create new visit") {
-                Task { await copyToVisit(target: "new_visit") }
+        .fullScreenCover(isPresented: $showPostApproval) {
+            EstimatePostApprovalSheet(
+                estimateId: estimateId,
+                estimateTotal: estimate?.total ?? 0,
+                linkedVisitId: sourceVisitId ?? estimate?.visit?.id,
+                optionId: estimate?.selectedOptionId ?? estimate?.options.first?.id,
+                sourceVisit: sourceVisit
+            ) {
+                await load()
+                await onUpdated()
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("A new scheduled visit will be created and this estimate's line items will be copied to it.")
+            .environmentObject(env)
         }
     }
 
@@ -364,31 +371,17 @@ struct EstimateDetailView: View {
                     }
 
                     if estimate.canCopyToVisit {
-                        Text("Copy approved line items to a visit job.")
+                        Text("Choose whether this work is done today or scheduled for another day.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
-                        if sourceVisitId != nil {
-                            Button {
-                                Task { await copyToVisit(target: "this_visit") }
-                            } label: {
-                                Label(
-                                    isSaving ? "Copying…" : "Copy to this visit",
-                                    systemImage: "doc.on.doc.fill"
-                                )
-                                .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(StormPrimaryButtonStyle())
-                            .disabled(isSaving)
-                        }
-
                         Button {
-                            showCopyNewVisitConfirm = true
+                            showPostApproval = true
                         } label: {
-                            Label("Copy to new visit", systemImage: "calendar.badge.plus")
+                            Label("Schedule work", systemImage: "calendar.badge.checkmark")
                                 .frame(maxWidth: .infinity)
                         }
-                        .stormButtonStyle(primary: sourceVisitId == nil)
+                        .buttonStyle(StormPrimaryButtonStyle())
                         .disabled(isSaving)
                     }
                 }
@@ -445,6 +438,7 @@ struct EstimateDetailView: View {
             )
             await load()
             actionMessage = "Estimate approved with signature"
+            pendingPostApproval = true
             approvalSheet = nil
             await onUpdated()
             return nil
@@ -452,54 +446,6 @@ struct EstimateDetailView: View {
             let message = (error as? APIError)?.message ?? error.localizedDescription
             self.error = message
             return message
-        }
-    }
-
-    private func copyToVisit(target: String) async {
-        isSaving = true
-        error = nil
-        actionMessage = nil
-        defer { isSaving = false }
-
-        let body: EstimateCopyBody
-        if target == "this_visit", let sourceVisitId {
-            body = EstimateCopyBody(target: "this_visit", visitId: sourceVisitId, schedule: nil)
-        } else {
-            let start = Date()
-            let end = start.addingTimeInterval(2 * 60 * 60)
-            body = EstimateCopyBody(
-                target: "new_visit",
-                visitId: nil,
-                schedule: EstimateCopyScheduleBody(
-                    title: "Work from estimate",
-                    startAt: VisitDateEditing.isoString(from: start),
-                    endAt: VisitDateEditing.isoString(from: end),
-                    division: sourceVisit?.division ?? "SERVICE",
-                    zip: sourceVisit?.zip ?? sourceVisit?.property?.zip,
-                    serviceAreaId: sourceVisit?.serviceArea?.id,
-                    assignedUserId: sourceVisit?.assignedUser?.id,
-                    address: sourceVisit?.address ?? sourceVisit?.property?.address,
-                    city: sourceVisit?.city ?? sourceVisit?.property?.city,
-                    state: sourceVisit?.state ?? sourceVisit?.property?.state
-                )
-            )
-        }
-
-        do {
-            let response: EstimateCopyResponse = try await env.apiClient.post(
-                path: APIPath.estimateCopy(estimateId),
-                body: body
-            )
-            await load()
-            await onUpdated()
-            if target == "this_visit" && response.visitId == sourceVisitId {
-                actionMessage = "Line items copied to this visit"
-                dismiss()
-            } else {
-                actionMessage = "Line items copied to a new visit"
-            }
-        } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 }

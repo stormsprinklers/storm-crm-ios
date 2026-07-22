@@ -524,11 +524,12 @@ struct PaymentSheet: View {
             let visitId: String
             let mobileReturn: Bool
             let platform: String
+            let amount: Double
         }
         do {
             let response: CheckoutResponse = try await env.apiClient.post(
                 path: APIPath.paymentsCheckout,
-                body: Body(visitId: visitId, mobileReturn: true, platform: "ios")
+                body: Body(visitId: visitId, mobileReturn: true, platform: "ios", amount: amountDue)
             )
             payLink = response.url ?? response.payLink
             if let urlString = response.url ?? response.payLink, let url = URL(string: urlString) {
@@ -549,12 +550,13 @@ struct PaymentSheet: View {
             let visitId: String
             let mobileReturn: Bool
             let platform: String
+            let amount: Double
         }
         do {
             // Prefer Stripe Checkout session.url (Apple Pay / Klarna / branded domain when ready).
             let response: CheckoutResponse = try await env.apiClient.post(
                 path: APIPath.paymentsCheckout,
-                body: Body(visitId: visitId, mobileReturn: true, platform: "ios")
+                body: Body(visitId: visitId, mobileReturn: true, platform: "ios", amount: amountDue)
             )
             payLink = response.url ?? response.payLink
             if payLink == nil {

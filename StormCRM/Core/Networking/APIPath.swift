@@ -51,6 +51,8 @@ enum APIPath {
     static func estimateDiscounts(_ id: String) -> String { "/api/estimates/\(id)/discounts" }
     static func estimateOptions(_ id: String) -> String { "/api/estimates/\(id)/options" }
     static func estimateCopy(_ id: String) -> String { "/api/estimates/\(id)/copy" }
+    static func estimatePostApproval(_ id: String) -> String { "/api/estimates/\(id)/post-approval" }
+    static let estimateSettings = "/api/settings/estimates"
     static func visitChecklistItem(_ visitId: String, checklistId: String, itemId: String) -> String {
         "/api/visits/\(visitId)/checklists/\(checklistId)/items/\(itemId)"
     }
