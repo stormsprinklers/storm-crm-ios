@@ -516,6 +516,19 @@ struct EstimateDetailView: View {
                             Label(isSaving ? "Sending…" : "Send to customer", systemImage: "paperplane.fill")
                                 .frame(maxWidth: .infinity)
                         }
+                        .disabled(isSaving)
+                    }
+
+                    if let url = estimate.financingUrl, !url.isEmpty {
+                        Button {
+                            Task { await sendFinancing() }
+                        } label: {
+                            Label(
+                                isSaving ? "Texting…" : "Explore financing options",
+                                systemImage: "banknote"
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
                         .buttonStyle(StormSecondaryButtonStyle())
                         .disabled(isSaving)
                     }
@@ -605,6 +618,23 @@ struct EstimateDetailView: View {
             estimate = try await env.apiClient.post(path: APIPath.estimateSend(estimateId))
             actionMessage = "Estimate sent to customer"
             await onUpdated()
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func sendFinancing() async {
+        isSaving = true
+        error = nil
+        actionMessage = nil
+        defer { isSaving = false }
+        do {
+            struct Ack: Decodable {
+                let ok: Bool?
+                let smsSent: Bool?
+            }
+            let _: Ack = try await env.apiClient.post(path: APIPath.estimateFinancing(estimateId))
+            actionMessage = "Financing options texted to the customer"
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }

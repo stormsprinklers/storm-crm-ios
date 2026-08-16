@@ -55,6 +55,13 @@ struct EstimatePresentView: View {
                         Task { await sendAndClose() }
                     }
                 }
+                if let url = estimate?.financingUrl, !url.isEmpty {
+                    ToolbarItem(placement: .bottomBar) {
+                        Button("Explore financing options") {
+                            Task { await sendFinancing() }
+                        }
+                    }
+                }
             }
             .sheet(item: Binding(
                 get: { openOptionId.map { PresentedOption(id: $0) } },
@@ -180,6 +187,19 @@ struct EstimatePresentView: View {
             estimate = try await env.apiClient.post(path: APIPath.estimateSend(estimateId))
             await onUpdated()
             dismiss()
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func sendFinancing() async {
+        do {
+            struct Ack: Decodable {
+                let ok: Bool?
+                let smsSent: Bool?
+            }
+            let _: Ack = try await env.apiClient.post(path: APIPath.estimateFinancing(estimateId))
+            error = nil
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }

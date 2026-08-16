@@ -53,12 +53,13 @@ struct EstimateDetailDTO: Decodable, Identifiable {
     let options: [EstimateOptionDTO]
     let lineItems: [LineItemDTO]
     let discounts: [DiscountDTO]
+    let financingUrl: String?
 
     enum CodingKeys: String, CodingKey {
         case id, estimateNumber, status, expiresAt, selectedOptionId
         case subtotal, discountTotal, total
         case signedAt, approvedAt, signatureBlobUrl, createdAt, customer, property, visit
-        case options, lineItems, discounts
+        case options, lineItems, discounts, financingUrl
     }
 
     init(from decoder: Decoder) throws {
@@ -81,6 +82,7 @@ struct EstimateDetailDTO: Decodable, Identifiable {
         options = try container.decodeIfPresent([EstimateOptionDTO].self, forKey: .options) ?? []
         lineItems = try container.decodeIfPresent([LineItemDTO].self, forKey: .lineItems) ?? []
         discounts = try container.decodeIfPresent([DiscountDTO].self, forKey: .discounts) ?? []
+        financingUrl = try container.decodeIfPresent(String.self, forKey: .financingUrl)
     }
 
     var isApproved: Bool {
