@@ -51,7 +51,12 @@ final class EnRouteLocationPublisher: ObservableObject {
 
     private func publishIfNeeded() async {
         guard let api, let visitId, let locationManager else { return }
-        guard let location = locationManager.lastLocation ?? (await locationManager.awaitLocation(timeout: 8)) else {
+        let location: CLLocation
+        if let last = locationManager.lastLocation {
+            location = last
+        } else if let fetched = await locationManager.awaitLocation(timeout: 8) {
+            location = fetched
+        } else {
             return
         }
 

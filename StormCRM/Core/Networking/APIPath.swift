@@ -11,6 +11,7 @@ enum APIPath {
     static let mobileInboxSms = "/api/mobile/inbox/sms/conversations"
     static let mobileTimeSegments = "/api/mobile/time-segments"
     static let mobileMissedTransfers = "/api/mobile/voice/missed-transfers"
+    static let mobileDashboard = "/api/mobile/dashboard"
     static let mobileDeviceLocation = "/api/mobile/device-location"
 
     static func visit(_ id: String) -> String { "/api/visits/\(id)" }
