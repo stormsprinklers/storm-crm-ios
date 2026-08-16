@@ -1,15 +1,51 @@
+import PhotosUI
 import SwiftUI
+
+private struct StormAiPendingPhoto: Identifiable {
+    let id = UUID()
+    let image: UIImage
+    let dataUrl: String
+    let fileName: String
+    let mimeType: String
+}
 
 struct StormAiChatView: View {
     @EnvironmentObject private var env: AppEnvironment
 
+    var visitId: String? = nil
+
     @State private var conversationId: String?
     @State private var messages: [StormAiMessageDTO] = []
     @State private var draft = ""
+    @State private var pendingPhotos: [StormAiPendingPhoto] = []
+    @State private var pickerItems: [PhotosPickerItem] = []
+    @State private var showCamera = false
     @State private var isSending = false
     @State private var isLoading = true
     @State private var error: String?
     @State private var warning: String?
+    @State private var voiceSession: StormAiRealtimeVoiceSession?
+    @State private var voiceStatus: StormAiRealtimeVoiceSession.Status = .idle
+    @State private var voiceToolName: String?
+    @State private var videoModeActive = false
+    @State private var frameSavedToast: String?
+    /// Explicit visit from Visit detail, or the tech's active job when opened from More.
+    @State private var resolvedVisitId: String?
+    @State private var activeJobTitle: String?
+
+    private let maxPhotos = 4
+
+    private var voiceActive: Bool {
+        switch voiceStatus {
+        case .connecting, .listening, .speaking, .tool: return true
+        default: return false
+        }
+    }
+
+    private var canSend: Bool {
+        !isSending && !voiceActive &&
+            (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingPhotos.isEmpty)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,11 +56,34 @@ struct StormAiChatView: View {
                             ProgressView("Loading…")
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 24)
-                        } else if messages.isEmpty && !isSending {
-                            Text("Ask about customers, the schedule, or performance. I only use CRM facts.")
+                        } else if messages.isEmpty && !isSending && !voiceActive {
+                            Text(
+                                effectiveVisitId == nil
+                                    ? "Ask about customers, attach a part photo, or use mic/video. Start or open an active job so video frames save to that visit."
+                                    : "Mic for voice, video for live camera help. Frames are stills only (full preview FPS) and save to this job."
+                            )
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .padding(.top, 8)
+                        }
+
+                        if let activeJobTitle, effectiveVisitId != nil {
+                            Label("Job: \(activeJobTitle)", systemImage: "wrench.and.screwdriver")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if voiceActive, videoModeActive, let session = voiceSession?.cameraSession {
+                            StormAiCameraPreview(session: session)
+                                .frame(height: 220)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            Button {
+                                Task { await voiceSession?.captureFrameNow() }
+                            } label: {
+                                Label("Snap frame for AI", systemImage: "camera.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
                         }
 
                         ForEach(messages) { message in
@@ -37,6 +96,12 @@ struct StormAiChatView: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .id("thinking")
+                        }
+                        if voiceActive {
+                            Text(voiceStatusLabel)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .id("voice-status")
                         }
                     }
                     .padding()
@@ -63,12 +128,90 @@ struct StormAiChatView: View {
                     .padding(.horizontal)
                     .padding(.bottom, 4)
             }
+            if let voiceError = voiceSession?.lastError, voiceActive || voiceStatus == .error {
+                Text(voiceError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal)
+                    .padding(.bottom, 4)
+            }
+
+            if let frameSavedToast {
+                Text(frameSavedToast)
+                    .font(.caption)
+                    .foregroundStyle(StormTheme.success)
+                    .padding(.horizontal)
+                    .padding(.bottom, 4)
+            }
+
+            if !pendingPhotos.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(pendingPhotos) { photo in
+                            ZStack(alignment: .topTrailing) {
+                                Image(uiImage: photo.image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 64, height: 64)
+                                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                                Button {
+                                    pendingPhotos.removeAll { $0.id == photo.id }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.white, .black.opacity(0.6))
+                                }
+                                .offset(x: 4, y: -4)
+                            }
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                }
+            }
 
             HStack(alignment: .bottom, spacing: 8) {
+                PhotosPicker(
+                    selection: $pickerItems,
+                    maxSelectionCount: max(1, maxPhotos - pendingPhotos.count),
+                    matching: .images
+                ) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.title3)
+                        .foregroundStyle(StormTheme.sky)
+                }
+                .disabled(isSending || voiceActive || pendingPhotos.count >= maxPhotos)
+
+                Button {
+                    showCamera = true
+                } label: {
+                    Image(systemName: "camera")
+                        .font(.title3)
+                        .foregroundStyle(StormTheme.sky)
+                }
+                .disabled(isSending || voiceActive || pendingPhotos.count >= maxPhotos)
+
+                Button {
+                    Task { await toggleVoice(video: false) }
+                } label: {
+                    Image(systemName: voiceActive && !videoModeActive ? "mic.circle.fill" : "mic.circle")
+                        .font(.title2)
+                        .foregroundStyle(voiceActive && !videoModeActive ? StormTheme.coral : StormTheme.sky)
+                }
+                .disabled(isSending || (voiceActive && videoModeActive))
+
+                Button {
+                    Task { await toggleVoice(video: true) }
+                } label: {
+                    Image(systemName: voiceActive && videoModeActive ? "video.circle.fill" : "video.circle")
+                        .font(.title2)
+                        .foregroundStyle(voiceActive && videoModeActive ? StormTheme.coral : StormTheme.sky)
+                }
+                .disabled(isSending || (voiceActive && !videoModeActive))
+
                 TextField("Ask Storm AI…", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.roundedBorder)
-                    .disabled(isSending)
+                    .disabled(isSending || voiceActive)
 
                 Button {
                     Task { await send() }
@@ -81,7 +224,7 @@ struct StormAiChatView: View {
                             .foregroundStyle(StormTheme.sky)
                     }
                 }
-                .disabled(isSending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(!canSend)
             }
             .padding()
             .background(.ultraThinMaterial)
@@ -94,27 +237,170 @@ struct StormAiChatView: View {
                 Button("New chat") {
                     Task { await startNewChat() }
                 }
-                .disabled(isSending)
+                .disabled(isSending || voiceActive)
             }
         }
-        .task { await loadLatest() }
+        .task {
+            await loadActiveVisitIfNeeded()
+            await loadLatest()
+        }
+        .onDisappear {
+            voiceSession?.stop()
+            voiceStatus = .idle
+            voiceToolName = nil
+            videoModeActive = false
+        }
+        .onChange(of: pickerItems) { _, items in
+            guard !items.isEmpty else { return }
+            Task {
+                await importPickerItems(items)
+                pickerItems = []
+            }
+        }
+        .sheet(isPresented: $showCamera) {
+            CameraImagePicker { image in
+                appendPending(image: image)
+            }
+            .ignoresSafeArea()
+        }
+    }
+
+    private var effectiveVisitId: String? {
+        visitId ?? resolvedVisitId
+    }
+
+    private var voiceStatusLabel: String {
+        switch voiceStatus {
+        case .connecting: return "Connecting voice…"
+        case .tool: return "Looking up \(voiceToolName ?? "CRM data")…"
+        case .speaking: return "Storm AI speaking…"
+        case .listening:
+            return videoModeActive
+                ? "Listening — point the camera and ask about what you see"
+                : "Listening — speak anytime"
+        case .error: return "Voice error"
+        default: return "Voice…"
+        }
+    }
+
+    private func ensureVoiceSession() -> StormAiRealtimeVoiceSession {
+        if let existing = voiceSession {
+            return existing
+        }
+        let session = StormAiRealtimeVoiceSession(api: env.apiClient)
+        session.onTranscript = { role, text in
+            messages.append(
+                StormAiMessageDTO(
+                    id: "voice-\(UUID().uuidString)",
+                    role: role,
+                    content: text,
+                    createdAt: ISO8601DateFormatter().string(from: Date()),
+                    attachments: nil
+                )
+            )
+        }
+        session.onStatusChange = { status in
+            voiceStatus = status
+            voiceToolName = session.activeToolName
+        }
+        session.onFrameSavedToJob = { saved in
+            if saved {
+                frameSavedToast = "Frame saved to job attachments"
+                Task {
+                    try? await Task.sleep(nanoseconds: 2_500_000_000)
+                    if frameSavedToast == "Frame saved to job attachments" {
+                        frameSavedToast = nil
+                    }
+                }
+            }
+        }
+        voiceSession = session
+        return session
+    }
+
+    private func toggleVoice(video: Bool) async {
+        let session = ensureVoiceSession()
+        if voiceActive {
+            session.stop()
+            voiceStatus = .idle
+            voiceToolName = nil
+            videoModeActive = false
+            return
+        }
+        error = nil
+        warning = nil
+        if effectiveVisitId == nil {
+            await loadActiveVisitIfNeeded()
+        }
+        videoModeActive = video
+        await session.start(
+            conversationId: conversationId,
+            visitId: effectiveVisitId,
+            videoMode: video
+        )
+        voiceStatus = session.status
+        voiceToolName = session.activeToolName
+        if let id = session.activeConversationId {
+            conversationId = id
+        }
+        if let voiceError = session.lastError {
+            error = voiceError
+            videoModeActive = false
+        }
+    }
+
+    private func loadActiveVisitIfNeeded() async {
+        if let visitId {
+            resolvedVisitId = visitId
+            if activeJobTitle == nil {
+                activeJobTitle = "This visit"
+            }
+            return
+        }
+        do {
+            let response: ActiveVisitResponse = try await env.apiClient.get(
+                path: APIPath.mobileActiveVisit
+            )
+            resolvedVisitId = response.visit?.id
+            activeJobTitle = response.visit?.title
+        } catch {
+            // Optional context — chat still works without an active job.
+        }
     }
 
     private func stormBubble(_ message: StormAiMessageDTO) -> some View {
         HStack {
             if message.isUser { Spacer(minLength: 40) }
-            Group {
-                if let attributed = try? AttributedString(markdown: message.content) {
-                    Text(attributed)
-                } else {
-                    Text(message.content)
+            VStack(alignment: message.isUser ? .trailing : .leading, spacing: 8) {
+                if let attachments = message.attachments, !attachments.isEmpty {
+                    ForEach(attachments, id: \.url) { attachment in
+                        Group {
+                            if attachment.url.hasPrefix("data:"),
+                               let uiImage = uiImage(fromDataUrl: attachment.url) {
+                                Image(uiImage: uiImage)
+                                    .resizable()
+                                    .scaledToFill()
+                            } else {
+                                AuthenticatedBlobImage(urlString: attachment.url, contentMode: .fill)
+                            }
+                        }
+                        .frame(width: 160, height: 160)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
                 }
+                Group {
+                    if let attributed = try? AttributedString(markdown: message.content) {
+                        Text(attributed)
+                    } else {
+                        Text(message.content)
+                    }
+                }
+                .font(.subheadline)
+                .foregroundStyle(StormTheme.navy)
+                .padding(12)
+                .background(message.isUser ? StormTheme.sky.opacity(0.18) : Color(.secondarySystemFill))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            .font(.subheadline)
-            .foregroundStyle(message.isUser ? StormTheme.navy : StormTheme.navy)
-            .padding(12)
-            .background(message.isUser ? StormTheme.sky.opacity(0.18) : Color(.secondarySystemFill))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             if !message.isUser { Spacer(minLength: 40) }
         }
     }
@@ -147,6 +433,10 @@ struct StormAiChatView: View {
     }
 
     private func startNewChat() async {
+        voiceSession?.stop()
+        voiceStatus = .idle
+        voiceToolName = nil
+        videoModeActive = false
         error = nil
         warning = nil
         do {
@@ -156,17 +446,67 @@ struct StormAiChatView: View {
             conversationId = created.conversation.id
             messages = []
             draft = ""
+            pendingPhotos = []
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 
+    private func importPickerItems(_ items: [PhotosPickerItem]) async {
+        for item in items {
+            guard pendingPhotos.count < maxPhotos else { break }
+            do {
+                guard let data = try await item.loadTransferable(type: Data.self),
+                      let image = UIImage(data: data)
+                else { continue }
+                appendPending(image: image)
+            } catch {
+                self.error = (error as? APIError)?.message ?? error.localizedDescription
+            }
+        }
+    }
+
+    private func appendPending(image: UIImage) {
+        guard pendingPhotos.count < maxPhotos else {
+            error = "You can attach up to \(maxPhotos) photos"
+            return
+        }
+        guard let jpeg = image.stormAiResizedJPEG(maxEdge: 1280, quality: 0.82),
+              let dataUrl = dataUrl(from: jpeg, mimeType: "image/jpeg")
+        else {
+            error = "Could not read photo"
+            return
+        }
+        let fileName = "photo-\(Int(Date().timeIntervalSince1970)).jpg"
+        pendingPhotos.append(
+            StormAiPendingPhoto(
+                image: image,
+                dataUrl: dataUrl,
+                fileName: fileName,
+                mimeType: "image/jpeg"
+            )
+        )
+    }
+
+    private func dataUrl(from data: Data, mimeType: String) -> String? {
+        "data:\(mimeType);base64,\(data.base64EncodedString())"
+    }
+
+    private func uiImage(fromDataUrl dataUrl: String) -> UIImage? {
+        guard let comma = dataUrl.firstIndex(of: ","),
+              let data = Data(base64Encoded: String(dataUrl[dataUrl.index(after: comma)...]))
+        else { return nil }
+        return UIImage(data: data)
+    }
+
     private func send() async {
         let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !content.isEmpty, !isSending else { return }
+        let photos = pendingPhotos
+        guard (!content.isEmpty || !photos.isEmpty), !isSending else { return }
         error = nil
         warning = nil
         draft = ""
+        pendingPhotos = []
         isSending = true
         defer { isSending = false }
 
@@ -181,22 +521,43 @@ struct StormAiChatView: View {
             }
             guard let conversationId = id else { return }
 
+            let localAttachments = photos.map {
+                StormAiAttachmentDTO(
+                    fileName: $0.fileName,
+                    mimeType: $0.mimeType,
+                    kind: "image",
+                    url: $0.dataUrl
+                )
+            }
             messages.append(
                 StormAiMessageDTO(
                     id: "local-\(UUID().uuidString)",
                     role: "user",
-                    content: content,
-                    createdAt: ISO8601DateFormatter().string(from: Date())
+                    content: content.isEmpty ? "What part is this?" : content,
+                    createdAt: ISO8601DateFormatter().string(from: Date()),
+                    attachments: localAttachments.isEmpty ? nil : localAttachments
                 )
             )
 
+            let imageBodies = photos.map {
+                StormAiSendImageBody(
+                    dataUrl: $0.dataUrl,
+                    fileName: $0.fileName,
+                    mimeType: $0.mimeType
+                )
+            }
             let body = StormAiSendBody(
                 content: content,
-                pageContext: StormAiPageContextBody(pathname: "ios://more")
+                images: imageBodies.isEmpty ? nil : imageBodies,
+                pageContext: StormAiPageContextBody(
+                    pathname: effectiveVisitId.map { "ios://visit/\($0)" } ?? "ios://more",
+                    visitId: effectiveVisitId
+                )
             )
             let result: StormAiMessagesResponse = try await env.apiClient.post(
                 path: APIPath.stormAiMessages(conversationId),
-                body: body
+                body: body,
+                timeoutInterval: photos.isEmpty ? 60 : 120
             )
             messages = result.messages
             warning = result.warning

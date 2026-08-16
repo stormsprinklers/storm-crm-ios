@@ -40,7 +40,8 @@ final class APIClient {
         path: String,
         body: B,
         authenticated: Bool = true,
-        headers: [String: String] = [:]
+        headers: [String: String] = [:],
+        timeoutInterval: TimeInterval? = nil
     ) async throws -> T {
         var request = try await buildRequest(
             path: path,
@@ -49,6 +50,9 @@ final class APIClient {
             headers: headers
         )
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let timeoutInterval {
+            request.timeoutInterval = timeoutInterval
+        }
         request.httpBody = try encoder.encode(body)
         return try await perform(request)
     }
@@ -65,6 +69,26 @@ final class APIClient {
             headers: headers
         )
         return try await perform(request)
+    }
+
+    /// POST JSON body and return raw response bytes (for opaque tool payloads).
+    func postRawJSON<B: Encodable>(
+        path: String,
+        body: B,
+        authenticated: Bool = true,
+        timeoutInterval: TimeInterval? = nil
+    ) async throws -> Data {
+        var request = try await buildRequest(
+            path: path,
+            method: "POST",
+            authenticated: authenticated
+        )
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let timeoutInterval {
+            request.timeoutInterval = timeoutInterval
+        }
+        request.httpBody = try encoder.encode(body)
+        return try await performData(request)
     }
 
     func patch<T: Decodable, B: Encodable>(
@@ -230,6 +254,20 @@ final class APIClient {
     }
 
     private func perform<T: Decodable>(_ request: URLRequest, retryOn401: Bool = true) async throws -> T {
+        let data = try await performData(request, retryOn401: retryOn401)
+        if T.self == EmptyResponse.self {
+            return EmptyResponse() as! T
+        }
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch let decodingError as DecodingError {
+            throw APIError.decoding(decodingError)
+        } catch {
+            throw APIError.decoding(error)
+        }
+    }
+
+    private func performData(_ request: URLRequest, retryOn401: Bool = true) async throws -> Data {
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else { throw APIError.server("No response") }
@@ -240,23 +278,13 @@ final class APIClient {
                 if let token = tokenStore.accessToken {
                     retry.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
                 }
-                return try await perform(retry, retryOn401: false)
+                return try await performData(retry, retryOn401: false)
             }
 
             guard (200...299).contains(http.statusCode) else {
                 throw parseError(data: data, status: http.statusCode)
             }
-
-            if T.self == EmptyResponse.self {
-                return EmptyResponse() as! T
-            }
-            do {
-                return try decoder.decode(T.self, from: data)
-            } catch let decodingError as DecodingError {
-                throw APIError.decoding(decodingError)
-            } catch {
-                throw APIError.decoding(error)
-            }
+            return data
         } catch let error as APIError {
             throw error
         } catch {

@@ -36,7 +36,12 @@ struct MoreView: View {
                     NavigationLink {
                         StormAiChatView()
                     } label: {
-                        Label("Storm AI", systemImage: "sparkles")
+                        VStack(alignment: .leading, spacing: 2) {
+                            Label("Storm AI", systemImage: "sparkles")
+                            Text("Chat, part photos, live voice & video")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     NavigationLink {

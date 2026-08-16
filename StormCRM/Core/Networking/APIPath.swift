@@ -116,6 +116,9 @@ enum APIPath {
     static let stormAiConversations = "/api/storm-ai/conversations"
     static func stormAiConversation(_ id: String) -> String { "/api/storm-ai/conversations/\(id)" }
     static func stormAiMessages(_ id: String) -> String { "/api/storm-ai/conversations/\(id)/messages" }
+    static let stormAiRealtimeSession = "/api/storm-ai/realtime/session"
+    static let stormAiRealtimeTools = "/api/storm-ai/realtime/tools"
+    static let stormAiRealtimeFrame = "/api/storm-ai/realtime/frame"
     static func reporting(_ type: String) -> String { "/api/reporting/\(type)" }
     static let paymentsCheckout = "/api/payments/checkout"
     static let paymentsConfirm = "/api/payments/confirm"

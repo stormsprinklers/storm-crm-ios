@@ -421,6 +421,14 @@ struct VisitDetailView: View {
         .navigationTitle("Visit")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    StormAiChatView(visitId: visitId)
+                } label: {
+                    Image(systemName: "sparkles")
+                        .accessibilityLabel("Storm AI")
+                }
+            }
             if env.auth.user.map({ UserRoles.canDeleteVisit($0.role) }) == true {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {

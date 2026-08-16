@@ -7,11 +7,19 @@ struct StormAiConversationDTO: Decodable, Identifiable {
     let updatedAt: String?
 }
 
+struct StormAiAttachmentDTO: Decodable, Hashable {
+    let fileName: String
+    let mimeType: String
+    let kind: String
+    let url: String
+}
+
 struct StormAiMessageDTO: Decodable, Identifiable {
     let id: String
     let role: String
     let content: String
     let createdAt: String
+    let attachments: [StormAiAttachmentDTO]?
 
     var isUser: Bool { role == "user" }
 }
@@ -39,11 +47,94 @@ struct StormAiMessagesResponse: Decodable {
     let warning: String?
 }
 
+struct StormAiSendImageBody: Encodable {
+    let dataUrl: String
+    let fileName: String
+    let mimeType: String
+}
+
 struct StormAiSendBody: Encodable {
     let content: String
+    let images: [StormAiSendImageBody]?
     let pageContext: StormAiPageContextBody
 }
 
 struct StormAiPageContextBody: Encodable {
     let pathname: String
+    let visitId: String?
+    let customerId: String?
+
+    init(pathname: String, visitId: String? = nil, customerId: String? = nil) {
+        self.pathname = pathname
+        self.visitId = visitId
+        self.customerId = customerId
+    }
+}
+
+struct StormAiRealtimeSessionBody: Encodable {
+    let conversationId: String?
+    let pageContext: StormAiPageContextBody
+    let videoMode: Bool?
+}
+
+struct StormAiRealtimeSessionResponse: Decodable {
+    let conversationId: String
+    let clientSecret: String
+    let model: String?
+    let voice: String?
+    let expiresAt: Double?
+}
+
+struct StormAiRealtimeToolBody: Encodable {
+    let conversationId: String
+    let callId: String
+    let name: String
+    let arguments: [String: AnyCodableValue]?
+}
+
+/// Minimal AnyCodable for tool argument pass-through.
+enum AnyCodableValue: Encodable {
+    case string(String)
+    case int(Int)
+    case double(Double)
+    case bool(Bool)
+    case null
+    case array([AnyCodableValue])
+    case object([String: AnyCodableValue])
+
+    init(from json: Any) {
+        switch json {
+        case let v as String: self = .string(v)
+        case let v as Bool: self = .bool(v)
+        case let v as Int: self = .int(v)
+        case let v as Double: self = .double(v)
+        case let v as NSNumber:
+            // JSONSerialization often boxes numbers/bools as NSNumber
+            if CFGetTypeID(v) == CFBooleanGetTypeID() {
+                self = .bool(v.boolValue)
+            } else if abs(v.doubleValue.truncatingRemainder(dividingBy: 1)) < .ulpOfOne {
+                self = .int(v.intValue)
+            } else {
+                self = .double(v.doubleValue)
+            }
+        case let v as [Any]: self = .array(v.map(AnyCodableValue.init(from:)))
+        case let v as [String: Any]:
+            self = .object(v.mapValues { AnyCodableValue(from: $0) })
+        case is NSNull: self = .null
+        default: self = .null
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        switch self {
+        case .string(let v): try c.encode(v)
+        case .int(let v): try c.encode(v)
+        case .double(let v): try c.encode(v)
+        case .bool(let v): try c.encode(v)
+        case .null: try c.encodeNil()
+        case .array(let v): try c.encode(v)
+        case .object(let v): try c.encode(v)
+        }
+    }
 }
