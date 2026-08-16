@@ -234,43 +234,20 @@ struct VisitDetailView: View {
                                         .foregroundStyle(.secondary)
                                 }
 
-                                HStack(alignment: .top, spacing: 12) {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text(visit.title)
-                                            .font(.title2.weight(.semibold))
-                                            .foregroundStyle(StormTheme.navy)
-                                        HStack(spacing: 8) {
-                                            StormBadge(text: visit.status.visitDisplayLabel, style: .accent)
-                                            if visit.isCallback == true {
-                                                StormBadge(text: "Callback", style: .warning)
-                                            }
-                                            if paymentSummary.isPaid {
-                                                StormBadge(text: "Paid", style: .success)
-                                            } else if env.offlineSync.hasPendingPayment(forVisitId: visitId) {
-                                                StormBadge(text: "Payment pending sync", style: .warning)
-                                            }
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(visit.title)
+                                        .font(.title2.weight(.semibold))
+                                        .foregroundStyle(StormTheme.navy)
+                                    HStack(spacing: 8) {
+                                        StormBadge(text: visit.status.visitDisplayLabel, style: .accent)
+                                        if visit.isCallback == true {
+                                            StormBadge(text: "Callback", style: .warning)
                                         }
-                                    }
-                                    Spacer(minLength: 0)
-                                    if paymentSummary.hasBalanceDue {
-                                        Button {
-                                            let amount = paymentAmountDue(for: visit)
-                                            activeSheet = .payment(amount: amount)
-                                        } label: {
-                                            Label {
-                                                // Always the live job total / balance — never a cached finish amount.
-                                                Text(paymentAmountDue(for: visit), format: .currency(code: "USD"))
-                                            } icon: {
-                                                Image(systemName: "dollarsign.circle.fill")
-                                            }
-                                            .font(.subheadline.weight(.semibold))
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 8)
-                                            .background(StormTheme.coral)
-                                            .foregroundStyle(.white)
-                                            .clipShape(Capsule())
+                                        if paymentSummary.isPaid {
+                                            StormBadge(text: "Paid", style: .success)
+                                        } else if env.offlineSync.hasPendingPayment(forVisitId: visitId) {
+                                            StormBadge(text: "Payment pending sync", style: .warning)
                                         }
-                                        .buttonStyle(.borderless)
                                     }
                                 }
 
@@ -283,15 +260,42 @@ struct VisitDetailView: View {
                                     )
                                 }
 
-                                Button {
-                                    activeSheet = .partsRun
-                                } label: {
-                                    Label("Parts run", systemImage: "shippingbox.fill")
-                                        .font(.body.weight(.semibold))
+                                HStack(spacing: 10) {
+                                    Button {
+                                        activeSheet = .partsRun
+                                    } label: {
+                                        Label("Parts run", systemImage: "shippingbox.fill")
+                                            .lineLimit(1)
+                                            .minimumScaleFactor(0.8)
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(StormSecondaryButtonStyle())
+                                    .frame(maxWidth: .infinity)
+
+                                    Button {
+                                        guard paymentSummary.hasBalanceDue else { return }
+                                        activeSheet = .payment(amount: paymentAmountDue(for: visit))
+                                    } label: {
+                                        Group {
+                                            if paymentSummary.isPaid {
+                                                Label("Paid", systemImage: "checkmark.circle.fill")
+                                            } else {
+                                                Label {
+                                                    Text(paymentAmountDue(for: visit), format: .currency(code: "USD"))
+                                                } icon: {
+                                                    Image(systemName: "creditcard.fill")
+                                                }
+                                            }
+                                        }
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.75)
                                         .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 6)
+                                    }
+                                    .buttonStyle(StormPrimaryButtonStyle())
+                                    .frame(maxWidth: .infinity)
+                                    .disabled(!paymentSummary.hasBalanceDue)
+                                    .opacity(paymentSummary.hasBalanceDue ? 1 : 0.55)
                                 }
-                                .buttonStyle(StormSecondaryButtonStyle())
 
                                 VisitWorkSummarySection(
                                     visitId: visitId,
@@ -347,12 +351,6 @@ struct VisitDetailView: View {
                                     )
                                 }
 
-                                VisitScheduleEditSection(
-                                    visit: visit,
-                                    canEdit: canEditSchedule,
-                                    onSaved: { await reloadVisit() }
-                                )
-
                                 VisitEstimatesSection(
                                     visit: visit,
                                     visitId: visitId
@@ -391,6 +389,12 @@ struct VisitDetailView: View {
                                 if visit.hasInstallPlan {
                                     VisitInstallPlanSection(visit: visit)
                                 }
+
+                                VisitScheduleEditSection(
+                                    visit: visit,
+                                    canEdit: canEditSchedule,
+                                    onSaved: { await reloadVisit() }
+                                )
                             }
                             .padding()
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -453,6 +457,13 @@ struct VisitDetailView: View {
         }
         .task {
             await viewModel.load(api: env.apiClient, visitId: visitId)
+            syncLiveTracking()
+        }
+        .onChange(of: viewModel.visit?.status) { _, _ in
+            syncLiveTracking()
+        }
+        .onDisappear {
+            env.enRouteLocation.stop()
         }
         .onReceive(NotificationCenter.default.publisher(for: .visitPaymentCompleted)) { notification in
             guard let visitId = notification.userInfo?["visitId"] as? String, visitId == self.visitId else { return }
@@ -550,12 +561,21 @@ struct VisitDetailView: View {
             type: type,
             location: location
         )
+        syncLiveTracking()
         // Payment is optional — prompt only, never block completion.
         if type == "FINISH",
            !(visit.lineItems ?? []).isEmpty,
            paymentSummary.hasBalanceDue {
             finishBillingAmount = paymentSummary.balanceDue ?? total
             showFinishBillingPrompt = true
+        }
+    }
+
+    private func syncLiveTracking() {
+        if viewModel.visit?.status == "EN_ROUTE" {
+            env.enRouteLocation.start(visitId: visitId)
+        } else {
+            env.enRouteLocation.stop()
         }
     }
 

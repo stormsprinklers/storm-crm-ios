@@ -156,6 +156,8 @@ struct EstimateDetailView: View {
     @State private var showPostApproval = false
     @State private var postApprovalMode: EstimatePostApprovalSheet.InitialMode = .choose
     @State private var pendingPostApproval = false
+    @State private var activeOptionId: String?
+    @State private var showPresent = false
 
     private struct ApprovalSheetContext: Identifiable {
         let id = UUID()
@@ -171,6 +173,8 @@ struct EstimateDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         header(for: estimate)
+
+                        optionTabs(for: estimate)
 
                         EstimateCustomerInfoSection(
                             customer: estimate.customer,
@@ -191,10 +195,10 @@ struct EstimateDetailView: View {
                         LineItemsSummarySection(
                             owner: .estimate(
                                 id: estimateId,
-                                optionId: estimate.selectedOptionId ?? estimate.options.first?.id
+                                optionId: currentOptionId(for: estimate)
                             ),
                             items: {
-                                let optionId = estimate.selectedOptionId ?? estimate.options.first?.id
+                                let optionId = currentOptionId(for: estimate)
                                 if let optionId {
                                     return estimate.lineItems.filter {
                                         $0.optionId == optionId || $0.optionId == nil
@@ -202,10 +206,18 @@ struct EstimateDetailView: View {
                                 }
                                 return estimate.lineItems
                             }(),
-                            discounts: estimate.discounts,
-                            subtotal: estimate.subtotal,
-                            discountTotal: estimate.discountTotal,
-                            total: estimate.total,
+                            discounts: {
+                                let optionId = currentOptionId(for: estimate)
+                                if let optionId {
+                                    return estimate.discounts.filter {
+                                        $0.optionId == optionId || $0.optionId == nil
+                                    }
+                                }
+                                return estimate.discounts
+                            }(),
+                            subtotal: currentOption(for: estimate)?.subtotal ?? estimate.subtotal,
+                            discountTotal: currentOption(for: estimate)?.discountTotal ?? estimate.discountTotal,
+                            total: currentOption(for: estimate)?.total ?? estimate.total,
                             canEdit: estimate.status != "CONVERTED"
                         ) {
                             await load()
@@ -262,6 +274,24 @@ struct EstimateDetailView: View {
                 await onUpdated()
             }
             .environmentObject(env)
+        }
+        .fullScreenCover(isPresented: $showPresent) {
+            EstimatePresentView(
+                estimateId: estimateId,
+                onUpdated: {
+                    await load()
+                    await onUpdated()
+                },
+                onApproveOption: { optionId, total in
+                    activeOptionId = optionId
+                    Task {
+                        await selectOption(optionId)
+                    }
+                    approvalSheet = ApprovalSheetContext(total: total, canApprove: true)
+                }
+            )
+            .environmentObject(env)
+            .environmentObject(env.branding)
         }
         .task(id: estimate?.status) {
             guard estimate?.status == "SENT" else { return }
@@ -336,6 +366,99 @@ struct EstimateDetailView: View {
         }
     }
 
+    private func currentOptionId(for estimate: EstimateDetailDTO) -> String? {
+        if let activeOptionId, estimate.options.contains(where: { $0.id == activeOptionId }) {
+            return activeOptionId
+        }
+        return estimate.selectedOptionId ?? estimate.options.first?.id
+    }
+
+    private func currentOption(for estimate: EstimateDetailDTO) -> EstimateOptionDTO? {
+        let id = currentOptionId(for: estimate)
+        return estimate.options.first(where: { $0.id == id }) ?? estimate.options.first
+    }
+
+    @ViewBuilder
+    private func optionTabs(for estimate: EstimateDetailDTO) -> some View {
+        StormCard {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    StormSectionHeader(title: "Options", systemImage: "square.stack")
+                    Spacer()
+                    Menu {
+                        Button("Duplicate current") {
+                            Task { await addOption(mode: "duplicate") }
+                        }
+                        Button("New blank") {
+                            Task { await addOption(mode: "fresh") }
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .foregroundStyle(StormTheme.sky)
+                    }
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(estimate.options) { option in
+                            let selected = option.id == currentOptionId(for: estimate)
+                            Button {
+                                Task { await selectOption(option.id) }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(option.label)
+                                        .font(.subheadline.weight(.semibold))
+                                    Text(option.total, format: .currency(code: "USD"))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(selected ? StormTheme.sky.opacity(0.12) : Color.clear)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(selected ? StormTheme.sky : Color.secondary.opacity(0.3), lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func selectOption(_ optionId: String) async {
+        activeOptionId = optionId
+        struct Body: Encodable { let optionId: String; let select: Bool }
+        do {
+            estimate = try await env.apiClient.patch(
+                path: APIPath.estimateOptions(estimateId),
+                body: Body(optionId: optionId, select: true)
+            )
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func addOption(mode: String) async {
+        struct Body: Encodable {
+            let mode: String
+            let duplicateFromOptionId: String?
+        }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            let data: EstimateDetailDTO = try await env.apiClient.post(
+                path: APIPath.estimateOptions(estimateId),
+                body: Body(mode: mode, duplicateFromOptionId: mode == "duplicate" ? activeOptionId : nil)
+            )
+            estimate = data
+            activeOptionId = data.options.last?.id
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
     @ViewBuilder
     private func totalsSection(for estimate: EstimateDetailDTO) -> some View {
         StormCard {
@@ -378,6 +501,15 @@ struct EstimateDetailView: View {
                     StormSectionHeader(title: "Actions", systemImage: "bolt")
 
                     if estimate.status == "DRAFT" || estimate.status == "SENT" {
+                        Button {
+                            showPresent = true
+                        } label: {
+                            Label("Present", systemImage: "rectangle.on.rectangle")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(StormPrimaryButtonStyle())
+                        .disabled(isSaving)
+
                         Button {
                             Task { await sendEstimate() }
                         } label: {
@@ -452,6 +584,9 @@ struct EstimateDetailView: View {
         do {
             let loaded: EstimateDetailDTO = try await env.apiClient.get(path: APIPath.estimate(estimateId))
             estimate = loaded
+            if activeOptionId == nil || !(loaded.options.contains { $0.id == activeOptionId }) {
+                activeOptionId = loaded.selectedOptionId ?? loaded.options.first?.id
+            }
             customerHistory = try? await env.apiClient.get(
                 path: APIPath.customerHistory(loaded.customer.id)
             )
@@ -484,13 +619,13 @@ struct EstimateDetailView: View {
 
         let base64 = pngData.base64EncodedString()
         let dataUrl = "data:image/png;base64,\(base64)"
-        struct Body: Encodable { let signature: String }
+        struct Body: Encodable { let signature: String; let selectedOptionId: String? }
 
         do {
             // Accept any 2xx body shape, then reload the estimate detail.
             let _: EmptyResponse = try await env.apiClient.post(
                 path: APIPath.estimateSignature(estimateId),
-                body: Body(signature: dataUrl)
+                body: Body(signature: dataUrl, selectedOptionId: activeOptionId)
             )
             await load()
             actionMessage = "Estimate approved with signature"

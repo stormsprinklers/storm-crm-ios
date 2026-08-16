@@ -1011,7 +1011,15 @@ struct ClockEntryDTO: Codable, Identifiable {
 struct CheckoutResponse: Decodable {
     let url: String?
     let payLink: String?
+    let sessionId: String?
     let balanceDue: Double?
+}
+
+struct PaymentWatchResponse: Decodable {
+    let paid: Bool?
+    let status: String?
+    let error: String?
+    let invoiceStatus: String?
 }
 
 struct VisitInvoiceResponse: Decodable {

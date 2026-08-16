@@ -76,6 +76,10 @@ struct RootView: View {
                         }
                 } else {
                     LoginView()
+                        .onAppear {
+                            env.deviceLocation.stop()
+                            env.enRouteLocation.stop()
+                        }
                 }
             }
             .animation(.easeInOut, value: auth.isAuthenticated)

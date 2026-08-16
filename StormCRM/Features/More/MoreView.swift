@@ -34,6 +34,12 @@ struct MoreView: View {
 
                 Section("Tools") {
                     NavigationLink {
+                        StormAiChatView()
+                    } label: {
+                        Label("Storm AI", systemImage: "sparkles")
+                    }
+
+                    NavigationLink {
                         SyncStatusView()
                     } label: {
                         HStack {

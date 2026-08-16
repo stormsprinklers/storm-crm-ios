@@ -11,7 +11,7 @@ struct IrrigationProgramGuideView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             // Title comes from the parent section (e.g. "Controller program guide").
-            Text("Each runtime occurs on every watering day for each start time listed in that program.")
+            Text("Program each zone for the minutes shown at every start time. Total is all starts combined on a watering day.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -115,7 +115,7 @@ private struct ProgramSetupCard: View {
             let zones = program.zones ?? []
             VStack(spacing: 0) {
                 ForEach(Array(zones.enumerated()), id: \.element.id) { index, zone in
-                    ZoneSetupRow(zone: zone)
+                    ZoneSetupRow(zone: zone, startTimes: program.startTimes ?? [])
                     if index < zones.count - 1 {
                         Divider().padding(.leading, 12)
                     }
@@ -133,6 +133,7 @@ private struct ProgramSetupCard: View {
 
 private struct ZoneSetupRow: View {
     let zone: ProgramZoneRuntimeDTO
+    let startTimes: [String]
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -151,9 +152,14 @@ private struct ZoneSetupRow: View {
 
             Spacer(minLength: 8)
 
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(runtimeLabel)
-                    .font(.subheadline.monospacedDigit())
+            VStack(alignment: .trailing, spacing: 3) {
+                ForEach(startBreakdowns, id: \.time) { start in
+                    Text("\(start.time)  \(start.minutes) min")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(start.minutes > 0 ? .primary : .secondary)
+                }
+                Text("Total \(totalMinutes) min")
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
                 Text(gallonsLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -169,22 +175,36 @@ private struct ZoneSetupRow: View {
         return "\(station) \(zone.name)"
     }
 
-    private var runtimeLabel: String {
-        // Do not append ×2/×3 for multiple starts — Start Times already lists each one.
-        if let minutes = zone.runtimePerEventMinutes {
-            return "\(Int(minutes.rounded())) min"
+    private var cycleCount: Int {
+        if zone.cycleSoak?.enabled == true {
+            return max(zone.cycleSoak?.cycleCount ?? 1, 1)
         }
-        if let cs = zone.cycleSoak,
-           cs.enabled == true,
-           let perCycle = cs.minutesPerCycle {
-            let cycles = max(cs.cycleCount ?? 1, 1)
-            return "\(Int((perCycle * Double(cycles)).rounded())) min"
+        return 1
+    }
+
+    private var minutesPerStart: Int {
+        if zone.cycleSoak?.enabled == true, let perCycle = zone.cycleSoak?.minutesPerCycle {
+            return Int(perCycle.rounded())
         }
-        return "0 min"
+        return Int((zone.runtimePerEventMinutes ?? 0).rounded())
+    }
+
+    private var startBreakdowns: [(time: String, minutes: Int)] {
+        let times = startTimes.isEmpty ? ["Start"] : startTimes
+        return times.enumerated().map { index, time in
+            (time: time, minutes: index < cycleCount ? minutesPerStart : 0)
+        }
+    }
+
+    private var totalMinutes: Int {
+        if let total = zone.runtimePerEventMinutes {
+            return Int(total.rounded())
+        }
+        return startBreakdowns.reduce(0) { $0 + $1.minutes }
     }
 
     private var gallonsLabel: String {
         let gal = Int((zone.gallonsPerEvent ?? 0).rounded())
-        return "\(gal.formatted()) gal"
+        return "\(gal.formatted()) gal / watering day"
     }
 }

@@ -80,6 +80,10 @@ final class AppEnvironment: ObservableObject {
 
     let location = LocationManager()
 
+    let enRouteLocation = EnRouteLocationPublisher()
+
+    let deviceLocation = DeviceLocationPublisher()
+
     let voice: VoiceManager
 
     let priceBookPins = PriceBookPinStore()
@@ -93,6 +97,9 @@ final class AppEnvironment: ObservableObject {
     @Published var selectedTab: MainTab = .dashboard
 
     @Published var paymentReturn: PaymentReturn?
+
+    /// Visit currently showing Collect payment — swallows the global return sheet so success can animate in-place.
+    @Published var collectingPaymentVisitId: String?
 
     @Published var pendingInboxConversationId: String?
 
@@ -134,6 +141,9 @@ final class AppEnvironment: ObservableObject {
 
         self.offlineSync = OfflineSyncManager(modelContainer: modelContainer)
 
+        enRouteLocation.configure(api: apiClient, location: location)
+        deviceLocation.configure(api: apiClient, location: location)
+
     }
 
 
@@ -141,6 +151,7 @@ final class AppEnvironment: ObservableObject {
     func bootstrapAfterLogin() {
 
         offlineSync.configure(apiClient: apiClient)
+        deviceLocation.start()
 
     }
 

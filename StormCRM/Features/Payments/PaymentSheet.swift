@@ -273,17 +273,27 @@ struct PaymentSheet: View {
     @State private var isLoading = false
     @State private var showCashCheckConfirm = false
     @State private var cashCheckKind: String = "CASH"
+    @State private var showSuccess = false
+    @State private var lastCardError: String?
 
     var body: some View {
         NavigationStack {
-            Group {
-                if let selectedMethod {
-                    methodDetail(selectedMethod)
-                } else {
-                    methodPicker
+            ZStack {
+                Group {
+                    if let selectedMethod {
+                        methodDetail(selectedMethod)
+                    } else {
+                        methodPicker
+                    }
+                }
+                .padding()
+
+                if showSuccess {
+                    PaymentSuccessBurst {
+                        finishAfterSuccess()
+                    }
                 }
             }
-            .padding()
             .navigationTitle("Collect payment")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -297,8 +307,10 @@ struct PaymentSheet: View {
                             statusMessage = nil
                             checkoutURL = nil
                             payLink = nil
+                            lastCardError = nil
                         }
                     }
+                    .disabled(showSuccess)
                 }
             }
             .confirmationDialog(
@@ -322,7 +334,25 @@ struct PaymentSheet: View {
                         : "Saved encrypted on this device. It will sync and notify admins when you're back online."
                 )
             }
+            .onAppear { env.collectingPaymentVisitId = visitId }
+            .onDisappear {
+                if env.collectingPaymentVisitId == visitId {
+                    env.collectingPaymentVisitId = nil
+                }
+            }
+            .task(id: watchKey) {
+                await watchForCardPayment()
+            }
+            .onChange(of: env.paymentReturn?.id) { _, _ in
+                handlePaymentReturnIfNeeded()
+            }
         }
+    }
+
+    private var watchKey: String {
+        guard selectedMethod == .manualCard || selectedMethod == .qrCode else { return "idle" }
+        if checkoutURL != nil || payLink != nil { return "watch-\(visitId)" }
+        return "idle"
     }
 
     private var methodPicker: some View {
@@ -346,11 +376,11 @@ struct PaymentSheet: View {
                 Button {
                     selectMethod(method)
                 } label: {
-                    HStack(alignment: .top, spacing: 12) {
+                    HStack(alignment: .center, spacing: 12) {
                         Image(systemName: method.systemImage)
                             .font(.title3)
                             .foregroundStyle(needsNet ? Color.secondary : StormTheme.sky)
-                            .frame(width: 28)
+                            .frame(width: 28, alignment: .center)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(method.title)
                                 .font(.subheadline.weight(.semibold))
@@ -401,6 +431,12 @@ struct PaymentSheet: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
+                        if let lastCardError {
+                            Text(lastCardError)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.red)
+                                .multilineTextAlignment(.center)
+                        }
                         SafariView(url: checkoutURL)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -424,6 +460,12 @@ struct PaymentSheet: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                             .multilineTextAlignment(.center)
+                        if let lastCardError {
+                            Text(lastCardError)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.red)
+                                .multilineTextAlignment(.center)
+                        }
                         if let error {
                             Text(error)
                                 .font(.caption)
@@ -494,6 +536,7 @@ struct PaymentSheet: View {
     }
 
     private func selectMethod(_ method: PaymentCollectMethod) {
+        lastCardError = nil
         error = nil
         statusMessage = nil
         checkoutURL = nil
@@ -664,7 +707,7 @@ struct PaymentSheet: View {
             )
             cashCheckKind = method
             statusMessage = "\(method == "CASH" ? "Cash" : "Check") payment recorded. Admins have been notified."
-            onCompleted()
+            playSuccess()
         } catch {
             if isLikelyOffline(error) {
                 queueManualPayment(body: body, method: method, idempotencyKey: key)
@@ -690,7 +733,86 @@ struct PaymentSheet: View {
         cashCheckKind = method
         statusMessage =
             "\(method == "CASH" ? "Cash" : "Check") payment saved securely on this device. It will sync and notify admins when you're back online."
+        playSuccess()
+    }
+
+    private func playSuccess() {
+        guard !showSuccess else { return }
+        lastCardError = nil
+        error = nil
+        showSuccess = true
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        NotificationCenter.default.post(
+            name: .visitPaymentCompleted,
+            object: nil,
+            userInfo: ["visitId": visitId]
+        )
+    }
+
+    private func finishAfterSuccess() {
+        env.paymentReturn = nil
         onCompleted()
+        dismiss()
+    }
+
+    private func handlePaymentReturnIfNeeded() {
+        guard let payment = env.paymentReturn, payment.visitId == visitId else { return }
+        env.paymentReturn = nil
+        if payment.cancelled {
+            lastCardError = "Payment was cancelled. The customer can try again."
+            return
+        }
+        Task { await confirmReturnedSession(payment.sessionId) }
+    }
+
+    private func confirmReturnedSession(_ sessionId: String?) async {
+        guard let sessionId else {
+            await pollOnce()
+            return
+        }
+        struct Body: Encodable { let sessionId: String }
+        do {
+            let response: PaymentConfirmResponse = try await env.apiClient.post(
+                path: APIPath.paymentsConfirm,
+                body: Body(sessionId: sessionId)
+            )
+            if response.confirmed == true {
+                playSuccess()
+                return
+            }
+        } catch {
+            lastCardError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+        await pollOnce()
+    }
+
+    private func watchForCardPayment() async {
+        guard selectedMethod == .manualCard || selectedMethod == .qrCode else { return }
+        guard checkoutURL != nil || payLink != nil else { return }
+        while !Task.isCancelled, !showSuccess {
+            await pollOnce()
+            if showSuccess { break }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        }
+    }
+
+    private func pollOnce() async {
+        guard !showSuccess else { return }
+        do {
+            let watch: PaymentWatchResponse = try await env.apiClient.get(
+                path: APIPath.visitPaymentWatch(visitId)
+            )
+            if watch.paid == true {
+                playSuccess()
+                return
+            }
+            if let message = watch.error, !message.isEmpty, message != lastCardError {
+                lastCardError = message
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+        } catch {
+            // Keep polling; a single failed request should not stop watching.
+        }
     }
 
     private func isLikelyOffline(_ error: Error) -> Bool {
@@ -732,33 +854,87 @@ enum QRCodeImage {
     }
 }
 
+struct PaymentSuccessBurst: View {
+    var onFinished: () -> Void
+    @State private var fill: CGFloat = 0
+    @State private var checkScale: CGFloat = 0.2
+    @State private var checkOpacity: Double = 0
+
+    var body: some View {
+        ZStack {
+            StormTheme.success
+                .opacity(0.18 + (0.82 * fill))
+            Circle()
+                .fill(StormTheme.success)
+                .frame(width: 280, height: 280)
+                .scaleEffect(0.4 + fill * 3.2)
+                .opacity(0.35 + 0.65 * fill)
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 112, weight: .bold))
+                .foregroundStyle(.white)
+                .scaleEffect(checkScale)
+                .opacity(checkOpacity)
+                .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+        }
+        .ignoresSafeArea()
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.45)) {
+                fill = 1
+            }
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.68).delay(0.12)) {
+                checkScale = 1
+                checkOpacity = 1
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: 1_150_000_000)
+                onFinished()
+            }
+        }
+    }
+}
+
 struct PaymentReturnSheet: View {
     @EnvironmentObject private var env: AppEnvironment
     let payment: PaymentReturn
     @State private var message = "Processing payment…"
     @State private var succeeded = false
+    @State private var failedMessage: String?
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                if succeeded {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.largeTitle)
-                        .foregroundStyle(StormTheme.success)
+            ZStack {
+                VStack(spacing: 12) {
+                    if let failedMessage {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.largeTitle)
+                            .foregroundStyle(StormTheme.coral)
+                        Text(failedMessage)
+                            .multilineTextAlignment(.center)
+                            .foregroundStyle(.red)
+                    } else {
+                        ProgressView()
+                        Text(message)
+                            .multilineTextAlignment(.center)
+                    }
+                    if payment.cancelled {
+                        Text("Payment cancelled").foregroundStyle(.secondary)
+                    }
                 }
-                Text(message)
-                    .multilineTextAlignment(.center)
-                if payment.cancelled {
-                    Text("Payment cancelled").foregroundStyle(.secondary)
+                .padding()
+
+                if succeeded {
+                    PaymentSuccessBurst {
+                        env.paymentReturn = nil
+                    }
                 }
             }
-            .padding()
             .navigationTitle("Payment")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") {
                         env.paymentReturn = nil
                     }
+                    .disabled(succeeded)
                 }
             }
             .task { await confirmIfNeeded() }
@@ -768,6 +944,7 @@ struct PaymentReturnSheet: View {
     private func confirmIfNeeded() async {
         guard !payment.cancelled, let sessionId = payment.sessionId else {
             message = payment.cancelled ? "Payment cancelled" : "No payment session"
+            failedMessage = payment.cancelled ? "Payment was cancelled." : "No payment session"
             return
         }
 
@@ -781,6 +958,7 @@ struct PaymentReturnSheet: View {
                 if response.confirmed == true {
                     message = "Payment recorded"
                     succeeded = true
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
                     NotificationCenter.default.post(
                         name: .visitPaymentCompleted,
                         object: nil,
@@ -792,11 +970,11 @@ struct PaymentReturnSheet: View {
                     try await Task.sleep(nanoseconds: 1_500_000_000)
                     continue
                 }
-                message = "Payment is still processing. Pull to refresh the visit in a moment."
+                failedMessage = "Payment did not go through. Ask the customer to try another card."
                 return
             } catch {
                 if attempt == 7 {
-                    message = (error as? APIError)?.message ?? error.localizedDescription
+                    failedMessage = (error as? APIError)?.message ?? error.localizedDescription
                 } else {
                     try? await Task.sleep(nanoseconds: 1_500_000_000)
                 }

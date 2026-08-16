@@ -12,7 +12,14 @@ struct MainTabView: View {
             MainBottomTabBar(selection: $env.selectedTab)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
-        .sheet(item: $env.paymentReturn) { payment in
+        .sheet(item: Binding(
+            get: {
+                guard let payment = env.paymentReturn else { return nil }
+                if env.collectingPaymentVisitId == payment.visitId { return nil }
+                return payment
+            },
+            set: { env.paymentReturn = $0 }
+        )) { payment in
             PaymentReturnSheet(payment: payment)
         }
         .onChange(of: push.pendingConversationId) { _, _ in

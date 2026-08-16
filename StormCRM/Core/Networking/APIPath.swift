@@ -11,10 +11,11 @@ enum APIPath {
     static let mobileInboxSms = "/api/mobile/inbox/sms/conversations"
     static let mobileTimeSegments = "/api/mobile/time-segments"
     static let mobileMissedTransfers = "/api/mobile/voice/missed-transfers"
-    static let mobileDashboard = "/api/mobile/dashboard"
+    static let mobileDeviceLocation = "/api/mobile/device-location"
 
     static func visit(_ id: String) -> String { "/api/visits/\(id)" }
     static func visitTime(_ id: String) -> String { "/api/visits/\(id)/time" }
+    static func visitLocation(_ id: String) -> String { "/api/visits/\(id)/location" }
     static func visitNotes(_ id: String) -> String { "/api/visits/\(id)/notes" }
     static func visitAttachments(_ id: String) -> String { "/api/visits/\(id)/attachments" }
     static func visitChecklists(_ id: String) -> String { "/api/visits/\(id)/checklists" }
@@ -23,6 +24,7 @@ enum APIPath {
     static func visitLineItems(_ id: String) -> String { "/api/visits/\(id)/line-items" }
     static func visitPartsRun(_ id: String) -> String { "/api/visits/\(id)/parts-run" }
     static func visitMaintenancePlan(_ id: String) -> String { "/api/visits/\(id)/maintenance-plan" }
+    static func visitPaymentWatch(_ id: String) -> String { "/api/visits/\(id)/payment-watch" }
     static func visitInvoice(_ id: String) -> String { "/api/visits/\(id)/invoice" }
     static func invoice(_ id: String) -> String { "/api/invoices/\(id)" }
     static func invoiceSend(_ id: String) -> String { "/api/invoices/\(id)/send" }
@@ -50,6 +52,7 @@ enum APIPath {
     static func estimateLineItems(_ id: String) -> String { "/api/estimates/\(id)/line-items" }
     static func estimateDiscounts(_ id: String) -> String { "/api/estimates/\(id)/discounts" }
     static func estimateOptions(_ id: String) -> String { "/api/estimates/\(id)/options" }
+    static func estimatePresent(_ id: String) -> String { "/api/estimates/\(id)/present" }
     static func estimateCopy(_ id: String) -> String { "/api/estimates/\(id)/copy" }
     static func estimatePostApproval(_ id: String) -> String { "/api/estimates/\(id)/post-approval" }
     static let estimateSettings = "/api/settings/estimates"
@@ -108,6 +111,9 @@ enum APIPath {
     static let voiceCall = "/api/inbox/voice/call"
     static let voicePresence = "/api/voice/presence"
     static let companySettings = "/api/settings/company"
+    static let stormAiConversations = "/api/storm-ai/conversations"
+    static func stormAiConversation(_ id: String) -> String { "/api/storm-ai/conversations/\(id)" }
+    static func stormAiMessages(_ id: String) -> String { "/api/storm-ai/conversations/\(id)/messages" }
     static func reporting(_ type: String) -> String { "/api/reporting/\(type)" }
     static let paymentsCheckout = "/api/payments/checkout"
     static let paymentsConfirm = "/api/payments/confirm"

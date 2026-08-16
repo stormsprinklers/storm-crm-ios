@@ -155,6 +155,7 @@ struct VisitPropertyIrrigationPreview: View {
     @State private var mapProperty: IrrigationMapProperty?
     @State private var isLoading = true
     @State private var error: String?
+    @State private var showEditor = false
 
     private var zones: [IrrigationMapZoneDTO] {
         mapProperty?.irrigationMapZones ?? []
@@ -162,14 +163,27 @@ struct VisitPropertyIrrigationPreview: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            HStack(spacing: 8) {
                 Text("Irrigation map")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Spacer()
                 if mapProperty?.irrigationMapStatus == "PUBLISHED" {
                     StormBadge(text: "Published", style: .success)
+                } else if mapProperty != nil {
+                    StormBadge(text: "Draft", style: .neutral)
                 }
+                Spacer()
+                Button {
+                    showEditor = true
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(StormTheme.sky)
+                        .padding(8)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Edit irrigation map")
             }
 
             if isLoading {
@@ -180,6 +194,8 @@ struct VisitPropertyIrrigationPreview: View {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.red)
+                Button("Edit map") { showEditor = true }
+                    .font(.caption.weight(.semibold))
             } else {
                 IrrigationMapCanvas(
                     imageUrl: mapProperty?.displayImageUrl ?? property.aerialImageUrl,
@@ -192,17 +208,29 @@ struct VisitPropertyIrrigationPreview: View {
                 if !zones.isEmpty {
                     IrrigationZoneLegend(zones: zones)
                 } else {
-                    Text("No zone boundaries drawn yet.")
+                    Text("No zone boundaries drawn yet. Tap the pencil to add or update this map.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                Text("Pinch to zoom the map. Double-tap to reset.")
+                Text("Pinch to zoom the map. Double-tap to reset. Pencil opens the editor.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
         }
         .task(id: property.id) { await load() }
+        .fullScreenCover(isPresented: $showEditor, onDismiss: {
+            Task { await load() }
+        }) {
+            NavigationStack {
+                IrrigationMapEditorView(
+                    customerId: customerId,
+                    propertyId: property.id,
+                    propertyName: property.name ?? "Property"
+                )
+            }
+            .environmentObject(env)
+        }
     }
 
     private func load() async {

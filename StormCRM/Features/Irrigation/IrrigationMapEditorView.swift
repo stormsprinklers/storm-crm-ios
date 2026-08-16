@@ -56,7 +56,7 @@ struct IrrigationMapEditorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button("Done") { dismiss() }
+                Button("Close") { dismiss() }
             }
         }
         .alert("Rename zone", isPresented: Binding(
@@ -93,7 +93,7 @@ struct IrrigationMapEditorView: View {
     private var headerBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                StormSectionHeader(title: "Irrigation map editor", systemImage: "map")
+                StormSectionHeader(title: "Edit irrigation map", systemImage: "map")
                 Spacer()
                 if viewModel.mapStatus == "PUBLISHED" {
                     StormBadge(text: "Published", style: .success)
@@ -101,6 +101,10 @@ struct IrrigationMapEditorView: View {
                     StormBadge(text: "Draft", style: .neutral)
                 }
             }
+
+            Text("Published maps can still be changed. Move zones and markers, then tap Save & publish so the customer portal stays up to date.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             if let error = viewModel.error {
                 Text(error).font(.caption).foregroundStyle(.red)
