@@ -89,18 +89,18 @@ struct StormAiRealtimeToolBody: Encodable {
     let conversationId: String
     let callId: String
     let name: String
-    let arguments: [String: AnyCodableValue]?
+    let arguments: [String: StormAiJSONValue]?
 }
 
-/// Minimal AnyCodable for tool argument pass-through.
-enum AnyCodableValue: Encodable {
+/// JSON value tree for realtime tool arguments (avoid clashing with OfflineSyncManager.AnyCodableValue).
+enum StormAiJSONValue: Encodable {
     case string(String)
     case int(Int)
     case double(Double)
     case bool(Bool)
     case null
-    case array([AnyCodableValue])
-    case object([String: AnyCodableValue])
+    case array([StormAiJSONValue])
+    case object([String: StormAiJSONValue])
 
     init(from json: Any) {
         switch json {
@@ -117,9 +117,9 @@ enum AnyCodableValue: Encodable {
             } else {
                 self = .double(v.doubleValue)
             }
-        case let v as [Any]: self = .array(v.map(AnyCodableValue.init(from:)))
+        case let v as [Any]: self = .array(v.map(StormAiJSONValue.init(from:)))
         case let v as [String: Any]:
-            self = .object(v.mapValues { AnyCodableValue(from: $0) })
+            self = .object(v.mapValues { StormAiJSONValue(from: $0) })
         case is NSNull: self = .null
         default: self = .null
         }

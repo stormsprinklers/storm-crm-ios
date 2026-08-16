@@ -477,10 +477,10 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         status = .tool
         activeToolName = name
 
-        var argsObject: [String: AnyCodableValue]?
+        var argsObject: [String: StormAiJSONValue]?
         if let data = argText.data(using: .utf8),
            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            argsObject = obj.mapValues { AnyCodableValue(from: $0) }
+            argsObject = obj.mapValues { StormAiJSONValue(from: $0) }
         }
 
         var output = #"{"ok":false,"error":"Tool request failed"}"#
