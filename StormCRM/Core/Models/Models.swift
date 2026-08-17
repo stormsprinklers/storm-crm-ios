@@ -143,9 +143,13 @@ struct EstimateSummaryDTO: Decodable, Identifiable {
     let status: String
     let total: Double
     let createdAt: String
+    let optionCount: Int
+    let optionMinTotal: Double?
+    let optionMaxTotal: Double?
 
     enum CodingKeys: String, CodingKey {
         case id, estimateNumber, displayNumber, status, total, createdAt
+        case optionCount, optionMinTotal, optionMaxTotal
     }
 
     init(from decoder: Decoder) throws {
@@ -155,6 +159,9 @@ struct EstimateSummaryDTO: Decodable, Identifiable {
         displayNumber = try container.decodeIfPresent(String.self, forKey: .displayNumber)
         status = try container.decode(String.self, forKey: .status)
         total = try container.decodeFlexibleDouble(forKey: .total) ?? 0
+        optionCount = try container.decodeIfPresent(Int.self, forKey: .optionCount) ?? 0
+        optionMinTotal = try container.decodeFlexibleDouble(forKey: .optionMinTotal)
+        optionMaxTotal = try container.decodeFlexibleDouble(forKey: .optionMaxTotal)
         if let text = try container.decodeIfPresent(String.self, forKey: .createdAt) {
             createdAt = text
         } else if let date = try container.decodeIfPresent(Date.self, forKey: .createdAt) {
@@ -165,7 +172,33 @@ struct EstimateSummaryDTO: Decodable, Identifiable {
     }
 
     var titleLabel: String {
-        displayNumber ?? estimateNumber ?? "Estimate"
+        var parts: [String] = [numberLabel]
+        if optionCount > 0 {
+            parts.append("\(optionCount) Option\(optionCount == 1 ? "" : "s")")
+        }
+        parts.append(priceLabel)
+        return parts.joined(separator: " | ")
+    }
+
+    private var numberLabel: String {
+        let number = estimateNumber?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if number.isEmpty {
+            return "Estimate"
+        }
+        return "Estimate \(number)"
+    }
+
+    private var priceLabel: String {
+        let minTotal = optionMinTotal ?? total
+        let maxTotal = optionMaxTotal ?? total
+        if optionCount > 1, abs(maxTotal - minTotal) > 0.009 {
+            return "\(Self.currencyLabel(minTotal))-\(Self.currencyLabel(maxTotal))"
+        }
+        return Self.currencyLabel(maxTotal > 0 ? maxTotal : total)
+    }
+
+    private static func currencyLabel(_ value: Double) -> String {
+        value.formatted(.currency(code: "USD").precision(.fractionLength(0...2)))
     }
 }
 

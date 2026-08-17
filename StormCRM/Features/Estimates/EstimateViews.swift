@@ -58,10 +58,8 @@ struct VisitEstimatesSection: View {
                                     Text(estimate.titleLabel)
                                         .font(.subheadline.weight(.semibold))
                                         .foregroundStyle(StormTheme.navy)
+                                        .multilineTextAlignment(.leading)
                                     HStack(spacing: 6) {
-                                        Text(estimate.total, format: .currency(code: "USD"))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
                                         StormBadge(text: estimate.status)
                                         Text(APIDateFormatting.displayString(from: estimate.createdAt))
                                             .font(.caption2)
@@ -158,6 +156,7 @@ struct EstimateDetailView: View {
     @State private var pendingPostApproval = false
     @State private var activeOptionId: String?
     @State private var showPresent = false
+    @State private var showResendConfirm = false
     @State private var optionNameDraft = ""
     @State private var optionNotesDraft = ""
     @FocusState private var optionNameFocused: Bool
@@ -311,6 +310,12 @@ struct EstimateDetailView: View {
                 await load()
                 if estimate?.status != "SENT" { break }
             }
+        }
+        .alert("Are you sure you want to send this estimate again?", isPresented: $showResendConfirm) {
+            Button("Send again") {
+                Task { await sendEstimate() }
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -584,30 +589,22 @@ struct EstimateDetailView: View {
             }
         } else {
             StormCard {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     StormSectionHeader(title: "Actions", systemImage: "bolt")
 
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 96), spacing: 8)],
-                        alignment: .leading,
-                        spacing: 8
-                    ) {
-                        ForEach(actionItems(for: estimate)) { item in
-                            Button(action: item.action) {
-                                VStack(spacing: 4) {
-                                    Image(systemName: item.systemImage)
-                                        .font(.body.weight(.semibold))
-                                    Text(item.title)
-                                        .font(.caption.weight(.semibold))
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.75)
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(EstimateActionChipStyle(tint: item.tint))
-                            .disabled(isSaving)
-                            .accessibilityLabel(item.accessibilityLabel)
-                        }
+                    let items = actionItems(for: estimate)
+                    let primary = items.filter { ["present", "send", "approve"].contains($0.id) }
+                    let secondary = items.filter { !["present", "send", "approve"].contains($0.id) }
+
+                    if !primary.isEmpty {
+                        actionChipRow(
+                            primary,
+                            sentCaption: estimate.hasBeenSent ? sentCaption(for: estimate) : nil
+                        )
+                    }
+
+                    if !secondary.isEmpty {
+                        actionChipRow(secondary)
                     }
 
                     if !estimate.isApproved, estimate.lineItems.isEmpty {
@@ -631,6 +628,50 @@ struct EstimateDetailView: View {
         let tint: Color
         let accessibilityLabel: String
         let action: () -> Void
+    }
+
+    private func actionChipRow(_ items: [EstimateActionItem], sentCaption: String? = nil) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            ForEach(items) { item in
+                VStack(spacing: 6) {
+                    actionChip(item)
+                    if item.id == "send", let sentCaption {
+                        Text(sentCaption)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+            }
+        }
+    }
+
+    private func actionChip(_ item: EstimateActionItem) -> some View {
+        Button(action: item.action) {
+            VStack(spacing: 4) {
+                Image(systemName: item.systemImage)
+                    .font(.body.weight(.semibold))
+                Text(item.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(EstimateActionChipStyle(tint: item.tint))
+        .disabled(isSaving)
+        .accessibilityLabel(item.accessibilityLabel)
+    }
+
+    private func sentCaption(for estimate: EstimateDetailDTO) -> String {
+        guard let sentAt = estimate.sentAt, let date = APIDateFormatting.parse(sentAt) else {
+            return "Estimate sent"
+        }
+        let day = date.formatted(date: .abbreviated, time: .omitted)
+        let time = date.formatted(date: .omitted, time: .shortened)
+        return "Estimate sent on \(day) at \(time)"
     }
 
     private func actionItems(for estimate: EstimateDetailDTO) -> [EstimateActionItem] {
@@ -660,7 +701,11 @@ struct EstimateDetailView: View {
                     tint: StormTheme.coral,
                     accessibilityLabel: "Send to customer"
                 ) {
-                    Task { await sendEstimate() }
+                    if estimate.hasBeenSent {
+                        showResendConfirm = true
+                    } else {
+                        Task { await sendEstimate() }
+                    }
                 }
             )
         }
@@ -921,8 +966,8 @@ private struct EstimateActionChipStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .padding(.vertical, 8)
-            .padding(.horizontal, 6)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 8)
             .background(tint.opacity(backgroundOpacity(configuration)))
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: 10))

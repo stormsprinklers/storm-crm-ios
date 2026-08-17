@@ -21,6 +21,8 @@ struct LineItemsBuilderView: View {
     @State private var error: String?
     @State private var optionId: String?
     @State private var activeAddSheet: AddSheet?
+    @State private var quantityDrafts: [String: Double] = [:]
+    @State private var quantityFlushTasks: [String: Task<Void, Never>] = [:]
 
     private enum AddSheet: Identifiable {
         case service
@@ -72,20 +74,20 @@ struct LineItemsBuilderView: View {
                 HStack {
                     Text("Subtotal")
                     Spacer()
-                    Text(subtotal, format: .currency(code: "USD"))
+                    Text(liveSubtotal, format: .currency(code: "USD"))
                 }
-                if discountTotal > 0 {
+                if liveDiscountTotal > 0 {
                     HStack {
                         Text("Discounts")
                         Spacer()
-                        Text(-discountTotal, format: .currency(code: "USD"))
+                        Text(-liveDiscountTotal, format: .currency(code: "USD"))
                     }
                     .foregroundStyle(.secondary)
                 }
                 HStack {
                     Text("Total").fontWeight(.semibold)
                     Spacer()
-                    Text(total, format: .currency(code: "USD")).fontWeight(.semibold)
+                    Text(liveTotal, format: .currency(code: "USD")).fontWeight(.semibold)
                 }
             }
         }
@@ -163,20 +165,20 @@ struct LineItemsBuilderView: View {
     ) -> some View {
         Section {
             ForEach(sectionItems) { item in
-                NavigationLink {
-                    LineItemDetailEditView(owner: owner, item: item) {
-                        await reload()
+                HStack(alignment: .center, spacing: 10) {
+                    Button {
+                        Task { await deleteItem(item.id) }
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundStyle(.red)
                     }
-                } label: {
-                    HStack(alignment: .top, spacing: 10) {
-                        Button {
-                            Task { await deleteItem(item.id) }
-                        } label: {
-                            Image(systemName: "minus.circle.fill")
-                                .foregroundStyle(.red)
-                        }
-                        .buttonStyle(.plain)
+                    .buttonStyle(.plain)
 
+                    NavigationLink {
+                        LineItemDetailEditView(owner: owner, item: item) {
+                            await reload()
+                        }
+                    } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.name).font(.body.weight(.medium))
                             if let description = item.description?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -186,13 +188,25 @@ struct LineItemsBuilderView: View {
                                     .foregroundStyle(.secondary)
                                     .lineLimit(2)
                             }
-                            Text(item.qtyPriceLabel)
+                            Text(unitPriceLabel(for: item))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
-                        Spacer(minLength: 8)
-                        Text(item.displayTotal, format: .currency(code: "USD"))
                     }
+                    .buttonStyle(.plain)
+
+                    PriceBookQuantityStepper(
+                        quantity: displayedQuantity(for: item),
+                        minimum: 1
+                    ) {
+                        adjustQuantity(item, by: -1)
+                    } onIncrement: {
+                        adjustQuantity(item, by: 1)
+                    }
+
+                    Text(displayedLineTotal(for: item), format: .currency(code: "USD"))
+                        .font(.body.weight(.medium))
+                        .monospacedDigit()
                 }
             }
             .onMove { indices, newOffset in
@@ -269,12 +283,103 @@ struct LineItemsBuilderView: View {
         }
     }
 
+    private var liveSubtotal: Double {
+        items.reduce(0) { $0 + displayedLineTotal(for: $1) }
+    }
+
+    private var liveDiscountTotal: Double {
+        visitDiscountTotal(subtotal: liveSubtotal, discounts: discounts)
+    }
+
+    private var liveTotal: Double {
+        max(0, liveSubtotal - liveDiscountTotal)
+    }
+
+    private func displayedQuantity(for item: LineItemDTO) -> Double {
+        quantityDrafts[item.id] ?? item.quantity
+    }
+
+    private func displayedLineTotal(for item: LineItemDTO) -> Double {
+        displayedQuantity(for: item) * item.unitPrice
+    }
+
+    private func unitPriceLabel(for item: LineItemDTO) -> String {
+        "\(item.unitPrice.formatted(.currency(code: "USD"))) / \(item.unit)"
+    }
+
+    private func adjustQuantity(_ item: LineItemDTO, by delta: Double) {
+        let current = displayedQuantity(for: item)
+        let next = max(1, current + delta)
+        guard next != current else { return }
+        quantityDrafts[item.id] = next
+        error = nil
+        quantityFlushTasks[item.id]?.cancel()
+        quantityFlushTasks[item.id] = Task {
+            try? await Task.sleep(nanoseconds: 140_000_000)
+            guard !Task.isCancelled else { return }
+            let quantity = quantityDrafts[item.id] ?? next
+            await patchQuantity(itemId: item.id, quantity: quantity)
+        }
+    }
+
+    private func patchQuantity(itemId: String, quantity: Double, reloadAfter: Bool = true) async {
+        struct Body: Encodable {
+            let lineItemId: String
+            let quantity: Double
+        }
+        do {
+            let _: EmptyResponse = try await env.apiClient.patch(
+                path: owner.lineItemsPath,
+                body: Body(lineItemId: itemId, quantity: quantity)
+            )
+            if quantityDrafts[itemId] == quantity {
+                quantityDrafts.removeValue(forKey: itemId)
+            }
+            if reloadAfter {
+                await reload()
+                if let draft = quantityDrafts[itemId],
+                   let server = items.first(where: { $0.id == itemId }),
+                   draft == server.quantity {
+                    quantityDrafts.removeValue(forKey: itemId)
+                }
+            }
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            quantityDrafts.removeValue(forKey: itemId)
+        }
+    }
+
+    private func flushPendingQuantities() async {
+        quantityFlushTasks.values.forEach { $0.cancel() }
+        quantityFlushTasks.removeAll()
+        let pending = items.compactMap { item -> (String, Double)? in
+            let qty = displayedQuantity(for: item)
+            guard qty != item.quantity else { return nil }
+            return (item.id, qty)
+        }
+        for (id, qty) in pending {
+            await patchQuantity(itemId: id, quantity: qty, reloadAfter: false)
+        }
+        if !pending.isEmpty {
+            await reload()
+        }
+        quantityDrafts.removeAll()
+    }
+
+    private func cancelPendingQuantityFlushes() {
+        quantityFlushTasks.values.forEach { $0.cancel() }
+        quantityFlushTasks.removeAll()
+        quantityDrafts.removeAll()
+    }
+
     private func confirmEdits() async {
+        await flushPendingQuantities()
         await onUpdated()
         dismiss()
     }
 
     private func cancelEdits() async {
+        cancelPendingQuantityFlushes()
         isReverting = true
         error = nil
         defer { isReverting = false }
@@ -560,6 +665,9 @@ struct LineItemsBuilderView: View {
     }
 
     private func deleteItem(_ id: String) async {
+        quantityFlushTasks[id]?.cancel()
+        quantityFlushTasks[id] = nil
+        quantityDrafts.removeValue(forKey: id)
         do {
             try await deleteLineItemRequest(id)
             await reload()

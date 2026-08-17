@@ -236,6 +236,7 @@ final class PriceBookLineItemQuantities: ObservableObject {
 
 struct PriceBookQuantityStepper: View {
     let quantity: Double
+    var minimum: Double = 0
     var onDecrement: () -> Void
     var onIncrement: () -> Void
 
@@ -247,8 +248,8 @@ struct PriceBookQuantityStepper: View {
                     .foregroundStyle(StormTheme.sky)
             }
             .buttonStyle(.borderless)
-            .disabled(quantity <= 0)
-            .opacity(quantity <= 0 ? 0.35 : 1)
+            .disabled(quantity <= minimum)
+            .opacity(quantity <= minimum ? 0.35 : 1)
             .accessibilityLabel("Decrease quantity")
 
             Text(quantityLabel)

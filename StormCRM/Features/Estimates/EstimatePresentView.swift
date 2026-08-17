@@ -15,6 +15,9 @@ struct EstimatePresentView: View {
     @State private var isDeclining = false
     @State private var renameOptionId: String?
     @State private var renameDraft = ""
+    @State private var showResendConfirm = false
+
+    private let canvasGray = Color(uiColor: .systemGray6)
 
     private var ranked: [EstimateOptionDTO] {
         (estimate?.options ?? [])
@@ -22,39 +25,61 @@ struct EstimatePresentView: View {
             .sorted { $0.total > $1.total }
     }
 
+    /// Match the portal: clamp every card to the shortest description so heights line up.
+    private var descriptionLineLimit: Int {
+        let lines = ranked.map { approxDescriptionLines($0.description ?? "") }
+        return max(1, lines.min() ?? 2)
+    }
+
     var body: some View {
         NavigationStack {
-            Group {
-                if isLoading && estimate == nil {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text("Preparing photos and descriptions…")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                } else if let error, estimate == nil {
-                    ContentUnavailableView("Could not present", systemImage: "exclamationmark.triangle", description: Text(error))
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(alignment: .top, spacing: 16) {
-                            ForEach(ranked) { option in
-                                presentCard(option)
-                            }
+            ZStack {
+                canvasGray.ignoresSafeArea()
+                Group {
+                    if isLoading && estimate == nil {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                            Text("Preparing photos and descriptions…")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
                         }
-                        .padding()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if let error, estimate == nil {
+                        ContentUnavailableView(
+                            "Could not present",
+                            systemImage: "exclamationmark.triangle",
+                            description: Text(error)
+                        )
+                    } else {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(alignment: .top, spacing: 16) {
+                                ForEach(ranked) { option in
+                                    presentCard(option)
+                                }
+                            }
+                            .padding()
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
             }
-            .background(Color(uiColor: .systemGray6).ignoresSafeArea())
             .navigationTitle("Present estimate")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(canvasGray, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarBackground(canvasGray, for: .bottomBar)
+            .toolbarBackground(.visible, for: .bottomBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Save") { dismiss() }
+                    Button("Save and exit") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save and send") {
-                        Task { await sendAndClose() }
+                        if estimate?.hasBeenSent == true {
+                            showResendConfirm = true
+                        } else {
+                            Task { await sendAndClose() }
+                        }
                     }
                 }
                 if let url = estimate?.financingUrl, !url.isEmpty {
@@ -87,14 +112,24 @@ struct EstimatePresentView: View {
                     renameOptionId = nil
                 }
             }
+            .alert("Are you sure you want to send this estimate again?", isPresented: $showResendConfirm) {
+                Button("Send again") {
+                    Task { await sendAndClose() }
+                }
+                Button("Cancel", role: .cancel) {}
+            }
         }
     }
 
     private func presentCard(_ option: EstimateOptionDTO) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let description = option.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let showMore = !description.isEmpty && approxDescriptionLines(description) > descriptionLineLimit
+
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 8) {
                 Text(option.label)
                     .font(.title3.weight(.bold))
+                    .lineLimit(2)
                 Spacer(minLength: 0)
                 Button {
                     renameDraft = option.label
@@ -119,10 +154,26 @@ struct EstimatePresentView: View {
             }
             .frame(height: 160)
             .clipped()
-            Text(option.description ?? " ")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .padding()
+            VStack(alignment: .leading, spacing: 4) {
+                Text(description.isEmpty ? " " : description)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(descriptionLineLimit)
+                if showMore {
+                    Button {
+                        openOptionId = option.id
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text("… More")
+                            Image(systemName: "chevron.down")
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(StormTheme.sky)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding()
             HStack {
                 Text(option.total, format: .currency(code: "USD"))
                     .font(.headline)
@@ -136,6 +187,14 @@ struct EstimatePresentView: View {
         .background(.white)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
+    }
+
+    private func approxDescriptionLines(_ text: String) -> Int {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return 1 }
+        return trimmed.split(separator: "\n", omittingEmptySubsequences: false).reduce(0) { count, paragraph in
+            count + max(1, Int(ceil(Double(paragraph.count) / 48.0)))
+        }
     }
 
     private func optionDetail(_ option: EstimateOptionDTO, estimate: EstimateDetailDTO) -> some View {
