@@ -43,11 +43,12 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     private var handledCallIds = Set<String>()
     private var closed = true
     private var receiveTask: Task<Void, Never>?
-    private var periodicFrameTask: Task<Void, Never>?
     private var searchFallbackTask: Task<Void, Never>?
     private var followUpTask: Task<Void, Never>?
+    private var videoTurnTask: Task<Void, Never>?
     private var lastFrameAt: Date = .distantPast
     private var frameInFlight = false
+    private var videoTurnPending = false
     private var awaitingFunctionOutput = false
     private var needsSpokenFollowUp = false
     private var inFlightTools = 0
@@ -58,13 +59,17 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     private var lastUserTranscript = ""
     private var searchFallbackUsed = false
     private let targetSampleRate: Double = 24_000
-    private let frameMinInterval: TimeInterval = 2.2
-    private let framePeriodicInterval: TimeInterval = 3.5
+    private let frameMinInterval: TimeInterval = 1.5
     private let toolTimeout: TimeInterval = 25
     private let searchFallbackDelayNs: UInt64 = 2_500_000_000
+    private let videoTurnFlushNs: UInt64 = 1_800_000_000
 
     private let visualQuestionRegex = try? NSRegularExpression(
-        pattern: #"\b(what|which|look|see|show|showing|this|that|valve|solenoid|controller|part|identify|manual)\b"#,
+        pattern: #"\b(what|which|where|how|look|see|show|showing|this|that|here|valve|solenoid|controller|part|identify|tell me|can you|could you|manual)\b"#,
+        options: [.caseInsensitive]
+    )
+    private let skipVideoFrameRegex = try? NSRegularExpression(
+        pattern: #"^(ok|okay|yes|yeah|yep|no|nope|thanks|thank you|got it|alright|all right|continue|next|done|copy|uh-huh|mm-hmm)[\s.!?]*$"#,
         options: [.caseInsensitive]
     )
     private let searchingSpeechRegex = try? NSRegularExpression(
@@ -149,10 +154,6 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             activity("Connected — listening", level: .ok)
             try? await Task.sleep(nanoseconds: 250_000_000)
             sendGreeting(video: videoMode)
-            if videoMode {
-                startPeriodicFrames()
-                Task { await captureAndSendFrame(reason: "session_start", force: true) }
-            }
         } catch {
             lastError = (error as? APIError)?.message ?? error.localizedDescription
             status = .error
@@ -193,18 +194,18 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 "content": [
                     [
                         "type": "input_text",
-                        "text": "[Video mode enabled. Camera frames will arrive automatically while I speak. Use them for part ID and visual questions.]",
+                        "text": "[Video mode enabled. Send a camera frame only when I ask about what I am showing.]",
                     ],
                 ],
             ],
         ])
-        startPeriodicFrames()
-        await captureAndSendFrame(reason: "video_enabled", force: true)
+        setAutoCreateResponse(false)
     }
 
     func disableVideo() {
         guard videoMode else { return }
-        stopPeriodicFrames()
+        clearVideoTurn()
+        setAutoCreateResponse(true)
         camera?.stop()
         camera = nil
         videoMode = false
@@ -238,7 +239,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         followUpWaitStartedAt = nil
         inFlightTools = 0
         modelResponseActive = false
-        stopPeriodicFrames()
+        clearVideoTurn()
         receiveTask?.cancel()
         receiveTask = nil
         webSocket?.cancel(with: .goingAway, reason: nil)
@@ -265,20 +266,51 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         }
     }
 
-    private func startPeriodicFrames() {
-        stopPeriodicFrames()
-        periodicFrameTask = Task { [weak self] in
-            while let self, !Task.isCancelled, !self.closed, self.videoMode {
-                try? await Task.sleep(nanoseconds: UInt64(self.framePeriodicInterval * 1_000_000_000))
-                guard !Task.isCancelled, !self.closed, self.videoMode else { break }
-                await self.captureAndSendFrame(reason: "periodic")
-            }
+    private func setAutoCreateResponse(_ enabled: Bool) {
+        sendJSON([
+            "type": "session.update",
+            "session": [
+                "audio": [
+                    "input": [
+                        "turn_detection": [
+                            "type": "server_vad",
+                            "threshold": 0.78,
+                            "prefix_padding_ms": 400,
+                            "silence_duration_ms": 900,
+                            "interrupt_response": true,
+                            "create_response": enabled,
+                        ],
+                    ],
+                ],
+            ],
+        ])
+    }
+
+    private func clearVideoTurn() {
+        videoTurnPending = false
+        videoTurnTask?.cancel()
+        videoTurnTask = nil
+    }
+
+    private func beginVideoTurn() {
+        guard videoMode, !closed else { return }
+        videoTurnPending = true
+        videoTurnTask?.cancel()
+        videoTurnTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: self?.videoTurnFlushNs ?? 1_800_000_000)
+            guard let self, !Task.isCancelled else { return }
+            await self.finishVideoTurn(withFrame: false)
         }
     }
 
-    private func stopPeriodicFrames() {
-        periodicFrameTask?.cancel()
-        periodicFrameTask = nil
+    private func finishVideoTurn(withFrame: Bool) async {
+        guard videoTurnPending, !closed else { return }
+        clearVideoTurn()
+        if withFrame {
+            activity("Capturing camera frame for your question")
+            await captureAndSendFrame(reason: "user_question", force: true)
+        }
+        sendJSON(["type": "response.create"])
     }
 
     private func clearSearchFallback() {
@@ -390,7 +422,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             "response": [
                 "output_modalities": ["audio"],
                 "instructions": video
-                    ? "Greet the technician briefly. Mention you can see still frames from their camera automatically when they ask about what they are showing. Then stop and listen."
+                    ? "Greet the technician briefly. Mention you can see a camera still when they ask about what they are showing. Then stop and listen."
                     : "Greet the technician briefly and offer to help with diagnostics, parts, or their performance. Then stop and listen.",
             ],
         ])
@@ -422,7 +454,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                     ],
                     [
                         "type": "input_text",
-                        "text": "[Live camera frame (\(reason)). Use this image for what the technician is asking about.]",
+                        "text": "[Camera frame for this question (\(reason)). Look at this image to answer.]",
                     ],
                 ],
             ],
@@ -439,23 +471,29 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             let visitId: String?
         }
 
-        do {
-            let result: FrameResponse = try await api.post(
-                path: APIPath.stormAiRealtimeFrame,
-                body: FrameBody(
-                    conversationId: conversationId,
-                    visitId: visitId,
-                    dataUrl: dataUrl,
-                    fileName: "storm-ai-frame-\(Int(Date().timeIntervalSince1970)).jpg"
-                ),
-                timeoutInterval: 30
-            )
-            onFrameSavedToJob?(result.savedToJob == true)
-            if let resolved = result.visitId {
-                self.visitId = resolved
+        let capturedConversationId = conversationId
+        let capturedVisitId = visitId
+        Task {
+            do {
+                let result: FrameResponse = try await api.post(
+                    path: APIPath.stormAiRealtimeFrame,
+                    body: FrameBody(
+                        conversationId: capturedConversationId,
+                        visitId: capturedVisitId,
+                        dataUrl: dataUrl,
+                        fileName: "storm-ai-frame-\(Int(Date().timeIntervalSince1970)).jpg"
+                    ),
+                    timeoutInterval: 30
+                )
+                await MainActor.run {
+                    onFrameSavedToJob?(result.savedToJob == true)
+                    if let resolved = result.visitId {
+                        self.visitId = resolved
+                    }
+                }
+            } catch {
+                // Frame still went to the model; job save can fail quietly.
             }
-        } catch {
-            // Frame still went to the model; job save can fail quietly.
         }
     }
 
@@ -549,9 +587,9 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         case "input_audio_buffer.speech_started":
             status = .listening
             activity("Heard speech — listening")
-            if videoMode {
-                Task { await captureAndSendFrame(reason: "speech_started", force: true) }
-            }
+
+        case "input_audio_buffer.speech_stopped":
+            if videoMode { beginVideoTurn() }
 
         case "response.created", "output_audio_buffer.started":
             if type == "response.created" {
@@ -580,8 +618,8 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 onTranscript?("user", transcript)
                 let clipped = transcript.count > 80 ? String(transcript.prefix(80)) + "…" : transcript
                 activity("You: \(clipped)")
-                if videoMode, looksLikeVisualQuestion(transcript) {
-                    Task { await captureAndSendFrame(reason: "visual_question", force: true) }
+                if videoMode, videoTurnPending {
+                    Task { await finishVideoTurn(withFrame: shouldSendCameraFrame(transcript)) }
                 }
             }
 
@@ -663,10 +701,19 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         }
     }
 
-    private func looksLikeVisualQuestion(_ text: String) -> Bool {
-        guard let regex = visualQuestionRegex else { return false }
-        let range = NSRange(text.startIndex..<text.endIndex, in: text)
-        return regex.firstMatch(in: text, options: [], range: range) != nil
+    private func shouldSendCameraFrame(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count < 3 { return false }
+        if let skip = skipVideoFrameRegex {
+            let range = NSRange(trimmed.startIndex..<trimmed.endIndex, in: trimmed)
+            if skip.firstMatch(in: trimmed, options: [], range: range) != nil { return false }
+        }
+        if trimmed.contains("?") { return true }
+        if let regex = visualQuestionRegex {
+            let range = NSRange(trimmed.startIndex..<trimmed.endIndex, in: trimmed)
+            if regex.firstMatch(in: trimmed, options: [], range: range) != nil { return true }
+        }
+        return trimmed.split(whereSeparator: { $0.isWhitespace }).count >= 3
     }
 
     private func looksLikeSearchingSpeech(_ text: String) -> Bool {

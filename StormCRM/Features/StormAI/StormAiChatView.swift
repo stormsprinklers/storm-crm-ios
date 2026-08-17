@@ -60,8 +60,8 @@ struct StormAiChatView: View {
                         } else if messages.isEmpty && !isSending && !voiceActive {
                             Text(
                                 effectiveVisitId == nil
-                                    ? "Ask about customers, attach a part photo, or use mic/video. Start or open an active job so video frames save to that visit."
-                                    : "Mic for voice, video to add the camera. Frames are captured automatically and save to this job."
+                                    ? "Ask about customers, attach a part photo, or use mic/video. Start or open an active job so a question in video mode can save a frame to that visit."
+                                    : "Mic for voice, video to add the camera. A still is sent when you ask about what you see, and saved to this job."
                             )
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
@@ -79,7 +79,7 @@ struct StormAiChatView: View {
                                 .id(ObjectIdentifier(session))
                                 .frame(height: 220)
                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            Text("Live preview — frames are captured automatically for the AI")
+                            Text("Live preview — a still is sent when you ask about what you see")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity)
