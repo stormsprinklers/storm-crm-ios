@@ -43,7 +43,7 @@ struct StormAiChatView: View {
     }
 
     private var canSend: Bool {
-        !isSending && !voiceActive &&
+        !isSending &&
             (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pendingPhotos.isEmpty)
     }
 
@@ -60,7 +60,7 @@ struct StormAiChatView: View {
                             Text(
                                 effectiveVisitId == nil
                                     ? "Ask about customers, attach a part photo, or use mic/video. Start or open an active job so video frames save to that visit."
-                                    : "Mic for voice, video for live camera help. Frames are stills only (full preview FPS) and save to this job."
+                                    : "Mic for voice, video to add the camera. Frames are captured automatically and save to this job."
                             )
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
@@ -77,13 +77,10 @@ struct StormAiChatView: View {
                             StormAiCameraPreview(session: session)
                                 .frame(height: 220)
                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            Button {
-                                Task { await voiceSession?.captureFrameNow() }
-                            } label: {
-                                Label("Snap frame for AI", systemImage: "camera.fill")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
+                            Text("Live preview — frames are captured automatically for the AI")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity)
                         }
 
                         ForEach(messages) { message in
@@ -179,7 +176,7 @@ struct StormAiChatView: View {
                         .font(.title3)
                         .foregroundStyle(StormTheme.sky)
                 }
-                .disabled(isSending || voiceActive || pendingPhotos.count >= maxPhotos)
+                .disabled(isSending || pendingPhotos.count >= maxPhotos)
 
                 Button {
                     showCamera = true
@@ -188,30 +185,30 @@ struct StormAiChatView: View {
                         .font(.title3)
                         .foregroundStyle(StormTheme.sky)
                 }
-                .disabled(isSending || voiceActive || pendingPhotos.count >= maxPhotos)
+                .disabled(isSending || pendingPhotos.count >= maxPhotos)
 
                 Button {
-                    Task { await toggleVoice(video: false) }
+                    Task { await toggleMic() }
                 } label: {
-                    Image(systemName: voiceActive && !videoModeActive ? "mic.circle.fill" : "mic.circle")
+                    Image(systemName: voiceActive ? "mic.circle.fill" : "mic.circle")
                         .font(.title2)
-                        .foregroundStyle(voiceActive && !videoModeActive ? StormTheme.coral : StormTheme.sky)
+                        .foregroundStyle(voiceActive ? StormTheme.coral : StormTheme.sky)
                 }
-                .disabled(isSending || (voiceActive && videoModeActive))
+                .disabled(isSending)
 
                 Button {
-                    Task { await toggleVoice(video: true) }
+                    Task { await toggleCamera() }
                 } label: {
                     Image(systemName: voiceActive && videoModeActive ? "video.circle.fill" : "video.circle")
                         .font(.title2)
                         .foregroundStyle(voiceActive && videoModeActive ? StormTheme.coral : StormTheme.sky)
                 }
-                .disabled(isSending || (voiceActive && !videoModeActive))
+                .disabled(isSending)
 
                 TextField("Ask Storm AI…", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.roundedBorder)
-                    .disabled(isSending || voiceActive)
+                    .disabled(isSending)
 
                 Button {
                     Task { await send() }
@@ -237,7 +234,7 @@ struct StormAiChatView: View {
                 Button("New chat") {
                     Task { await startNewChat() }
                 }
-                .disabled(isSending || voiceActive)
+                .disabled(isSending)
             }
         }
         .task {
@@ -303,6 +300,9 @@ struct StormAiChatView: View {
             voiceStatus = status
             voiceToolName = session.activeToolName
         }
+        session.onVideoModeChange = { enabled in
+            videoModeActive = enabled
+        }
         session.onFrameSavedToJob = { saved in
             if saved {
                 frameSavedToast = "Frame saved to job attachments"
@@ -318,7 +318,7 @@ struct StormAiChatView: View {
         return session
     }
 
-    private func toggleVoice(video: Bool) async {
+    private func toggleMic() async {
         let session = ensureVoiceSession()
         if voiceActive {
             session.stop()
@@ -332,14 +332,58 @@ struct StormAiChatView: View {
         if effectiveVisitId == nil {
             await loadActiveVisitIfNeeded()
         }
-        videoModeActive = video
+        videoModeActive = false
         await session.start(
             conversationId: conversationId,
             visitId: effectiveVisitId,
-            videoMode: video
+            videoMode: false
         )
         voiceStatus = session.status
         voiceToolName = session.activeToolName
+        videoModeActive = session.isVideoMode
+        if let id = session.activeConversationId {
+            conversationId = id
+        }
+        if let voiceError = session.lastError {
+            error = voiceError
+            videoModeActive = false
+        }
+    }
+
+    private func toggleCamera() async {
+        let session = ensureVoiceSession()
+        error = nil
+        warning = nil
+        if effectiveVisitId == nil {
+            await loadActiveVisitIfNeeded()
+        }
+
+        // Already in a live session: toggle camera without dropping conversation.
+        if session.isActive {
+            if session.isVideoMode {
+                session.disableVideo()
+                videoModeActive = false
+            } else {
+                await session.enableVideo()
+                videoModeActive = session.isVideoMode
+                if let voiceError = session.lastError {
+                    error = voiceError
+                }
+            }
+            voiceStatus = session.status
+            return
+        }
+
+        // Start a new realtime session with video (same chat conversation id).
+        videoModeActive = true
+        await session.start(
+            conversationId: conversationId,
+            visitId: effectiveVisitId,
+            videoMode: true
+        )
+        voiceStatus = session.status
+        voiceToolName = session.activeToolName
+        videoModeActive = session.isVideoMode
         if let id = session.activeConversationId {
             conversationId = id
         }
@@ -503,6 +547,13 @@ struct StormAiChatView: View {
         let content = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let photos = pendingPhotos
         guard (!content.isEmpty || !photos.isEmpty), !isSending else { return }
+        // Keep one conversation: end live voice/video first, then continue in text.
+        if voiceActive {
+            voiceSession?.stop()
+            voiceStatus = .idle
+            voiceToolName = nil
+            videoModeActive = false
+        }
         error = nil
         warning = nil
         draft = ""

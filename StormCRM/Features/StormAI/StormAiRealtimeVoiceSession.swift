@@ -23,6 +23,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     var onTranscript: ((String, String) -> Void)?
     var onStatusChange: ((Status) -> Void)?
     var onFrameSavedToJob: ((Bool) -> Void)?
+    var onVideoModeChange: ((Bool) -> Void)?
 
     private let api: APIClient
     private var conversationId: String?
@@ -35,15 +36,20 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     private var playerNode: AVAudioPlayerNode?
     private var micConverter: AVAudioConverter?
     private var pendingArgs: [String: String] = [:]
+    private var pendingNames: [String: String] = [:]
+    private var handledCallIds = Set<String>()
     private var closed = true
     private var receiveTask: Task<Void, Never>?
+    private var periodicFrameTask: Task<Void, Never>?
     private var lastFrameAt: Date = .distantPast
     private var frameInFlight = false
     private let targetSampleRate: Double = 24_000
-    private let frameMinInterval: TimeInterval = 2.5
+    private let frameMinInterval: TimeInterval = 2.2
+    private let framePeriodicInterval: TimeInterval = 3.2
+    private let toolTimeout: TimeInterval = 25
 
     private let visualQuestionRegex = try? NSRegularExpression(
-        pattern: #"\b(what|which|look|see|show|showing|this|that|valve|solenoid|controller|part|identify)\b"#,
+        pattern: #"\b(what|which|look|see|show|showing|this|that|valve|solenoid|controller|part|identify|manual)\b"#,
         options: [.caseInsensitive]
     )
 
@@ -65,11 +71,13 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     func start(conversationId: String?, visitId: String? = nil, videoMode: Bool = false) async {
         stopInternal(resetStatus: false)
         closed = false
+        handledCallIds.removeAll()
         self.videoMode = videoMode
         self.visitId = visitId
         status = .connecting
         lastError = nil
         activeToolName = nil
+        onVideoModeChange?(videoMode)
 
         if let permissionError = await StormAiMediaPermissions.requestForRealtime(video: videoMode) {
             lastError = permissionError
@@ -108,9 +116,12 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             try await connectWebSocket(clientSecret: session.clientSecret, model: model)
             try configureAudio()
             status = .listening
-            // Brief delay so the data channel / socket is ready before greeting.
             try? await Task.sleep(nanoseconds: 250_000_000)
             sendGreeting(video: videoMode)
+            if videoMode {
+                startPeriodicFrames()
+                Task { await captureAndSendFrame(reason: "session_start", force: true) }
+            }
         } catch {
             lastError = (error as? APIError)?.message ?? error.localizedDescription
             status = .error
@@ -118,8 +129,66 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         }
     }
 
-    func captureFrameNow() async {
-        await captureAndSendFrame(reason: "manual", force: true)
+    /// Turn camera on without ending the voice session (same conversation).
+    func enableVideo() async {
+        guard isActive, !closed else {
+            lastError = "Start voice first"
+            return
+        }
+        if videoMode { return }
+
+        if let permissionError = await StormAiMediaPermissions.requestForRealtime(video: true) {
+            lastError = permissionError
+            return
+        }
+
+        let cam = StormAiCameraController()
+        let started = await cam.start()
+        if !started {
+            lastError = cam.lastError ?? "Could not start camera"
+            return
+        }
+        camera = cam
+        videoMode = true
+        onVideoModeChange?(true)
+        sendJSON([
+            "type": "conversation.item.create",
+            "item": [
+                "type": "message",
+                "role": "user",
+                "content": [
+                    [
+                        "type": "input_text",
+                        "text": "[Video mode enabled. Camera frames will arrive automatically while I speak. Use them for part ID and visual questions.]",
+                    ],
+                ],
+            ],
+        ])
+        startPeriodicFrames()
+        await captureAndSendFrame(reason: "video_enabled", force: true)
+    }
+
+    /// Turn camera off but keep the live voice session.
+    func disableVideo() {
+        guard videoMode else { return }
+        stopPeriodicFrames()
+        camera?.stop()
+        camera = nil
+        videoMode = false
+        onVideoModeChange?(false)
+        sendJSON([
+            "type": "conversation.item.create",
+            "item": [
+                "type": "message",
+                "role": "user",
+                "content": [
+                    [
+                        "type": "input_text",
+                        "text": "[Video mode off. Continue this same voice conversation without new camera frames.]",
+                    ],
+                ],
+            ],
+        ])
     }
 
     func stop() {
@@ -128,6 +197,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
 
     private func stopInternal(resetStatus: Bool) {
         closed = true
+        stopPeriodicFrames()
         receiveTask?.cancel()
         receiveTask = nil
         webSocket?.cancel(with: .goingAway, reason: nil)
@@ -144,6 +214,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         camera?.stop()
         camera = nil
         videoMode = false
+        onVideoModeChange?(false)
 
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
 
@@ -151,6 +222,22 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         if resetStatus {
             status = .idle
         }
+    }
+
+    private func startPeriodicFrames() {
+        stopPeriodicFrames()
+        periodicFrameTask = Task { [weak self] in
+            while let self, !Task.isCancelled, !self.closed, self.videoMode {
+                try? await Task.sleep(nanoseconds: UInt64(self.framePeriodicInterval * 1_000_000_000))
+                guard !Task.isCancelled, !self.closed, self.videoMode else { break }
+                await self.captureAndSendFrame(reason: "periodic")
+            }
+        }
+    }
+
+    private func stopPeriodicFrames() {
+        periodicFrameTask?.cancel()
+        periodicFrameTask = nil
     }
 
     private func connectWebSocket(clientSecret: String, model: String) async throws {
@@ -213,13 +300,15 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         }
     }
 
-    private func sendJSON(_ payload: [String: Any]) {
+    @discardableResult
+    private func sendJSON(_ payload: [String: Any]) -> Bool {
         guard !closed,
               let ws = webSocket,
               let data = try? JSONSerialization.data(withJSONObject: payload),
               let text = String(data: data, encoding: .utf8)
-        else { return }
+        else { return false }
         ws.send(.string(text)) { _ in }
+        return true
     }
 
     private func sendGreeting(video: Bool) {
@@ -228,7 +317,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             "response": [
                 "output_modalities": ["audio"],
                 "instructions": video
-                    ? "Greet the technician briefly. Mention you can see still frames from their camera when they ask about what they are showing. Then stop and listen."
+                    ? "Greet the technician briefly. Mention you can see still frames from their camera automatically when they ask about what they are showing. Then stop and listen."
                     : "Greet the technician briefly and offer to help with diagnostics, parts, or their performance. Then stop and listen.",
             ],
         ])
@@ -285,7 +374,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                     dataUrl: dataUrl,
                     fileName: "storm-ai-frame-\(Int(Date().timeIntervalSince1970)).jpg"
                 ),
-                timeoutInterval: 90
+                timeoutInterval: 30
             )
             onFrameSavedToJob?(result.savedToJob == true)
             if let resolved = result.visitId {
@@ -392,7 +481,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         case "input_audio_buffer.speech_started":
             status = .listening
             if videoMode {
-                Task { await captureAndSendFrame(reason: "speech_started") }
+                Task { await captureAndSendFrame(reason: "speech_started", force: true) }
             }
 
         case "response.created", "output_audio_buffer.started":
@@ -404,7 +493,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 playPCM16Base64(delta)
             }
 
-        case "response.done", "response.cancelled", "output_audio_buffer.stopped":
+        case "response.cancelled", "output_audio_buffer.stopped":
             if status != .tool { status = .listening }
 
         case "conversation.item.input_audio_transcription.completed",
@@ -421,17 +510,65 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 onTranscript?("assistant", transcript)
             }
 
+        case "response.output_item.added":
+            if let item = json["item"] as? [String: Any],
+               (item["type"] as? String) == "function_call",
+               let callId = item["call_id"] as? String,
+               let name = item["name"] as? String {
+                pendingNames[callId] = name
+                status = .tool
+                activeToolName = name
+            }
+
         case "response.function_call_arguments.delta":
             let callId = json["call_id"] as? String ?? ""
             let delta = json["delta"] as? String ?? ""
-            pendingArgs[callId, default: ""] += delta
+            if !callId.isEmpty {
+                pendingArgs[callId, default: ""] += delta
+                if let name = json["name"] as? String, !name.isEmpty {
+                    pendingNames[callId] = name
+                }
+            }
 
         case "response.function_call_arguments.done":
             let callId = json["call_id"] as? String ?? ""
-            let name = json["name"] as? String ?? ""
+            let name = (json["name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? pendingNames[callId]
+                ?? ""
             let argText = (json["arguments"] as? String) ?? pendingArgs[callId] ?? "{}"
             pendingArgs[callId] = nil
-            await runTool(callId: callId, name: name, argText: argText)
+            pendingNames[callId] = nil
+            if !callId.isEmpty, !name.isEmpty {
+                await runTool(callId: callId, name: name, argText: argText)
+            }
+
+        case "response.output_item.done":
+            if let item = json["item"] as? [String: Any],
+               (item["type"] as? String) == "function_call",
+               let callId = item["call_id"] as? String,
+               let name = item["name"] as? String {
+                let argText = (item["arguments"] as? String) ?? pendingArgs[callId] ?? "{}"
+                await runTool(callId: callId, name: name, argText: argText)
+            }
+
+        case "response.done":
+            if let response = json["response"] as? [String: Any],
+               let outputs = response["output"] as? [[String: Any]] {
+                var hadFunction = false
+                for item in outputs where (item["type"] as? String) == "function_call" {
+                    hadFunction = true
+                    if let callId = item["call_id"] as? String,
+                       let name = item["name"] as? String {
+                        let argText = (item["arguments"] as? String) ?? "{}"
+                        await runTool(callId: callId, name: name, argText: argText)
+                    }
+                }
+                if !hadFunction, status != .tool {
+                    status = .listening
+                }
+            } else if status != .tool {
+                status = .listening
+            }
 
         default:
             break
@@ -473,9 +610,21 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     }
 
     private func runTool(callId: String, name: String, argText: String) async {
-        guard let conversationId else { return }
+        guard let conversationId, !callId.isEmpty, !name.isEmpty else { return }
+        if handledCallIds.contains(callId) { return }
+        handledCallIds.insert(callId)
+
         status = .tool
         activeToolName = name
+
+        if videoMode, name == "search_parts_info" || name == "get_parts_info" {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { await self.captureAndSendFrame(reason: "before_\(name)", force: true) }
+                group.addTask { try? await Task.sleep(nanoseconds: 1_200_000_000) }
+                await group.next()
+                group.cancelAll()
+            }
+        }
 
         var argsObject: [String: StormAiJSONValue]?
         if let data = argText.data(using: .utf8),
@@ -493,16 +642,22 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                     name: name,
                     arguments: argsObject
                 ),
-                timeoutInterval: 60
+                timeoutInterval: toolTimeout
             )
             if let text = String(data: resultData, encoding: .utf8) {
                 output = text
             }
         } catch {
-            // keep default
+            let message = (error as? APIError)?.message ?? error.localizedDescription
+            let timedOut = message.localizedCaseInsensitiveContains("timed out")
+                || message.localizedCaseInsensitiveContains("timeout")
+                || message.localizedCaseInsensitiveContains("cancelled")
+            output = timedOut
+                ? #"{"ok":false,"error":"Tool timed out — tell the tech briefly and ask them to continue."}"#
+                : #"{"ok":false,"error":"Tool request failed"}"#
         }
 
-        sendJSON([
+        let sentOutput = sendJSON([
             "type": "conversation.item.create",
             "item": [
                 "type": "function_call_output",
@@ -510,14 +665,22 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 "output": output,
             ],
         ])
-        sendJSON([
+        let sentResponse = sendJSON([
             "type": "response.create",
             "response": [
                 "output_modalities": ["audio"],
                 "instructions":
-                    "Continue speaking briefly with the technician using the tool result. Then stop and listen.",
+                    "You just received a tool result. Speak a short, clear answer to the technician now using that result. Do not stay silent. Then stop and listen.",
             ],
         ])
+
+        if !sentOutput || !sentResponse {
+            lastError = "Lost connection while looking something up — tap mic to reconnect."
+            status = .error
+            activeToolName = nil
+            return
+        }
+
         activeToolName = nil
         status = .speaking
     }
