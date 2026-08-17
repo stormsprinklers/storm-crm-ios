@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 
 /// Full-FPS local camera preview. Frames are captured as stills on demand — not streamed to OpenAI.
-final class StormAiCameraController: NSObject, ObservableObject {
+final class StormAiCameraController: NSObject, ObservableObject, @unchecked Sendable {
     @Published private(set) var isRunning = false
     @Published var lastError: String?
 
@@ -19,7 +19,7 @@ final class StormAiCameraController: NSObject, ObservableObject {
             return false
         }
 
-        return await withCheckedContinuation { continuation in
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             sessionQueue.async { [weak self] in
                 guard let self else {
                     continuation.resume(returning: false)
@@ -44,7 +44,7 @@ final class StormAiCameraController: NSObject, ObservableObject {
     }
 
     func captureJPEG(maxEdge: CGFloat = 1280, quality: CGFloat = 0.82) async -> Data? {
-        await withCheckedContinuation { continuation in
+        let data: Data? = await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
             sessionQueue.async { [weak self] in
                 guard let self else {
                     continuation.resume(returning: nil)
@@ -62,10 +62,9 @@ final class StormAiCameraController: NSObject, ObservableObject {
                 let settings = AVCapturePhotoSettings()
                 self.photoOutput.capturePhoto(with: settings, delegate: self)
             }
-        }.flatMap { data in
-            guard let data, let image = UIImage(data: data) else { return nil }
-            return image.stormAiResizedJPEG(maxEdge: maxEdge, quality: quality)
         }
+        guard let data, let image = UIImage(data: data) else { return nil }
+        return image.stormAiResizedJPEG(maxEdge: maxEdge, quality: quality)
     }
 
     private func configureAndStart() {
@@ -94,14 +93,25 @@ final class StormAiCameraController: NSObject, ObservableObject {
             return
         }
         session.addOutput(photoOutput)
-        if let connection = photoOutput.connection(with: .video), connection.isVideoOrientationSupported {
-            connection.videoOrientation = .portrait
+        if let connection = photoOutput.connection(with: .video) {
+            applyPortraitOrientation(to: connection)
         }
         session.commitConfiguration()
         session.startRunning()
         DispatchQueue.main.async {
             self.isRunning = self.session.isRunning
             self.lastError = nil
+        }
+    }
+
+    private func applyPortraitOrientation(to connection: AVCaptureConnection) {
+        if #available(iOS 17.0, *) {
+            let angle: CGFloat = 90
+            if connection.isVideoRotationAngleSupported(angle) {
+                connection.videoRotationAngle = angle
+            }
+        } else if connection.isVideoOrientationSupported {
+            connection.videoOrientation = .portrait
         }
     }
 }
