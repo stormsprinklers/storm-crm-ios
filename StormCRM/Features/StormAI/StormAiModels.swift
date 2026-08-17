@@ -36,6 +36,23 @@ struct StormAiPartsCardDTO: Decodable, Hashable, Identifiable {
     var id: String { partId }
 }
 
+struct StormAiRealtimeActivity: Identifiable, Hashable {
+    enum Level: String {
+        case info, wait, ok, error
+    }
+
+    let id = UUID()
+    let at: Date
+    let level: Level
+    let message: String
+
+    init(level: Level = .info, message: String, at: Date = Date()) {
+        self.at = at
+        self.level = level
+        self.message = message
+    }
+}
+
 struct StormAiMessageDTO: Decodable, Identifiable {
     let id: String
     let role: String

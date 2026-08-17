@@ -471,20 +471,26 @@ private struct ScheduleDayTimeline: View {
     private var hourLanes: [Int] { Array(startHour..<endHour) }
     private var contentHeight: CGFloat { CGFloat(endHour - startHour) * hourHeight + vPadding * 2 }
 
+    /// Device timezone, matching hour labels and job-block placement (ISO times are UTC instants).
+    private var scheduleTimeZone: TimeZone { .current }
+
     var body: some View {
-        ScrollView {
-            GeometryReader { geo in
-                let laneWidth = max(geo.size.width - gutter - 12, 60)
-                ZStack(alignment: .topLeading) {
-                    ForEach(hourLanes, id: \.self) { hour in
-                        hourLane(hour, laneWidth: laneWidth)
-                    }
-                    ForEach(jobs) { job in
-                        jobBlock(job, laneWidth: laneWidth)
+        TimelineView(.periodic(from: .now, by: 15)) { timeline in
+            ScrollView {
+                GeometryReader { geo in
+                    let laneWidth = max(geo.size.width - gutter - 12, 60)
+                    ZStack(alignment: .topLeading) {
+                        ForEach(hourLanes, id: \.self) { hour in
+                            hourLane(hour, laneWidth: laneWidth)
+                        }
+                        ForEach(jobs) { job in
+                            jobBlock(job, laneWidth: laneWidth)
+                        }
+                        nowIndicator(at: timeline.date, width: geo.size.width)
                     }
                 }
+                .frame(height: contentHeight)
             }
-            .frame(height: contentHeight)
         }
         // Swipe the day timeline left/right to change days (vertical scroll still works).
         .modifier(ScheduleHorizontalSwipe { delta in
@@ -541,6 +547,34 @@ private struct ScheduleDayTimeline: View {
         }
     }
 
+    @ViewBuilder
+    private func nowIndicator(at now: Date, width: CGFloat) -> some View {
+        if let y = nowLineY(at: now) {
+            HStack(spacing: 0) {
+                Circle()
+                    .fill(StormTheme.coral)
+                    .frame(width: 8, height: 8)
+                Rectangle()
+                    .fill(StormTheme.coral)
+                    .frame(height: 1.5)
+            }
+            .frame(width: max(width - gutter + 4, 40), alignment: .leading)
+            .offset(x: gutter - 4, y: y - 4)
+            .allowsHitTesting(false)
+            .accessibilityLabel("Current time \(now.formatted(date: .omitted, time: .shortened))")
+        }
+    }
+
+    private func nowLineY(at now: Date) -> CGFloat? {
+        var calendar = self.calendar
+        calendar.timeZone = scheduleTimeZone
+        guard calendar.isDate(now, inSameDayAs: day) else { return nil }
+        let minutes = minutesFromDayStart(now)
+        let visibleMinutes = CGFloat(endHour - startHour) * 60
+        guard minutes >= -0.5, minutes <= visibleMinutes + 0.5 else { return nil }
+        return vPadding + minutes / 60 * hourHeight
+    }
+
     private func blockLayout(for job: VisitDTO) -> (y: CGFloat, height: CGFloat) {
         let start = APIDateFormatting.parse(job.startAt) ?? day
         let end = APIDateFormatting.parse(job.endAt) ?? start.addingTimeInterval(3600)
@@ -554,16 +588,25 @@ private struct ScheduleDayTimeline: View {
     }
 
     private func minutesFromDayStart(_ date: Date) -> CGFloat {
-        let components = calendar.dateComponents([.hour, .minute], from: date)
-        let minutes = (components.hour ?? 0) * 60 + (components.minute ?? 0)
-        return CGFloat(minutes - startHour * 60)
+        var calendar = self.calendar
+        calendar.timeZone = scheduleTimeZone
+        let components = calendar.dateComponents([.hour, .minute, .second], from: date)
+        let minutes =
+            Double(components.hour ?? 0) * 60
+            + Double(components.minute ?? 0)
+            + Double(components.second ?? 0) / 60
+        return CGFloat(minutes - Double(startHour * 60))
     }
 
     private func hourLabel(_ hour: Int) -> String {
-        var comps = DateComponents()
+        var calendar = self.calendar
+        calendar.timeZone = scheduleTimeZone
+        var comps = calendar.dateComponents([.year, .month, .day], from: day)
         comps.hour = hour
+        comps.minute = 0
+        comps.second = 0
         let date = calendar.date(from: comps) ?? Date()
-        return date.formatted(.dateTime.hour())
+        return date.formatted(Date.FormatStyle(timeZone: scheduleTimeZone).hour())
     }
 }
 

@@ -4,7 +4,6 @@ import SwiftUI
 
 struct VisitHeaderSection: View {
     let visit: VisitDetailDTO
-    let paymentSummary: VisitPaymentSummary
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -17,9 +16,6 @@ struct VisitHeaderSection: View {
                 StormBadge(text: visit.division)
                 if visit.isCallback == true {
                     StormBadge(text: "Callback", style: .warning)
-                }
-                if paymentSummary.isPaid {
-                    StormBadge(text: "Paid", style: .success)
                 }
             }
 
@@ -292,7 +288,7 @@ struct VisitPaymentSummary {
     static func from(visit: VisitDetailDTO, computedTotal: Double) -> VisitPaymentSummary {
         guard let invoice = visit.invoices?.first else {
             return VisitPaymentSummary(
-                isPaid: computedTotal <= 0,
+                isPaid: false,
                 balanceDue: computedTotal > 0 ? computedTotal : nil,
                 invoice: nil
             )
@@ -305,7 +301,8 @@ struct VisitPaymentSummary {
         // adds/deletes (e.g. still $125 after the only line item was removed).
         let effectiveTotal = computedTotal
         let balanceDue = max(0, effectiveTotal - amountPaid)
-        let isPaid = balanceDue <= 0
+        let markedPaid = invoice.status.uppercased() == "PAID" || invoice.paidAt != nil
+        let isPaid = effectiveTotal > 0 && balanceDue <= 0 && (amountPaid > 0 || markedPaid)
         return VisitPaymentSummary(
             isPaid: isPaid,
             balanceDue: balanceDue > 0 ? balanceDue : nil,

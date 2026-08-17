@@ -158,6 +158,10 @@ struct EstimateDetailView: View {
     @State private var pendingPostApproval = false
     @State private var activeOptionId: String?
     @State private var showPresent = false
+    @State private var optionNameDraft = ""
+    @State private var optionNotesDraft = ""
+    @FocusState private var optionNameFocused: Bool
+    @FocusState private var optionNotesFocused: Bool
 
     private struct ApprovalSheetContext: Identifiable {
         let id = UUID()
@@ -245,6 +249,12 @@ struct EstimateDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
         .task { await load() }
+        .onChange(of: optionNameFocused) { _, focused in
+            if !focused { Task { await saveOptionLabel() } }
+        }
+        .onChange(of: optionNotesFocused) { _, focused in
+            if !focused { Task { await saveOptionNotes() } }
+        }
         .fullScreenCover(item: $approvalSheet, onDismiss: {
             if pendingPostApproval {
                 pendingPostApproval = false
@@ -423,24 +433,100 @@ struct EstimateDetailView: View {
                         }
                     }
                 }
+                if estimate.status != "CONVERTED" {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Option name")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("Option name", text: $optionNameDraft)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($optionNameFocused)
+                            .submitLabel(.done)
+                            .onSubmit { Task { await saveOptionLabel() } }
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Notes for AI")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Staff only. Helps write the homeowner description and pick a photo.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        TextField("Optional context for this option", text: $optionNotesDraft, axis: .vertical)
+                            .lineLimit(3...8)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($optionNotesFocused)
+                    }
+                }
             }
         }
     }
 
     private func selectOption(_ optionId: String) async {
+        if optionNameFocused {
+            await saveOptionLabel()
+        }
+        await saveOptionNotes()
         activeOptionId = optionId
+        if let option = estimate?.options.first(where: { $0.id == optionId }) {
+            optionNameDraft = option.label
+            optionNotesDraft = option.internalNotes ?? ""
+        }
         struct Body: Encodable { let optionId: String; let select: Bool }
         do {
             estimate = try await env.apiClient.patch(
                 path: APIPath.estimateOptions(estimateId),
                 body: Body(optionId: optionId, select: true)
             )
+            syncOptionDrafts()
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func syncOptionDrafts() {
+        guard let estimate else { return }
+        let option = currentOption(for: estimate) ?? estimate.options.first
+        optionNameDraft = option?.label ?? ""
+        optionNotesDraft = option?.internalNotes ?? ""
+    }
+
+    private func saveOptionLabel() async {
+        guard let estimate, let optionId = currentOptionId(for: estimate) else { return }
+        let trimmed = optionNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != currentOption(for: estimate)?.label else { return }
+        struct Body: Encodable { let optionId: String; let label: String }
+        do {
+            self.estimate = try await env.apiClient.patch(
+                path: APIPath.estimateOptions(estimateId),
+                body: Body(optionId: optionId, label: trimmed)
+            )
+            optionNameDraft = trimmed
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func saveOptionNotes() async {
+        guard let estimate, let optionId = currentOptionId(for: estimate) else { return }
+        let trimmed = optionNotesDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let current = (currentOption(for: estimate)?.internalNotes ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != current else { return }
+        struct Body: Encodable { let optionId: String; let internalNotes: String }
+        do {
+            self.estimate = try await env.apiClient.patch(
+                path: APIPath.estimateOptions(estimateId),
+                body: Body(optionId: optionId, internalNotes: trimmed)
+            )
+            optionNotesDraft = trimmed
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 
     private func addOption(mode: String) async {
+        await saveOptionLabel()
+        await saveOptionNotes()
         struct Body: Encodable {
             let mode: String
             let duplicateFromOptionId: String?
@@ -454,6 +540,7 @@ struct EstimateDetailView: View {
             )
             estimate = data
             activeOptionId = data.options.last?.id
+            syncOptionDrafts()
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
@@ -497,97 +584,147 @@ struct EstimateDetailView: View {
             }
         } else {
             StormCard {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     StormSectionHeader(title: "Actions", systemImage: "bolt")
 
-                    if estimate.status == "DRAFT" || estimate.status == "SENT" {
-                        Button {
-                            showPresent = true
-                        } label: {
-                            Label("Present", systemImage: "rectangle.on.rectangle")
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 96), spacing: 8)],
+                        alignment: .leading,
+                        spacing: 8
+                    ) {
+                        ForEach(actionItems(for: estimate)) { item in
+                            Button(action: item.action) {
+                                VStack(spacing: 4) {
+                                    Image(systemName: item.systemImage)
+                                        .font(.body.weight(.semibold))
+                                    Text(item.title)
+                                        .font(.caption.weight(.semibold))
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.75)
+                                }
                                 .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(EstimateActionChipStyle(tint: item.tint))
+                            .disabled(isSaving)
+                            .accessibilityLabel(item.accessibilityLabel)
                         }
-                        .buttonStyle(StormPrimaryButtonStyle())
-                        .disabled(isSaving)
-
-                        Button {
-                            Task { await sendEstimate() }
-                        } label: {
-                            Label(isSaving ? "Sending…" : "Send to customer", systemImage: "paperplane.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .disabled(isSaving)
                     }
 
-                    if let url = estimate.financingUrl, !url.isEmpty {
-                        Button {
-                            Task { await sendFinancing() }
-                        } label: {
-                            Label(
-                                isSaving ? "Texting…" : "Explore financing options",
-                                systemImage: "banknote"
-                            )
-                            .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(StormSecondaryButtonStyle())
-                        .disabled(isSaving)
-                    }
-
-                    if !estimate.isApproved {
-                        Button {
-                            error = nil
-                            approvalSheet = ApprovalSheetContext(
-                                total: estimate.total,
-                                canApprove: !estimate.lineItems.isEmpty
-                            )
-                        } label: {
-                            Label("Approve with signature", systemImage: "checkmark.seal.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(StormPrimaryButtonStyle())
-                        .disabled(isSaving)
-
-                        Text(
-                            estimate.lineItems.isEmpty
-                                ? "Add line items first, then collect the customer signature."
-                                : "Opens a popup to collect the customer signature."
-                        )
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if !estimate.isApproved, estimate.lineItems.isEmpty {
+                        Text("Add line items first, then collect the customer signature.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     } else if let signedAt = estimate.signedAt {
                         Text("Signed \(APIDateFormatting.displayString(from: signedAt))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-
-                    if estimate.canCopyToVisit {
-                        Text("Complete the work today, or schedule a follow-up visit.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Button {
-                            postApprovalMode = .today
-                            showPostApproval = true
-                        } label: {
-                            Label("Complete Today", systemImage: "sun.max.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(StormPrimaryButtonStyle())
-                        .disabled(isSaving)
-
-                        Button {
-                            postApprovalMode = .schedule
-                            showPostApproval = true
-                        } label: {
-                            Label("Schedule Visit", systemImage: "calendar.badge.checkmark")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(StormSecondaryButtonStyle())
-                        .disabled(isSaving)
-                    }
                 }
             }
         }
+    }
+
+    private struct EstimateActionItem: Identifiable {
+        let id: String
+        let title: String
+        let systemImage: String
+        let tint: Color
+        let accessibilityLabel: String
+        let action: () -> Void
+    }
+
+    private func actionItems(for estimate: EstimateDetailDTO) -> [EstimateActionItem] {
+        var items: [EstimateActionItem] = []
+
+        if estimate.status == "DRAFT" || estimate.status == "SENT" {
+            items.append(
+                EstimateActionItem(
+                    id: "present",
+                    title: "Present",
+                    systemImage: "rectangle.on.rectangle",
+                    tint: StormTheme.sky,
+                    accessibilityLabel: "Present estimate"
+                ) {
+                    Task {
+                        await saveOptionLabel()
+                        await saveOptionNotes()
+                        showPresent = true
+                    }
+                }
+            )
+            items.append(
+                EstimateActionItem(
+                    id: "send",
+                    title: isSaving ? "Sending…" : "Send",
+                    systemImage: "paperplane.fill",
+                    tint: StormTheme.coral,
+                    accessibilityLabel: "Send to customer"
+                ) {
+                    Task { await sendEstimate() }
+                }
+            )
+        }
+
+        if !estimate.isApproved {
+            items.append(
+                EstimateActionItem(
+                    id: "approve",
+                    title: "Approve",
+                    systemImage: "checkmark.seal.fill",
+                    tint: StormTheme.success,
+                    accessibilityLabel: "Approve with signature"
+                ) {
+                    error = nil
+                    approvalSheet = ApprovalSheetContext(
+                        total: estimate.total,
+                        canApprove: !estimate.lineItems.isEmpty
+                    )
+                }
+            )
+        }
+
+        if let url = estimate.financingUrl, !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            items.append(
+                EstimateActionItem(
+                    id: "financing",
+                    title: isSaving ? "Texting…" : "Financing",
+                    systemImage: "banknote",
+                    tint: StormTheme.brandNavy,
+                    accessibilityLabel: "Send financing link"
+                ) {
+                    Task { await sendFinancing() }
+                }
+            )
+        }
+
+        if estimate.canCopyToVisit {
+            items.append(
+                EstimateActionItem(
+                    id: "today",
+                    title: "Today",
+                    systemImage: "sun.max.fill",
+                    tint: Color.orange,
+                    accessibilityLabel: "Complete today"
+                ) {
+                    postApprovalMode = .today
+                    showPostApproval = true
+                }
+            )
+            items.append(
+                EstimateActionItem(
+                    id: "schedule",
+                    title: "Schedule",
+                    systemImage: "calendar.badge.checkmark",
+                    tint: StormTheme.sky,
+                    accessibilityLabel: "Schedule visit"
+                ) {
+                    postApprovalMode = .schedule
+                    showPostApproval = true
+                }
+            )
+        }
+
+        return items
     }
 
     private func load() async {
@@ -600,6 +737,7 @@ struct EstimateDetailView: View {
             if activeOptionId == nil || !(loaded.options.contains { $0.id == activeOptionId }) {
                 activeOptionId = loaded.selectedOptionId ?? loaded.options.first?.id
             }
+            syncOptionDrafts()
             customerHistory = try? await env.apiClient.get(
                 path: APIPath.customerHistory(loaded.customer.id)
             )
@@ -774,5 +912,24 @@ struct EstimateCustomerInfoSection: View {
             return "History · \(count) past visit\(count == 1 ? "" : "s")"
         }
         return "Customer history"
+    }
+}
+
+private struct EstimateActionChipStyle: ButtonStyle {
+    var tint: Color
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.vertical, 8)
+            .padding(.horizontal, 6)
+            .background(tint.opacity(backgroundOpacity(configuration)))
+            .foregroundStyle(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func backgroundOpacity(_ configuration: Configuration) -> Double {
+        if !isEnabled { return 0.45 }
+        return configuration.isPressed ? 0.8 : 1
     }
 }

@@ -27,6 +27,7 @@ struct StormAiChatView: View {
     @State private var voiceSession: StormAiRealtimeVoiceSession?
     @State private var voiceStatus: StormAiRealtimeVoiceSession.Status = .idle
     @State private var voiceToolName: String?
+    @State private var voiceActivity: [StormAiRealtimeActivity] = []
     @State private var videoModeActive = false
     @State private var frameSavedToast: String?
     /// Explicit visit from Visit detail, or the tech's active job when opened from More.
@@ -96,10 +97,37 @@ struct StormAiChatView: View {
                                 .id("thinking")
                         }
                         if voiceActive {
-                            Text(voiceStatusLabel)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .id("voice-status")
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(voiceStatusLabel)
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(StormTheme.navy)
+                                if voiceActivity.isEmpty {
+                                    Text("Live steps will appear here while voice is active.")
+                                        .font(.system(.caption2, design: .monospaced))
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        ForEach(voiceActivity.suffix(18)) { entry in
+                                            HStack(alignment: .top, spacing: 6) {
+                                                Text(entry.at, style: .time)
+                                                    .font(.system(.caption2, design: .monospaced))
+                                                    .foregroundStyle(.tertiary)
+                                                    .frame(width: 54, alignment: .leading)
+                                                Text(entry.message)
+                                                    .font(.system(.caption2, design: .monospaced))
+                                                    .foregroundStyle(activityColor(entry.level))
+                                                    .fixedSize(horizontal: false, vertical: true)
+                                            }
+                                        }
+                                    }
+                                    .frame(maxHeight: 140, alignment: .top)
+                                }
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(.secondarySystemFill))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .id("voice-status")
                         }
                     }
                     .padding()
@@ -109,6 +137,9 @@ struct StormAiChatView: View {
                 }
                 .onChange(of: isSending) { _, sending in
                     if sending { scrollToBottom(proxy) }
+                }
+                .onChange(of: voiceActivity.count) { _, _ in
+                    scrollToBottom(proxy)
                 }
             }
 
@@ -267,6 +298,15 @@ struct StormAiChatView: View {
         visitId ?? resolvedVisitId
     }
 
+    private func activityColor(_ level: StormAiRealtimeActivity.Level) -> Color {
+        switch level {
+        case .info: return .secondary
+        case .wait: return .orange
+        case .ok: return StormTheme.success
+        case .error: return .red
+        }
+    }
+
     private var voiceStatusLabel: String {
         switch voiceStatus {
         case .connecting: return "Connecting voice…"
@@ -317,6 +357,12 @@ struct StormAiChatView: View {
                 )
             )
         }
+        session.onActivity = { entry in
+            voiceActivity.append(entry)
+            if voiceActivity.count > 30 {
+                voiceActivity.removeFirst(voiceActivity.count - 30)
+            }
+        }
         session.onFrameSavedToJob = { saved in
             if saved {
                 frameSavedToast = "Frame saved to job attachments"
@@ -339,6 +385,7 @@ struct StormAiChatView: View {
             voiceStatus = .idle
             voiceToolName = nil
             videoModeActive = false
+            voiceActivity = []
             return
         }
         error = nil
@@ -347,6 +394,7 @@ struct StormAiChatView: View {
             await loadActiveVisitIfNeeded()
         }
         videoModeActive = false
+        voiceActivity = []
         await session.start(
             conversationId: conversationId,
             visitId: effectiveVisitId,
@@ -390,6 +438,7 @@ struct StormAiChatView: View {
 
         // Start a new realtime session with video (same chat conversation id).
         videoModeActive = true
+        voiceActivity = []
         await session.start(
             conversationId: conversationId,
             visitId: effectiveVisitId,

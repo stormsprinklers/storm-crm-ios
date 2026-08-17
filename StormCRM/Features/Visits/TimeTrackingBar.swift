@@ -139,7 +139,7 @@ struct TimeTrackingBar: View {
                     accessibilityLabel: "Finish visit",
                     systemImage: "checkmark.square.fill",
                     isActive: isCompleted && finishEvent != nil,
-                    activeTint: StormTheme.coral,
+                    activeTint: StormTheme.sky,
                     timestamp: finishEvent?.occurredAt,
                     timestampLabel: finishEvent == nil ? nil : "Finished at",
                     disabled: !canFinish,

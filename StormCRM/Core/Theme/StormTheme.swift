@@ -31,6 +31,8 @@ enum StormTheme {
     })
 
     static let success = Color(hex: "#16A34A")!
+    /// Filled “paid” / complete-success actions — lighter than `success` so it sits with sky/ice chips.
+    static let lightGreen = Color(hex: "#6BCB8B")!
 }
 
 extension Color {
@@ -81,12 +83,14 @@ struct StormSectionHeader: View {
 }
 
 struct StormPrimaryButtonStyle: ButtonStyle {
+    var tint: Color = StormTheme.coral
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline.weight(.semibold))
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(StormTheme.coral.opacity(configuration.isPressed ? 0.85 : 1))
+            .background(tint.opacity(configuration.isPressed ? 0.85 : 1))
             .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: 10))
     }

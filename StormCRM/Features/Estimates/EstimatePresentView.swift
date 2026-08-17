@@ -13,6 +13,8 @@ struct EstimatePresentView: View {
     @State private var error: String?
     @State private var openOptionId: String?
     @State private var isDeclining = false
+    @State private var renameOptionId: String?
+    @State private var renameDraft = ""
 
     private var ranked: [EstimateOptionDTO] {
         (estimate?.options ?? [])
@@ -69,22 +71,49 @@ struct EstimatePresentView: View {
             )) { presented in
                 if let option = ranked.first(where: { $0.id == presented.id }), let estimate {
                     optionDetail(option, estimate: estimate)
+                        .environmentObject(env)
                 }
             }
             .task { await prepare() }
+            .alert("Rename option", isPresented: Binding(
+                get: { renameOptionId != nil },
+                set: { if !$0 { renameOptionId = nil } }
+            )) {
+                TextField("Option name", text: $renameDraft)
+                Button("Save") {
+                    Task { await saveRename() }
+                }
+                Button("Cancel", role: .cancel) {
+                    renameOptionId = nil
+                }
+            }
         }
     }
 
     private func presentCard(_ option: EstimateOptionDTO) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(option.label)
-                .font(.title3.weight(.bold))
-                .padding()
-            AsyncImage(url: option.photoUrl.flatMap(URL.init(string:))) { phase in
-                switch phase {
-                case .success(let image):
-                    image.resizable().scaledToFill()
-                default:
+            HStack(alignment: .center, spacing: 8) {
+                Text(option.label)
+                    .font(.title3.weight(.bold))
+                Spacer(minLength: 0)
+                Button {
+                    renameDraft = option.label
+                    renameOptionId = option.id
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(StormTheme.sky)
+                        .padding(8)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Rename option")
+            }
+            .padding()
+            Group {
+                if let photoUrl = option.photoUrl, !photoUrl.isEmpty {
+                    AuthenticatedBlobImage(urlString: photoUrl, contentMode: .fill)
+                } else {
                     Color.gray.opacity(0.2)
                 }
             }
@@ -112,6 +141,15 @@ struct EstimatePresentView: View {
     private func optionDetail(_ option: EstimateOptionDTO, estimate: EstimateDetailDTO) -> some View {
         NavigationStack {
             List {
+                if let photoUrl = option.photoUrl, !photoUrl.isEmpty {
+                    Section {
+                        AuthenticatedBlobImage(urlString: photoUrl, contentMode: .fill)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 220)
+                            .clipped()
+                            .listRowInsets(EdgeInsets())
+                    }
+                }
                 Section {
                     Text(option.total, format: .currency(code: "USD"))
                         .font(.title2.weight(.bold))
@@ -161,6 +199,23 @@ struct EstimatePresentView: View {
         defer { isLoading = false }
         do {
             estimate = try await env.apiClient.post(path: APIPath.estimatePresent(estimateId))
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func saveRename() async {
+        guard let optionId = renameOptionId else { return }
+        let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        renameOptionId = nil
+        guard !trimmed.isEmpty else { return }
+        struct Body: Encodable { let optionId: String; let label: String }
+        do {
+            estimate = try await env.apiClient.patch(
+                path: APIPath.estimateOptions(estimateId),
+                body: Body(optionId: optionId, label: trimmed)
+            )
+            await onUpdated()
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }

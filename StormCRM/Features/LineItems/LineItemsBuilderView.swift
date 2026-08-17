@@ -122,7 +122,9 @@ struct LineItemsBuilderView: View {
                 ProgressView()
             }
         }
-        .sheet(item: $activeAddSheet) { sheet in
+        .sheet(item: $activeAddSheet, onDismiss: {
+            Task { await reload() }
+        }) { sheet in
             NavigationStack {
                 switch sheet {
                 case .service:

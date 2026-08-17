@@ -57,10 +57,10 @@ struct VisitLineItemsEditSection: View {
         .onChange(of: items.map { "\($0.id):\($0.name):\($0.description ?? ""):\($0.quantity):\($0.unitPrice)" }) { _, _ in
             drafts.sync(from: items)
         }
-        .sheet(isPresented: $showPicker) {
-            PriceBookPickerSheet { item in
-                await addFromPriceBook(item)
-            }
+        .sheet(isPresented: $showPicker, onDismiss: {
+            Task { await onUpdated() }
+        }) {
+            PriceBookPickerSheet(owner: .visit(id: visitId))
         }
         .sheet(isPresented: $showCustomItem) {
             CustomLineItemSheet { input in
@@ -121,20 +121,6 @@ struct VisitLineItemsEditSection: View {
                     unitPrice: input.unitPrice,
                     quantity: input.quantity
                 )
-            )
-            await onUpdated()
-        } catch {
-            self.error = (error as? APIError)?.message
-        }
-    }
-
-    private func addFromPriceBook(_ item: PriceBookItemDTO) async {
-        do {
-            try await PriceBookLineItemAdding.add(
-                api: env.apiClient,
-                owner: .visit(id: visitId),
-                item: item,
-                optionId: nil
             )
             await onUpdated()
         } catch {

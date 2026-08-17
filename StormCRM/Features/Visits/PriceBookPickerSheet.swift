@@ -18,7 +18,16 @@ struct PriceBookPickerSheet: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var priceBookPins: PriceBookPinStore
     @Environment(\.dismiss) private var dismiss
-    let onSelect: (PriceBookItemDTO) async -> Void
+    @StateObject private var quantities: PriceBookLineItemQuantities
+
+    let owner: LineItemsOwner
+    var optionId: String? = nil
+
+    init(owner: LineItemsOwner, optionId: String? = nil) {
+        self.owner = owner
+        self.optionId = optionId
+        _quantities = StateObject(wrappedValue: PriceBookLineItemQuantities(owner: owner, optionId: optionId))
+    }
 
     @State private var search = ""
     @State private var typeFilter: PriceBookTypeFilter = .service
@@ -41,14 +50,20 @@ struct PriceBookPickerSheet: View {
                 }
             }
             .overlay {
-                if isLoading { ProgressView() }
+                if isLoading && categories.isEmpty && !isSearching {
+                    ProgressView()
+                }
             }
             .navigationTitle("Price book")
             .searchable(text: $search, prompt: "Search services and materials")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Done") { dismiss() }
                 }
+            }
+            .task {
+                quantities.attach(api: env.apiClient)
+                await quantities.loadExisting()
             }
             .task(id: typeFilter) {
                 guard !isSearching else { return }
@@ -58,6 +73,7 @@ struct PriceBookPickerSheet: View {
                 Task { await loadSearch(query: newValue) }
             }
         }
+        .environmentObject(quantities)
     }
 
     @ViewBuilder
@@ -66,13 +82,14 @@ struct PriceBookPickerSheet: View {
             if let error {
                 Text(error).foregroundStyle(.red)
             }
+            if let qtyError = quantities.error {
+                Text(qtyError).foregroundStyle(.red)
+            }
 
             if !priceBookPins.items.isEmpty {
                 Section("Pinned") {
                     ForEach(priceBookPins.items) { item in
                         PriceBookPickerRow(item: item) {
-                            await select(item)
-                        } onTogglePin: {
                             withAnimation(.easeInOut(duration: 0.15)) {
                                 priceBookPins.toggle(item)
                             }
@@ -101,9 +118,9 @@ struct PriceBookPickerSheet: View {
                         NavigationLink {
                             PriceBookCategoryBrowseView(
                                 categoryId: category.id,
-                                categoryName: category.name,
-                                onSelect: { item in await select(item) }
+                                categoryName: category.name
                             )
+                            .environmentObject(quantities)
                         } label: {
                             PriceBookCategoryRow(category: category)
                         }
@@ -129,8 +146,6 @@ struct PriceBookPickerSheet: View {
                     Section(group.title) {
                         ForEach(group.items) { item in
                             PriceBookPickerRow(item: item) {
-                                await select(item)
-                            } onTogglePin: {
                                 withAnimation(.easeInOut(duration: 0.15)) {
                                     priceBookPins.toggle(item)
                                 }
@@ -150,11 +165,6 @@ struct PriceBookPickerSheet: View {
         return grouped.keys.sorted().map { key in
             (title: key, items: grouped[key] ?? [])
         }
-    }
-
-    private func select(_ item: PriceBookItemDTO) async {
-        await onSelect(item)
-        dismiss()
     }
 
     private func loadCategories() async {
@@ -202,10 +212,10 @@ struct PriceBookPickerSheet: View {
 private struct PriceBookCategoryBrowseView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var priceBookPins: PriceBookPinStore
+    @EnvironmentObject private var quantities: PriceBookLineItemQuantities
 
     let categoryId: String
     let categoryName: String
-    let onSelect: (PriceBookItemDTO) async -> Void
 
     @State private var childCategories: [PriceBookCategoryDTO] = []
     @State private var items: [PriceBookItemDTO] = []
@@ -224,8 +234,7 @@ private struct PriceBookCategoryBrowseView: View {
                         NavigationLink {
                             PriceBookCategoryBrowseView(
                                 categoryId: child.id,
-                                categoryName: child.name,
-                                onSelect: onSelect
+                                categoryName: child.name
                             )
                         } label: {
                             PriceBookCategoryRow(category: child)
@@ -241,8 +250,6 @@ private struct PriceBookCategoryBrowseView: View {
                 Section(categoryName) {
                     ForEach(items) { item in
                         PriceBookPickerRow(item: item) {
-                            await onSelect(item)
-                        } onTogglePin: {
                             withAnimation(.easeInOut(duration: 0.15)) {
                                 priceBookPins.toggle(item)
                             }
@@ -255,7 +262,9 @@ private struct PriceBookCategoryBrowseView: View {
         .navigationTitle(categoryName)
         .navigationBarTitleDisplayMode(.inline)
         .overlay {
-            if isLoading { ProgressView() }
+            if isLoading && items.isEmpty && childCategories.isEmpty {
+                ProgressView()
+            }
         }
         .task { await load() }
     }
@@ -319,49 +328,54 @@ private struct PriceBookCategoryRow: View {
 
 private struct PriceBookPickerRow: View {
     @EnvironmentObject private var priceBookPins: PriceBookPinStore
+    @EnvironmentObject private var quantities: PriceBookLineItemQuantities
 
     let item: PriceBookItemDTO
-    let onSelect: () async -> Void
     let onTogglePin: () -> Void
 
     var body: some View {
         let pinned = priceBookPins.isPinned(item.id)
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .center, spacing: 10) {
             Button {
-                Task { await onSelect() }
+                quantities.increment(item)
             } label: {
-                HStack(alignment: .top, spacing: 10) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.name)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(StormTheme.navy)
-                            .multilineTextAlignment(.leading)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.name)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(StormTheme.navy)
+                        .multilineTextAlignment(.leading)
 
-                        HStack(spacing: 6) {
-                            if let categoryName = item.displayCategoryName {
-                                Text(categoryName)
-                            }
-                            Text(item.typeLabel)
+                    HStack(spacing: 6) {
+                        if let categoryName = item.displayCategoryName {
+                            Text(categoryName)
                         }
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        Text(item.typeLabel)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-                        if let description = item.description, !description.isEmpty {
-                            Text(description)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
+                    if let description = item.description, !description.isEmpty {
+                        Text(description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
                     }
 
-                    Spacer(minLength: 8)
-
                     Text(item.resolvedUnitPrice, format: .currency(code: "USD"))
-                        .font(.subheadline.weight(.semibold))
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
+
+            PriceBookQuantityStepper(
+                quantity: quantities.quantity(forBookId: item.id)
+            ) {
+                quantities.decrement(item)
+            } onIncrement: {
+                quantities.increment(item)
+            }
 
             Button(action: onTogglePin) {
                 Image(systemName: pinned ? "pin.fill" : "pin")

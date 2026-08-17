@@ -4,6 +4,7 @@ import SwiftUI
 struct PriceBookBrowseAddView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var priceBookPins: PriceBookPinStore
+    @StateObject private var quantities: PriceBookLineItemQuantities
 
     let owner: LineItemsOwner
     let itemType: String
@@ -12,13 +13,27 @@ struct PriceBookBrowseAddView: View {
     /// Dismisses the whole add sheet (not just a pushed category).
     var closePicker: () -> Void
 
+    init(
+        owner: LineItemsOwner,
+        itemType: String,
+        optionId: String? = nil,
+        onAdded: @escaping () async -> Void,
+        closePicker: @escaping () -> Void
+    ) {
+        self.owner = owner
+        self.itemType = itemType
+        self.optionId = optionId
+        self.onAdded = onAdded
+        self.closePicker = closePicker
+        _quantities = StateObject(wrappedValue: PriceBookLineItemQuantities(owner: owner, optionId: optionId))
+    }
+
     @State private var tab: BrowseTab = .all
     @State private var search = ""
     @State private var categories: [PriceBookCategoryDTO] = []
     @State private var frequent: [PriceBookItemDTO] = []
     @State private var searchResults: [PriceBookItemDTO] = []
     @State private var isLoading = false
-    @State private var isAdding = false
     @State private var error: String?
     @State private var showCreate = false
 
@@ -50,6 +65,9 @@ struct PriceBookBrowseAddView: View {
         List {
             if let error {
                 Section { Text(error).foregroundStyle(.red).font(.caption) }
+            }
+            if let qtyError = quantities.error {
+                Section { Text(qtyError).foregroundStyle(.red).font(.caption) }
             }
 
             if isSearching {
@@ -132,28 +150,34 @@ struct PriceBookBrowseAddView: View {
                 onAdded: onAdded,
                 closePicker: closePicker
             )
+            .environmentObject(quantities)
         }
         .sheet(isPresented: $showCreate) {
             NavigationStack {
                 CreatePriceBookItemSheet(itemType: itemType) { created in
-                    await addItem(created, keepOpen: false)
+                    quantities.increment(created)
                 }
             }
         }
-        .task { await loadBrowse() }
+        .task {
+            quantities.attach(api: env.apiClient)
+            await loadBrowse()
+            await quantities.loadExisting()
+        }
         .onChange(of: search) { _, value in
             Task { await loadSearch(value) }
         }
-        .overlay { if isLoading { ProgressView() } }
+        .overlay {
+            if isLoading && categories.isEmpty && !isSearching {
+                ProgressView()
+            }
+        }
+        .environmentObject(quantities)
     }
 
     @ViewBuilder
     private func itemRow(_ item: PriceBookItemDTO) -> some View {
-        PriceBookAddItemRow(item: item) {
-            Task { await addItem(item, keepOpen: false) }
-        } onSwipeAdd: {
-            Task { await addItem(item, keepOpen: true) }
-        }
+        PriceBookAddItemRow(item: item)
     }
 
     private func loadBrowse() async {
@@ -184,6 +208,9 @@ struct PriceBookBrowseAddView: View {
             searchResults = []
             return
         }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        guard !Task.isCancelled else { return }
+        guard search.trimmingCharacters(in: .whitespacesAndNewlines) == q else { return }
         do {
             searchResults = try await env.apiClient.get(
                 path: APIPath.priceBookItems,
@@ -196,31 +223,12 @@ struct PriceBookBrowseAddView: View {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
-
-    private func addItem(_ item: PriceBookItemDTO, keepOpen: Bool) async {
-        guard !isAdding else { return }
-        isAdding = true
-        defer { isAdding = false }
-        do {
-            try await PriceBookLineItemAdding.add(
-                api: env.apiClient,
-                owner: owner,
-                item: item,
-                optionId: optionId
-            )
-            await onAdded()
-            if !keepOpen {
-                closePicker()
-            }
-        } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
-        }
-    }
 }
 
 struct PriceBookCategoryItemsAddView: View {
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var priceBookPins: PriceBookPinStore
+    @EnvironmentObject private var quantities: PriceBookLineItemQuantities
     let owner: LineItemsOwner
     let category: PriceBookCategoryDTO
     let itemType: String
@@ -232,12 +240,14 @@ struct PriceBookCategoryItemsAddView: View {
     @State private var children: [PriceBookCategoryDTO] = []
     @State private var error: String?
     @State private var isLoading = false
-    @State private var isAdding = false
 
     var body: some View {
         List {
             if let error {
                 Section { Text(error).foregroundStyle(.red) }
+            }
+            if let qtyError = quantities.error {
+                Section { Text(qtyError).foregroundStyle(.red).font(.caption) }
             }
             if !children.isEmpty {
                 Section("Categories") {
@@ -250,17 +260,17 @@ struct PriceBookCategoryItemsAddView: View {
             }
             Section(category.name) {
                 ForEach(items) { item in
-                    PriceBookAddItemRow(item: item) {
-                        Task { await add(item, keepOpen: false) }
-                    } onSwipeAdd: {
-                        Task { await add(item, keepOpen: true) }
-                    }
+                    PriceBookAddItemRow(item: item)
                 }
             }
         }
         .navigationTitle(category.name)
         .task { await load() }
-        .overlay { if isLoading { ProgressView() } }
+        .overlay {
+            if isLoading && items.isEmpty && children.isEmpty {
+                ProgressView()
+            }
+        }
     }
 
     private func load() async {
@@ -281,68 +291,48 @@ struct PriceBookCategoryItemsAddView: View {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
-
-    private func add(_ item: PriceBookItemDTO, keepOpen: Bool) async {
-        guard !isAdding else { return }
-        isAdding = true
-        defer { isAdding = false }
-        do {
-            try await PriceBookLineItemAdding.add(
-                api: env.apiClient,
-                owner: owner,
-                item: item,
-                optionId: optionId
-            )
-            await onAdded()
-            if !keepOpen {
-                closePicker()
-            }
-        } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
-        }
-    }
 }
 
-/// Tap adds and closes the picker; swipe right reveals a green + that adds and stays open.
+/// Quantity steppers are sky blue so they are not confused with the green add / red remove line-item buttons.
 private struct PriceBookAddItemRow: View {
+    @EnvironmentObject private var quantities: PriceBookLineItemQuantities
     let item: PriceBookItemDTO
-    var onTapAdd: () -> Void
-    var onSwipeAdd: () -> Void
 
     var body: some View {
-        Button(action: onTapAdd) {
-            HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: 12) {
+            Button {
+                quantities.increment(item)
+            } label: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.name)
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
                     if let description = item.description, !description.isEmpty {
                         Text(description)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                     }
-                }
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 6) {
-                    PriceBookFavoriteStarButton(item: item)
                     Text(item.resolvedUnitPrice, format: .currency(code: "USD"))
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.vertical, 4)
-        }
-        .buttonStyle(.plain)
-        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-            Button(action: onSwipeAdd) {
-                Image(systemName: "plus")
-                    .font(.body.weight(.bold))
-                    .foregroundStyle(.white)
+            .buttonStyle(.borderless)
+
+            PriceBookQuantityStepper(
+                quantity: quantities.quantity(forBookId: item.id)
+            ) {
+                quantities.decrement(item)
+            } onIncrement: {
+                quantities.increment(item)
             }
-            .tint(.green)
-            .accessibilityLabel("Add and keep browsing")
+
+            PriceBookFavoriteStarButton(item: item)
         }
+        .padding(.vertical, 4)
     }
 }
 
@@ -373,7 +363,7 @@ struct CreatePriceBookItemSheet: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     let itemType: String
-    var onCreated: (PriceBookItemDTO) async -> Void
+    var onCreated: (PriceBookItemDTO) -> Void
 
     @State private var name = ""
     @State private var unitPrice = ""
@@ -452,7 +442,7 @@ struct CreatePriceBookItemSheet: View {
                     pricingMode: "MANUAL"
                 )
             )
-            await onCreated(created)
+            onCreated(created)
             dismiss()
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription

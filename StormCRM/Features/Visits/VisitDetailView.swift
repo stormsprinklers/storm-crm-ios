@@ -8,6 +8,7 @@ final class VisitDetailViewModel: ObservableObject {
     @Published var customerHistory: CustomerHistoryDTO?
     @Published var isLoading = false
     @Published var isDeleting = false
+    @Published var isSaving = false
     @Published var error: String?
     @Published var actionMessage: String?
 
@@ -178,6 +179,41 @@ final class VisitDetailViewModel: ObservableObject {
             return false
         }
     }
+
+    func cancelVisit(api: APIClient, visitId: String) async -> Bool {
+        isSaving = true
+        actionMessage = nil
+        defer { isSaving = false }
+        struct Body: Encodable { let status: String }
+        do {
+            visit = try await api.patch(path: APIPath.visit(visitId), body: Body(status: "CANCELLED"))
+            actionMessage = "Visit cancelled"
+            return true
+        } catch {
+            actionMessage = (error as? APIError)?.message ?? error.localizedDescription
+            return false
+        }
+    }
+
+    func updateTitle(api: APIClient, visitId: String, title: String) async -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            actionMessage = "Title can’t be empty"
+            return false
+        }
+        isSaving = true
+        actionMessage = nil
+        defer { isSaving = false }
+        struct Body: Encodable { let title: String }
+        do {
+            visit = try await api.patch(path: APIPath.visit(visitId), body: Body(title: trimmed))
+            actionMessage = "Title updated"
+            return true
+        } catch {
+            actionMessage = (error as? APIError)?.message ?? error.localizedDescription
+            return false
+        }
+    }
 }
 
 struct VisitDetailView: View {
@@ -189,6 +225,10 @@ struct VisitDetailView: View {
     @State private var showFinishBillingPrompt = false
     @State private var finishBillingAmount: Double = 0
     @State private var showDeleteConfirm = false
+    @State private var showCancelConfirm = false
+    @State private var showRescheduleSheet = false
+    @State private var showEditTitle = false
+    @State private var titleDraft = ""
     @State private var newNote = ""
 
     private enum VisitActiveSheet: Identifiable {
@@ -243,9 +283,7 @@ struct VisitDetailView: View {
                                         if visit.isCallback == true {
                                             StormBadge(text: "Callback", style: .warning)
                                         }
-                                        if paymentSummary.isPaid {
-                                            StormBadge(text: "Paid", style: .success)
-                                        } else if env.offlineSync.hasPendingPayment(forVisitId: visitId) {
+                                        if env.offlineSync.hasPendingPayment(forVisitId: visitId) {
                                             StormBadge(text: "Payment pending sync", style: .warning)
                                         }
                                     }
@@ -291,10 +329,14 @@ struct VisitDetailView: View {
                                         .minimumScaleFactor(0.75)
                                         .frame(maxWidth: .infinity)
                                     }
-                                    .buttonStyle(StormPrimaryButtonStyle())
+                                    .buttonStyle(
+                                        StormPrimaryButtonStyle(
+                                            tint: paymentSummary.isPaid ? StormTheme.lightGreen : StormTheme.coral
+                                        )
+                                    )
                                     .frame(maxWidth: .infinity)
                                     .disabled(!paymentSummary.hasBalanceDue)
-                                    .opacity(paymentSummary.hasBalanceDue ? 1 : 0.55)
+                                    .opacity(paymentSummary.hasBalanceDue || paymentSummary.isPaid ? 1 : 0.55)
                                 }
 
                                 VisitWorkSummarySection(
@@ -429,13 +471,42 @@ struct VisitDetailView: View {
                         .accessibilityLabel("Storm AI")
                 }
             }
-            if env.auth.user.map({ UserRoles.canDeleteVisit($0.role) }) == true {
+            if env.auth.user != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Button("Delete visit", role: .destructive) {
-                            showDeleteConfirm = true
+                        Button {
+                            titleDraft = viewModel.visit?.title ?? ""
+                            showEditTitle = true
+                        } label: {
+                            Label("Edit title", systemImage: "pencil")
                         }
-                        .disabled(viewModel.isDeleting)
+                        .disabled(viewModel.visit == nil || viewModel.isSaving)
+
+                        Button {
+                            showRescheduleSheet = true
+                        } label: {
+                            Label("Reschedule", systemImage: "calendar")
+                        }
+                        .disabled(viewModel.visit == nil || viewModel.isSaving)
+
+                        if let status = viewModel.visit?.status,
+                           status != "CANCELLED",
+                           status != "COMPLETED" {
+                            Button(role: .destructive) {
+                                showCancelConfirm = true
+                            } label: {
+                                Label("Cancel visit", systemImage: "xmark.circle")
+                            }
+                            .disabled(viewModel.isSaving)
+                        }
+
+                        if env.auth.user.map({ UserRoles.canDeleteVisit($0.role) }) == true {
+                            Divider()
+                            Button("Delete visit", role: .destructive) {
+                                showDeleteConfirm = true
+                            }
+                            .disabled(viewModel.isDeleting)
+                        }
                     } label: {
                         Image(systemName: "ellipsis.circle")
                             .accessibilityLabel("More")
@@ -498,11 +569,43 @@ struct VisitDetailView: View {
                 "This job has \((viewModel.visit.map(paymentAmountDue(for:)) ?? finishBillingAmount).formatted(.currency(code: "USD"))) outstanding. Collect now or send an invoice?"
             )
         }
+        .sheet(isPresented: $showRescheduleSheet) {
+            if let visit = viewModel.visit {
+                VisitScheduleEditSheet(visit: visit) {
+                    await reloadVisit()
+                }
+                .environmentObject(env)
+            }
+        }
+        .alert("Edit visit title", isPresented: $showEditTitle) {
+            TextField("Title", text: $titleDraft)
+            Button("Save") {
+                Task {
+                    _ = await viewModel.updateTitle(
+                        api: env.apiClient,
+                        visitId: visitId,
+                        title: titleDraft
+                    )
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         .confirmationDialog(
-            "Are you sure you want to delete this visit?",
-            isPresented: $showDeleteConfirm,
+            "Cancel this visit?",
+            isPresented: $showCancelConfirm,
             titleVisibility: .visible
         ) {
+            Button("Cancel visit", role: .destructive) {
+                Task {
+                    _ = await viewModel.cancelVisit(api: env.apiClient, visitId: visitId)
+                    syncLiveTracking()
+                }
+            }
+            Button("Keep visit", role: .cancel) {}
+        } message: {
+            Text("The visit stays on the customer record and counts toward cancellation reporting. It is not deleted.")
+        }
+        .alert("Are you sure you want to delete this visit?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
                 Task {
                     if await viewModel.deleteVisit(api: env.apiClient, visitId: visitId) {

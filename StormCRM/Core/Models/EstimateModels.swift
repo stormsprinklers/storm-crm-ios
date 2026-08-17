@@ -5,6 +5,7 @@ struct EstimateOptionDTO: Decodable, Identifiable {
     let letter: String?
     let label: String
     let description: String?
+    let internalNotes: String?
     let photoUrl: String?
     let declinedAt: String?
     let sortOrder: Int
@@ -14,7 +15,7 @@ struct EstimateOptionDTO: Decodable, Identifiable {
     let displayNumber: String
 
     enum CodingKeys: String, CodingKey {
-        case id, letter, label, description, photoUrl, declinedAt
+        case id, letter, label, description, internalNotes, photoUrl, declinedAt
         case sortOrder, subtotal, discountTotal, total, displayNumber
     }
 
@@ -24,6 +25,7 @@ struct EstimateOptionDTO: Decodable, Identifiable {
         letter = try container.decodeIfPresent(String.self, forKey: .letter)
         label = try container.decodeIfPresent(String.self, forKey: .label) ?? "Option"
         description = try container.decodeIfPresent(String.self, forKey: .description)
+        internalNotes = try container.decodeIfPresent(String.self, forKey: .internalNotes)
         photoUrl = try container.decodeIfPresent(String.self, forKey: .photoUrl)
         declinedAt = try container.decodeIfPresent(String.self, forKey: .declinedAt)
         sortOrder = try container.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0

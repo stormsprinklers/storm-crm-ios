@@ -12,6 +12,7 @@ struct PropertyIrrigationInlineSection: View {
     @State private var programGuide: ControllerProgramGuideDTO?
     @State private var isLoading = true
     @State private var error: String?
+    @State private var showEditor = false
 
     private var zones: [IrrigationMapZoneDTO] {
         mapProperty?.irrigationMapZones ?? []
@@ -59,20 +60,25 @@ struct PropertyIrrigationInlineSection: View {
                 }
 
                 if showsEditLink {
-                    NavigationLink {
-                        IrrigationMapEditorView(
-                            customerId: customerId,
-                            propertyId: propertyId,
-                            propertyName: propertyName
-                        )
+                    Button {
+                        showEditor = true
                     } label: {
                         Label("Edit irrigation map", systemImage: "pencil")
                             .font(.subheadline)
                     }
+                    .buttonStyle(.borderless)
                     .padding(.top, 4)
                 }
             }
         }
+        .irrigationMapEditorSheet(
+            isPresented: $showEditor,
+            customerId: customerId,
+            propertyId: propertyId,
+            propertyName: propertyName,
+            env: env,
+            onDismiss: { Task { await load() } }
+        )
         .task(id: propertyId) { await load() }
     }
 
@@ -182,9 +188,10 @@ struct VisitPropertyIrrigationPreview: View {
                         .padding(8)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .accessibilityLabel("Edit irrigation map")
             }
+            .zIndex(1)
 
             if isLoading {
                 ProgressView("Loading map…")
@@ -219,18 +226,14 @@ struct VisitPropertyIrrigationPreview: View {
             }
         }
         .task(id: property.id) { await load() }
-        .fullScreenCover(isPresented: $showEditor, onDismiss: {
-            Task { await load() }
-        }) {
-            NavigationStack {
-                IrrigationMapEditorView(
-                    customerId: customerId,
-                    propertyId: property.id,
-                    propertyName: property.name ?? "Property"
-                )
-            }
-            .environmentObject(env)
-        }
+        .irrigationMapEditorSheet(
+            isPresented: $showEditor,
+            customerId: customerId,
+            propertyId: property.id,
+            propertyName: property.name ?? "Property",
+            env: env,
+            onDismiss: { Task { await load() } }
+        )
     }
 
     private func load() async {
@@ -274,6 +277,7 @@ struct IrrigationDetailView: View {
     @State private var mapProperty: IrrigationMapProperty?
     @State private var programGuide: ControllerProgramGuideDTO?
     @State private var error: String?
+    @State private var showEditor = false
 
     var body: some View {
         ScrollView {
@@ -290,12 +294,8 @@ struct IrrigationDetailView: View {
                             StormBadge(text: "Draft", style: .neutral)
                         }
                         Spacer()
-                        NavigationLink {
-                            IrrigationMapEditorView(
-                                customerId: customerId,
-                                propertyId: propertyId,
-                                propertyName: propertyName
-                            )
+                        Button {
+                            showEditor = true
                         } label: {
                             Label("Edit map", systemImage: "pencil")
                         }
@@ -346,6 +346,14 @@ struct IrrigationDetailView: View {
         }
         .background(StormTheme.page.ignoresSafeArea())
         .navigationTitle(propertyName)
+        .irrigationMapEditorSheet(
+            isPresented: $showEditor,
+            customerId: customerId,
+            propertyId: propertyId,
+            propertyName: propertyName,
+            env: env,
+            onDismiss: { Task { await load() } }
+        )
         .refreshable { await load() }
         .task { await load() }
     }

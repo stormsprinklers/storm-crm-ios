@@ -62,10 +62,10 @@ struct EstimateLineItemsEditSection: View {
         .onChange(of: items.map { "\($0.id):\($0.name):\($0.description ?? ""):\($0.quantity):\($0.unitPrice)" }) { _, _ in
             drafts.sync(from: items)
         }
-        .sheet(isPresented: $showPicker) {
-            PriceBookPickerSheet { item in
-                await addFromPriceBook(item)
-            }
+        .sheet(isPresented: $showPicker, onDismiss: {
+            Task { await onUpdated() }
+        }) {
+            PriceBookPickerSheet(owner: .estimate(id: estimateId, optionId: nil))
         }
         .sheet(isPresented: $showCustomItem) {
             CustomLineItemSheet { input in
@@ -89,23 +89,6 @@ struct EstimateLineItemsEditSection: View {
             Spacer()
             Text(item.displayTotal, format: .currency(code: "USD"))
                 .font(.subheadline.weight(.semibold))
-        }
-    }
-
-    private func addFromPriceBook(_ item: PriceBookItemDTO) async {
-        isSaving = true
-        error = nil
-        defer { isSaving = false }
-        do {
-            try await PriceBookLineItemAdding.add(
-                api: env.apiClient,
-                owner: .estimate(id: estimateId, optionId: nil),
-                item: item,
-                optionId: nil
-            )
-            await onUpdated()
-        } catch {
-            self.error = (error as? APIError)?.message
         }
     }
 

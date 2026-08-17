@@ -1,5 +1,29 @@
 import SwiftUI
 
+/// Present the irrigation map editor as a sheet. Destination `NavigationLink`s
+/// do nothing inside path-based `NavigationStack`s (Customers / Schedule).
+extension View {
+    func irrigationMapEditorSheet(
+        isPresented: Binding<Bool>,
+        customerId: String,
+        propertyId: String,
+        propertyName: String,
+        env: AppEnvironment,
+        onDismiss: (() -> Void)? = nil
+    ) -> some View {
+        sheet(isPresented: isPresented, onDismiss: onDismiss) {
+            NavigationStack {
+                IrrigationMapEditorView(
+                    customerId: customerId,
+                    propertyId: propertyId,
+                    propertyName: propertyName
+                )
+            }
+            .environmentObject(env)
+        }
+    }
+}
+
 struct IrrigationMapEditorView: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
