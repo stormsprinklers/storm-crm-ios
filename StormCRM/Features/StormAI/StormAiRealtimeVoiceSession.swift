@@ -344,7 +344,6 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                         break
                     }
                 } catch {
-                    // `self` is already bound by `while let self` above.
                     if !Task.isCancelled, !self.closed {
                         self.lastError = error.localizedDescription
                         self.status = .error
