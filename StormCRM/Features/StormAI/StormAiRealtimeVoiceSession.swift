@@ -43,6 +43,9 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     private var periodicFrameTask: Task<Void, Never>?
     private var lastFrameAt: Date = .distantPast
     private var frameInFlight = false
+    /// While true, do not inject camera frames (would sit between function_call and output).
+    private var suppressUserItems = false
+    private var toolPrefetch: [String: Task<String, Never>] = [:]
     private let targetSampleRate: Double = 24_000
     private let frameMinInterval: TimeInterval = 2.2
     private let framePeriodicInterval: TimeInterval = 3.2
@@ -72,6 +75,9 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         stopInternal(resetStatus: false)
         closed = false
         handledCallIds.removeAll()
+        suppressUserItems = false
+        toolPrefetch.values.forEach { $0.cancel() }
+        toolPrefetch.removeAll()
         self.videoMode = videoMode
         self.visitId = visitId
         status = .connecting
@@ -324,6 +330,8 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     }
 
     private func captureAndSendFrame(reason: String, force: Bool = false) async {
+        // Never insert user/camera items while a function call is awaiting output.
+        guard !suppressUserItems else { return }
         guard videoMode, !closed, let conversationId, let camera else { return }
         let now = Date()
         if !force, now.timeIntervalSince(lastFrameAt) < frameMinInterval { return }
@@ -537,9 +545,12 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 ?? ""
             let argText = (json["arguments"] as? String) ?? pendingArgs[callId] ?? "{}"
             pendingArgs[callId] = nil
-            pendingNames[callId] = nil
+            if !name.isEmpty { pendingNames[callId] = name }
+            // Prefetch only — deliver after response.done.
             if !callId.isEmpty, !name.isEmpty {
-                await runTool(callId: callId, name: name, argText: argText)
+                status = .tool
+                activeToolName = name
+                beginToolPrefetch(callId: callId, name: name, argText: argText)
             }
 
         case "response.output_item.done":
@@ -547,24 +558,31 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                (item["type"] as? String) == "function_call",
                let callId = item["call_id"] as? String,
                let name = item["name"] as? String {
+                pendingNames[callId] = name
+                status = .tool
+                activeToolName = name
                 let argText = (item["arguments"] as? String) ?? pendingArgs[callId] ?? "{}"
-                await runTool(callId: callId, name: name, argText: argText)
+                beginToolPrefetch(callId: callId, name: name, argText: argText)
             }
 
         case "response.done":
             if let response = json["response"] as? [String: Any],
                let outputs = response["output"] as? [[String: Any]] {
-                var hadFunction = false
-                for item in outputs where (item["type"] as? String) == "function_call" {
-                    hadFunction = true
-                    if let callId = item["call_id"] as? String,
-                       let name = item["name"] as? String {
-                        let argText = (item["arguments"] as? String) ?? "{}"
-                        await runTool(callId: callId, name: name, argText: argText)
-                    }
+                let toolItems = outputs.filter {
+                    ($0["type"] as? String) == "function_call"
+                        && ($0["call_id"] as? String)?.isEmpty == false
+                        && ($0["name"] as? String)?.isEmpty == false
                 }
-                if !hadFunction, status != .tool {
-                    status = .listening
+                if toolItems.isEmpty {
+                    if status != .tool { status = .listening }
+                } else {
+                    for item in toolItems {
+                        let callId = item["call_id"] as? String ?? ""
+                        let name = item["name"] as? String ?? ""
+                        let argText = (item["arguments"] as? String) ?? "{}"
+                        await deliverToolOutput(callId: callId, name: name, argText: argText)
+                    }
+                    await finishToolTurn()
                 }
             } else if status != .tool {
                 status = .listening
@@ -609,21 +627,15 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         player.scheduleBuffer(buffer, completionHandler: nil)
     }
 
-    private func runTool(callId: String, name: String, argText: String) async {
-        guard let conversationId, !callId.isEmpty, !name.isEmpty else { return }
-        if handledCallIds.contains(callId) { return }
-        handledCallIds.insert(callId)
+    private func beginToolPrefetch(callId: String, name: String, argText: String) {
+        guard conversationId != nil, toolPrefetch[callId] == nil else { return }
+        suppressUserItems = true
+        toolPrefetch[callId] = Task { await self.fetchToolResult(callId: callId, name: name, argText: argText) }
+    }
 
-        status = .tool
-        activeToolName = name
-
-        if videoMode, name == "search_parts_info" || name == "get_parts_info" {
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { await self.captureAndSendFrame(reason: "before_\(name)", force: true) }
-                group.addTask { try? await Task.sleep(nanoseconds: 1_200_000_000) }
-                await group.next()
-                group.cancelAll()
-            }
+    private func fetchToolResult(callId: String, name: String, argText: String) async -> String {
+        guard let conversationId else {
+            return #"{"ok":false,"error":"Tool request failed"}"#
         }
 
         var argsObject: [String: StormAiJSONValue]?
@@ -632,7 +644,6 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             argsObject = obj.mapValues { StormAiJSONValue(from: $0) }
         }
 
-        var output = #"{"ok":false,"error":"Tool request failed"}"#
         do {
             let resultData = try await api.postRawJSON(
                 path: APIPath.stormAiRealtimeTools,
@@ -645,17 +656,54 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 timeoutInterval: toolTimeout
             )
             if let text = String(data: resultData, encoding: .utf8) {
-                output = text
+                return text
             }
         } catch {
             let message = (error as? APIError)?.message ?? error.localizedDescription
             let timedOut = message.localizedCaseInsensitiveContains("timed out")
                 || message.localizedCaseInsensitiveContains("timeout")
                 || message.localizedCaseInsensitiveContains("cancelled")
-            output = timedOut
+            return timedOut
                 ? #"{"ok":false,"error":"Tool timed out — tell the tech briefly and ask them to continue."}"#
                 : #"{"ok":false,"error":"Tool request failed"}"#
         }
+        return #"{"ok":false,"error":"Tool request failed"}"#
+    }
+
+    private func deliverToolOutput(callId: String, name: String, argText: String) async {
+        guard !callId.isEmpty, !name.isEmpty else { return }
+        if handledCallIds.contains(callId) { return }
+        handledCallIds.insert(callId)
+
+        status = .tool
+        activeToolName = name
+        suppressUserItems = true
+
+        if toolPrefetch[callId] == nil {
+            beginToolPrefetch(callId: callId, name: name, argText: argText)
+        }
+        let output = await toolPrefetch[callId]?.value
+            ?? #"{"ok":false,"error":"Tool request failed"}"#
+        toolPrefetch[callId] = nil
+
+        sendJSON([
+            "type": "session.update",
+            "session": [
+                "type": "realtime",
+                "audio": [
+                    "input": [
+                        "turn_detection": [
+                            "type": "server_vad",
+                            "threshold": 0.78,
+                            "prefix_padding_ms": 400,
+                            "silence_duration_ms": 900,
+                            "interrupt_response": false,
+                            "create_response": true,
+                        ],
+                    ],
+                ],
+            ],
+        ])
 
         let sentOutput = sendJSON([
             "type": "conversation.item.create",
@@ -665,20 +713,51 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 "output": output,
             ],
         ])
+        if !sentOutput {
+            lastError = "Lost connection while looking something up — tap mic to reconnect."
+            status = .error
+        }
+    }
+
+    private func finishToolTurn() async {
         let sentResponse = sendJSON([
             "type": "response.create",
             "response": [
-                "output_modalities": ["audio"],
                 "instructions":
-                    "You just received a tool result. Speak a short, clear answer to the technician now using that result. Do not stay silent. Then stop and listen.",
+                    "A tool result was just added. Speak the answer to the technician now in one or two short sentences using only that result. Do not say you are still waiting. Then stop and listen.",
             ],
         ])
 
-        if !sentOutput || !sentResponse {
+        if !sentResponse {
             lastError = "Lost connection while looking something up — tap mic to reconnect."
             status = .error
+            suppressUserItems = false
             activeToolName = nil
             return
+        }
+
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard let self, !self.closed else { return }
+            self.suppressUserItems = false
+            self.sendJSON([
+                "type": "session.update",
+                "session": [
+                    "type": "realtime",
+                    "audio": [
+                        "input": [
+                            "turn_detection": [
+                                "type": "server_vad",
+                                "threshold": 0.78,
+                                "prefix_padding_ms": 400,
+                                "silence_duration_ms": 900,
+                                "interrupt_response": true,
+                                "create_response": true,
+                            ],
+                        ],
+                    ],
+                ],
+            ])
         }
 
         activeToolName = nil
