@@ -41,18 +41,26 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     private var closed = true
     private var receiveTask: Task<Void, Never>?
     private var periodicFrameTask: Task<Void, Never>?
+    private var searchFallbackTask: Task<Void, Never>?
     private var lastFrameAt: Date = .distantPast
     private var frameInFlight = false
-    /// While true, do not inject camera frames (would sit between function_call and output).
-    private var suppressUserItems = false
+    private var awaitingFunctionOutput = false
+    private var pendingResponseAfterTools = Set<String>()
     private var toolPrefetch: [String: Task<String, Never>] = [:]
+    private var lastUserTranscript = ""
+    private var searchFallbackUsed = false
     private let targetSampleRate: Double = 24_000
     private let frameMinInterval: TimeInterval = 2.2
-    private let framePeriodicInterval: TimeInterval = 3.2
+    private let framePeriodicInterval: TimeInterval = 3.5
     private let toolTimeout: TimeInterval = 25
+    private let searchFallbackDelayNs: UInt64 = 2_500_000_000
 
     private let visualQuestionRegex = try? NSRegularExpression(
         pattern: #"\b(what|which|look|see|show|showing|this|that|valve|solenoid|controller|part|identify|manual)\b"#,
+        options: [.caseInsensitive]
+    )
+    private let searchingSpeechRegex = try? NSRegularExpression(
+        pattern: #"\b(search|searching|look(ing)? up|check(ing)?|parts (list|library|info)|let me (find|check|look|search))\b"#,
         options: [.caseInsensitive]
     )
 
@@ -75,9 +83,12 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         stopInternal(resetStatus: false)
         closed = false
         handledCallIds.removeAll()
-        suppressUserItems = false
+        awaitingFunctionOutput = false
+        pendingResponseAfterTools.removeAll()
         toolPrefetch.values.forEach { $0.cancel() }
         toolPrefetch.removeAll()
+        searchFallbackUsed = false
+        clearSearchFallback()
         self.videoMode = videoMode
         self.visitId = visitId
         status = .connecting
@@ -135,7 +146,6 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         }
     }
 
-    /// Turn camera on without ending the voice session (same conversation).
     func enableVideo() async {
         guard isActive, !closed else {
             lastError = "Start voice first"
@@ -174,7 +184,6 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         await captureAndSendFrame(reason: "video_enabled", force: true)
     }
 
-    /// Turn camera off but keep the live voice session.
     func disableVideo() {
         guard videoMode else { return }
         stopPeriodicFrames()
@@ -203,6 +212,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
 
     private func stopInternal(resetStatus: Bool) {
         closed = true
+        clearSearchFallback()
         stopPeriodicFrames()
         receiveTask?.cancel()
         receiveTask = nil
@@ -244,6 +254,11 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     private func stopPeriodicFrames() {
         periodicFrameTask?.cancel()
         periodicFrameTask = nil
+    }
+
+    private func clearSearchFallback() {
+        searchFallbackTask?.cancel()
+        searchFallbackTask = nil
     }
 
     private func connectWebSocket(clientSecret: String, model: String) async throws {
@@ -330,8 +345,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     }
 
     private func captureAndSendFrame(reason: String, force: Bool = false) async {
-        // Never insert user/camera items while a function call is awaiting output.
-        guard !suppressUserItems else { return }
+        guard !awaitingFunctionOutput else { return }
         guard videoMode, !closed, let conversationId, let camera else { return }
         let now = Date()
         if !force, now.timeIntervalSince(lastFrameAt) < frameMinInterval { return }
@@ -502,11 +516,12 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             }
 
         case "response.cancelled", "output_audio_buffer.stopped":
-            if status != .tool { status = .listening }
+            if !awaitingFunctionOutput { status = .listening }
 
         case "conversation.item.input_audio_transcription.completed",
              "conversation.item.input_audio.transcription.completed":
             if let transcript = json["transcript"] as? String, !transcript.isEmpty {
+                lastUserTranscript = transcript
                 onTranscript?("user", transcript)
                 if videoMode, looksLikeVisualQuestion(transcript) {
                     Task { await captureAndSendFrame(reason: "visual_question", force: true) }
@@ -516,6 +531,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         case "response.output_audio_transcript.done", "response.audio_transcript.done":
             if let transcript = json["transcript"] as? String, !transcript.isEmpty {
                 onTranscript?("assistant", transcript)
+                maybeScheduleSearchFallback(transcript)
             }
 
         case "response.output_item.added":
@@ -526,6 +542,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 pendingNames[callId] = name
                 status = .tool
                 activeToolName = name
+                clearSearchFallback()
             }
 
         case "response.function_call_arguments.delta":
@@ -546,11 +563,9 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             let argText = (json["arguments"] as? String) ?? pendingArgs[callId] ?? "{}"
             pendingArgs[callId] = nil
             if !name.isEmpty { pendingNames[callId] = name }
-            // Prefetch only — deliver after response.done.
             if !callId.isEmpty, !name.isEmpty {
-                status = .tool
-                activeToolName = name
-                beginToolPrefetch(callId: callId, name: name, argText: argText)
+                clearSearchFallback()
+                await completeFunctionCall(callId: callId, name: name, argText: argText)
             }
 
         case "response.output_item.done":
@@ -558,33 +573,29 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                (item["type"] as? String) == "function_call",
                let callId = item["call_id"] as? String,
                let name = item["name"] as? String {
-                pendingNames[callId] = name
-                status = .tool
-                activeToolName = name
+                clearSearchFallback()
                 let argText = (item["arguments"] as? String) ?? pendingArgs[callId] ?? "{}"
-                beginToolPrefetch(callId: callId, name: name, argText: argText)
+                await completeFunctionCall(callId: callId, name: name, argText: argText)
             }
 
         case "response.done":
             if let response = json["response"] as? [String: Any],
                let outputs = response["output"] as? [[String: Any]] {
-                let toolItems = outputs.filter {
-                    ($0["type"] as? String) == "function_call"
-                        && ($0["call_id"] as? String)?.isEmpty == false
-                        && ($0["name"] as? String)?.isEmpty == false
-                }
-                if toolItems.isEmpty {
-                    if status != .tool { status = .listening }
-                } else {
-                    for item in toolItems {
-                        let callId = item["call_id"] as? String ?? ""
-                        let name = item["name"] as? String ?? ""
+                for item in outputs where (item["type"] as? String) == "function_call" {
+                    if let callId = item["call_id"] as? String,
+                       let name = item["name"] as? String {
+                        clearSearchFallback()
                         let argText = (item["arguments"] as? String) ?? "{}"
-                        await deliverToolOutput(callId: callId, name: name, argText: argText)
+                        await completeFunctionCall(callId: callId, name: name, argText: argText)
                     }
-                    await finishToolTurn()
                 }
-            } else if status != .tool {
+            }
+
+            if !pendingResponseAfterTools.isEmpty {
+                pendingResponseAfterTools.removeAll()
+                awaitingFunctionOutput = false
+                requestSpokenToolFollowUp()
+            } else if !awaitingFunctionOutput {
                 status = .listening
             }
 
@@ -595,6 +606,12 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
 
     private func looksLikeVisualQuestion(_ text: String) -> Bool {
         guard let regex = visualQuestionRegex else { return false }
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        return regex.firstMatch(in: text, options: [], range: range) != nil
+    }
+
+    private func looksLikeSearchingSpeech(_ text: String) -> Bool {
+        guard let regex = searchingSpeechRegex else { return false }
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         return regex.firstMatch(in: text, options: [], range: range) != nil
     }
@@ -627,10 +644,50 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         player.scheduleBuffer(buffer, completionHandler: nil)
     }
 
-    private func beginToolPrefetch(callId: String, name: String, argText: String) {
-        guard conversationId != nil, toolPrefetch[callId] == nil else { return }
-        suppressUserItems = true
-        toolPrefetch[callId] = Task { await self.fetchToolResult(callId: callId, name: name, argText: argText) }
+    private func completeFunctionCall(callId: String, name: String, argText: String) async {
+        guard !callId.isEmpty, !name.isEmpty else { return }
+        if handledCallIds.contains(callId) { return }
+        handledCallIds.insert(callId)
+
+        awaitingFunctionOutput = true
+        pendingResponseAfterTools.insert(callId)
+        status = .tool
+        activeToolName = name
+
+        if toolPrefetch[callId] == nil {
+            toolPrefetch[callId] = Task {
+                await self.fetchToolResult(callId: callId, name: name, argText: argText)
+            }
+        }
+        let output = await toolPrefetch[callId]?.value
+            ?? #"{"ok":false,"error":"Tool request failed"}"#
+        toolPrefetch[callId] = nil
+
+        let sent = sendJSON([
+            "type": "conversation.item.create",
+            "item": [
+                "type": "function_call_output",
+                "call_id": callId,
+                "output": output,
+            ],
+        ])
+        if !sent {
+            lastError = "Lost connection while looking something up — tap mic to reconnect."
+            status = .error
+            awaitingFunctionOutput = false
+            pendingResponseAfterTools.remove(callId)
+        }
+    }
+
+    private func requestSpokenToolFollowUp() {
+        let sent = sendJSON(["type": "response.create"])
+        if !sent {
+            lastError = "Lost connection while looking something up — tap mic to reconnect."
+            status = .error
+            return
+        }
+        activeToolName = nil
+        status = .speaking
     }
 
     private func fetchToolResult(callId: String, name: String, argText: String) async -> String {
@@ -670,97 +727,86 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         return #"{"ok":false,"error":"Tool request failed"}"#
     }
 
-    private func deliverToolOutput(callId: String, name: String, argText: String) async {
-        guard !callId.isEmpty, !name.isEmpty else { return }
-        if handledCallIds.contains(callId) { return }
-        handledCallIds.insert(callId)
+    private func maybeScheduleSearchFallback(_ assistantTranscript: String) {
+        guard looksLikeSearchingSpeech(assistantTranscript) else { return }
+        guard !searchFallbackUsed, !awaitingFunctionOutput, pendingResponseAfterTools.isEmpty else { return }
 
-        status = .tool
-        activeToolName = name
-        suppressUserItems = true
-
-        if toolPrefetch[callId] == nil {
-            beginToolPrefetch(callId: callId, name: name, argText: argText)
-        }
-        let output = await toolPrefetch[callId]?.value
-            ?? #"{"ok":false,"error":"Tool request failed"}"#
-        toolPrefetch[callId] = nil
-
-        sendJSON([
-            "type": "session.update",
-            "session": [
-                "type": "realtime",
-                "audio": [
-                    "input": [
-                        "turn_detection": [
-                            "type": "server_vad",
-                            "threshold": 0.78,
-                            "prefix_padding_ms": 400,
-                            "silence_duration_ms": 900,
-                            "interrupt_response": false,
-                            "create_response": true,
-                        ],
-                    ],
-                ],
-            ],
-        ])
-
-        let sentOutput = sendJSON([
-            "type": "conversation.item.create",
-            "item": [
-                "type": "function_call_output",
-                "call_id": callId,
-                "output": output,
-            ],
-        ])
-        if !sentOutput {
-            lastError = "Lost connection while looking something up — tap mic to reconnect."
-            status = .error
+        clearSearchFallback()
+        searchFallbackTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: self?.searchFallbackDelayNs ?? 2_500_000_000)
+            guard let self, !Task.isCancelled else { return }
+            await self.runSearchFallback()
         }
     }
 
-    private func finishToolTurn() async {
-        let sentResponse = sendJSON([
-            "type": "response.create",
-            "response": [
-                "instructions":
-                    "A tool result was just added. Speak the answer to the technician now in one or two short sentences using only that result. Do not say you are still waiting. Then stop and listen.",
-            ],
-        ])
+    private func runSearchFallback() async {
+        guard !closed, !searchFallbackUsed, !awaitingFunctionOutput else { return }
+        guard pendingResponseAfterTools.isEmpty, conversationId != nil else { return }
 
-        if !sentResponse {
-            lastError = "Lost connection while looking something up — tap mic to reconnect."
-            status = .error
-            suppressUserItems = false
-            activeToolName = nil
-            return
+        searchFallbackUsed = true
+        status = .tool
+        activeToolName = "search_parts_info"
+
+        let query = lastUserTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "identify irrigation part from camera description valve solenoid controller"
+            : lastUserTranscript
+
+        let argText: String
+        if let data = try? JSONSerialization.data(withJSONObject: ["query": query]),
+           let encoded = String(data: data, encoding: .utf8) {
+            argText = encoded
+        } else {
+            argText = #"{"query":"identify irrigation part"}"#
         }
 
-        Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
-            guard let self, !self.closed else { return }
-            self.suppressUserItems = false
-            self.sendJSON([
-                "type": "session.update",
-                "session": [
-                    "type": "realtime",
-                    "audio": [
-                        "input": [
-                            "turn_detection": [
-                                "type": "server_vad",
-                                "threshold": 0.78,
-                                "prefix_padding_ms": 400,
-                                "silence_duration_ms": 900,
-                                "interrupt_response": true,
-                                "create_response": true,
-                            ],
-                        ],
+        let result = await fetchToolResult(
+            callId: "fallback-\(Int(Date().timeIntervalSince1970))",
+            name: "search_parts_info",
+            argText: argText
+        )
+
+        let spoken = formatPartsFallbackSpeech(resultJson: result)
+        sendJSON([
+            "type": "conversation.item.create",
+            "item": [
+                "type": "message",
+                "role": "user",
+                "content": [
+                    [
+                        "type": "input_text",
+                        "text": "[Parts library search already completed. Results JSON follows. Speak the answer to the technician now using only these results. Do not say you are still searching or waiting.]\n\(result)",
                     ],
                 ],
-            ])
-        }
-
+            ],
+        ])
+        sendJSON([
+            "type": "response.create",
+            "response": [
+                "instructions": spoken
+                    ?? "Tell the technician the parts library search finished and summarize the tool JSON that was just added. Do not say you are still waiting.",
+            ],
+        ])
         activeToolName = nil
         status = .speaking
+
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 15_000_000_000)
+            self?.searchFallbackUsed = false
+        }
+    }
+
+    private func formatPartsFallbackSpeech(resultJson: String) -> String? {
+        guard let data = resultJson.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        let payload = (root["data"] as? [String: Any]) ?? root
+        let parts = payload["parts"] as? [[String: Any]] ?? []
+        guard let top = parts.first else {
+            return "Speak this: I checked the parts library and did not find a match for what you are showing. Then stop and listen."
+        }
+        let name = top["name"] as? String ?? "a matching part"
+        let manufacturer = (top["manufacturer"] as? String).flatMap { $0.isEmpty ? nil : " by \($0)" } ?? ""
+        let partNumber = (top["partNumber"] as? String).flatMap { $0.isEmpty ? nil : ", part number \($0)" } ?? ""
+        return "Speak this to the technician now, then stop and listen: From the parts library, this looks like \(name)\(manufacturer)\(partNumber)."
     }
 }
