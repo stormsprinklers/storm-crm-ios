@@ -145,15 +145,7 @@ struct EstimatePresentView: View {
                 .accessibilityLabel("Rename option")
             }
             .padding()
-            Group {
-                if let photoUrl = option.photoUrl, !photoUrl.isEmpty {
-                    AuthenticatedBlobImage(urlString: photoUrl, contentMode: .fill)
-                } else {
-                    Color.gray.opacity(0.2)
-                }
-            }
-            .frame(height: 160)
-            .clipped()
+            presentPhoto(url: option.photoUrl, height: 160)
             VStack(alignment: .leading, spacing: 4) {
                 Text(description.isEmpty ? " " : description)
                     .font(.subheadline)
@@ -197,52 +189,59 @@ struct EstimatePresentView: View {
         }
     }
 
+    private func presentPhoto(url: String?, height: CGFloat) -> some View {
+        Color(uiColor: .secondarySystemFill)
+            .frame(maxWidth: .infinity)
+            .frame(height: height)
+            .overlay {
+                if let url, !url.isEmpty {
+                    AuthenticatedBlobImage(urlString: url, contentMode: .fill)
+                }
+            }
+            .clipped()
+    }
+
     private func optionDetail(_ option: EstimateOptionDTO, estimate: EstimateDetailDTO) -> some View {
         NavigationStack {
-            List {
-                if let photoUrl = option.photoUrl, !photoUrl.isEmpty {
+            VStack(spacing: 0) {
+                presentPhoto(url: option.photoUrl, height: 220)
+                List {
                     Section {
-                        AuthenticatedBlobImage(urlString: photoUrl, contentMode: .fill)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 220)
-                            .clipped()
-                            .listRowInsets(EdgeInsets())
+                        Text(option.total, format: .currency(code: "USD"))
+                            .font(.title2.weight(.bold))
+                        if let description = option.description, !description.isEmpty {
+                            Text(description)
+                        }
                     }
-                }
-                Section {
-                    Text(option.total, format: .currency(code: "USD"))
-                        .font(.title2.weight(.bold))
-                    if let description = option.description, !description.isEmpty {
-                        Text(description)
-                    }
-                }
-                Section("Line items") {
-                    ForEach(estimate.lineItems.filter { $0.optionId == option.id || $0.optionId == nil }) { item in
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(item.name)
-                                if let description = item.description, !description.isEmpty {
-                                    Text(description).font(.caption).foregroundStyle(.secondary)
+                    Section("Line items") {
+                        ForEach(estimate.lineItems.filter { $0.optionId == option.id || $0.optionId == nil }) { item in
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(item.name)
+                                    if let description = item.description, !description.isEmpty {
+                                        Text(description).font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
+                                Spacer()
+                                Text(item.displayTotal, format: .currency(code: "USD"))
                             }
-                            Spacer()
-                            Text(item.displayTotal, format: .currency(code: "USD"))
                         }
                     }
-                }
-                if estimate.status != "APPROVED" && estimate.status != "CONVERTED" {
-                    Section {
-                        Button("Approve this option") {
-                            onApproveOption(option.id, option.total)
-                            dismiss()
+                    if estimate.status != "APPROVED" && estimate.status != "CONVERTED" {
+                        Section {
+                            Button("Approve this option") {
+                                onApproveOption(option.id, option.total)
+                                dismiss()
+                            }
+                            Button("Decline", role: .destructive) {
+                                Task { await decline(option.id) }
+                            }
+                            .disabled(isDeclining)
                         }
-                        Button("Decline", role: .destructive) {
-                            Task { await decline(option.id) }
-                        }
-                        .disabled(isDeclining)
                     }
                 }
             }
+            .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle(option.label)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

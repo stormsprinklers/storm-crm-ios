@@ -19,6 +19,7 @@ enum BlobImageURL {
 
     static func needsAuthentication(_ storedUrl: String?) -> Bool {
         guard let storedUrl else { return false }
+        if storedUrl.contains("/api/public/blob") { return false }
         return storedUrl.contains("blob.vercel-storage.com") || storedUrl.contains("/api/blob")
     }
 }
@@ -33,17 +34,20 @@ struct AuthenticatedBlobImage: View {
     @State private var failed = false
 
     var body: some View {
-        Group {
+        ZStack {
             if let image {
                 Image(uiImage: image)
                     .resizable()
                     .aspectRatio(contentMode: contentMode)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if failed {
                 placeholder("Could not load image")
             } else {
                 ProgressView()
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
         .task(id: urlString) { await load() }
     }
 
@@ -67,8 +71,8 @@ struct AuthenticatedBlobImage: View {
         }
 
         var request = URLRequest(url: url)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if BlobImageURL.needsAuthentication(urlString),
+        request.setValue("image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        if BlobImageURL.needsAuthentication(urlString) || BlobImageURL.needsAuthentication(url.absoluteString),
            let token = env.tokenStore.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
