@@ -14,14 +14,53 @@ struct StormAiAttachmentDTO: Decodable, Hashable {
     let url: String
 }
 
+struct StormAiPartsCardPhotoDTO: Decodable, Hashable {
+    let id: String?
+    let url: String
+    let fileName: String
+}
+
+struct StormAiPartsCardDTO: Decodable, Hashable, Identifiable {
+    let kind: String
+    let partId: String
+    let name: String
+    let manufacturer: String?
+    let partNumber: String?
+    let section: String?
+    let visualDescription: String?
+    let technicalDescription: String?
+    let manualUrl: String?
+    let manualKind: String?
+    let photos: [StormAiPartsCardPhotoDTO]
+
+    var id: String { partId }
+}
+
 struct StormAiMessageDTO: Decodable, Identifiable {
     let id: String
     let role: String
     let content: String
     let createdAt: String
     let attachments: [StormAiAttachmentDTO]?
+    let partsCard: StormAiPartsCardDTO?
 
     var isUser: Bool { role == "user" }
+
+    init(
+        id: String,
+        role: String,
+        content: String,
+        createdAt: String,
+        attachments: [StormAiAttachmentDTO]?,
+        partsCard: StormAiPartsCardDTO? = nil
+    ) {
+        self.id = id
+        self.role = role
+        self.content = content
+        self.createdAt = createdAt
+        self.attachments = attachments
+        self.partsCard = partsCard
+    }
 }
 
 struct StormAiConversationListResponse: Decodable {

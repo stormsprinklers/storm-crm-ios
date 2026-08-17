@@ -124,18 +124,35 @@ struct StormAiCameraPreview: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
-        view.previewLayer.session = session
         view.previewLayer.videoGravity = .resizeAspectFill
+        view.attach(session: session)
         return view
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
-        uiView.previewLayer.session = session
+        uiView.attach(session: session)
     }
 
     final class PreviewView: UIView {
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
         var previewLayer: AVCaptureVideoPreviewLayer { layer as! AVCaptureVideoPreviewLayer }
+
+        func attach(session: AVCaptureSession) {
+            if previewLayer.session !== session {
+                previewLayer.session = session
+            }
+            previewLayer.videoGravity = .resizeAspectFill
+            // Re-bind on the next run loop so the layer is in the hierarchy when mid-call video starts.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if self.previewLayer.session !== session {
+                    self.previewLayer.session = session
+                }
+                if let connection = self.previewLayer.connection, connection.isEnabled == false {
+                    connection.isEnabled = true
+                }
+            }
+        }
     }
 }
 

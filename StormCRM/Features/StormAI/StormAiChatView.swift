@@ -75,6 +75,7 @@ struct StormAiChatView: View {
 
                         if voiceActive, videoModeActive, let session = voiceSession?.cameraSession {
                             StormAiCameraPreview(session: session)
+                                .id(ObjectIdentifier(session))
                                 .frame(height: 220)
                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             Text("Live preview — frames are captured automatically for the AI")
@@ -303,6 +304,19 @@ struct StormAiChatView: View {
         session.onVideoModeChange = { enabled in
             videoModeActive = enabled
         }
+        session.onPartsCard = { card in
+            if messages.contains(where: { $0.partsCard?.partId == card.partId }) { return }
+            messages.append(
+                StormAiMessageDTO(
+                    id: "parts-\(card.partId)-\(UUID().uuidString)",
+                    role: "assistant",
+                    content: card.name,
+                    createdAt: ISO8601DateFormatter().string(from: Date()),
+                    attachments: nil,
+                    partsCard: card
+                )
+            )
+        }
         session.onFrameSavedToJob = { saved in
             if saved {
                 frameSavedToast = "Frame saved to job attachments"
@@ -432,21 +446,73 @@ struct StormAiChatView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
                 }
-                Group {
-                    if let attributed = try? AttributedString(markdown: message.content) {
-                        Text(attributed)
-                    } else {
-                        Text(message.content)
+                if let card = message.partsCard {
+                    partsCardView(card)
+                } else {
+                    Group {
+                        if let attributed = try? AttributedString(markdown: message.content) {
+                            Text(attributed)
+                        } else {
+                            Text(message.content)
+                        }
                     }
+                    .font(.subheadline)
+                    .foregroundStyle(StormTheme.navy)
+                    .padding(12)
+                    .background(message.isUser ? StormTheme.sky.opacity(0.18) : Color(.secondarySystemFill))
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-                .font(.subheadline)
-                .foregroundStyle(StormTheme.navy)
-                .padding(12)
-                .background(message.isUser ? StormTheme.sky.opacity(0.18) : Color(.secondarySystemFill))
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             if !message.isUser { Spacer(minLength: 40) }
         }
+    }
+
+    private func partsCardView(_ card: StormAiPartsCardDTO) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(card.name)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(StormTheme.navy)
+
+            if !card.photos.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(card.photos, id: \.url) { photo in
+                            AuthenticatedBlobImage(urlString: photo.url, contentMode: .fill)
+                                .frame(width: 120, height: 120)
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                    }
+                }
+            }
+
+            let meta = [card.manufacturer, card.partNumber, card.section]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+                .joined(separator: " · ")
+            if !meta.isEmpty {
+                Text(meta)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let visual = card.visualDescription, !visual.isEmpty {
+                Text(visual)
+                    .font(.subheadline)
+                    .foregroundStyle(StormTheme.navy)
+            }
+            if let tech = card.technicalDescription, !tech.isEmpty {
+                Text(tech)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            if let manualUrl = card.manualUrl, let url = URL(string: manualUrl) {
+                Link(card.manualKind == "pdf" ? "Open manual (PDF)" : "Open manual", destination: url)
+                    .font(.subheadline.weight(.medium))
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemFill))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {

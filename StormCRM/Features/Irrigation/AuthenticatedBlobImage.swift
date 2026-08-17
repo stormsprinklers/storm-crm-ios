@@ -19,7 +19,7 @@ enum BlobImageURL {
 
     static func needsAuthentication(_ storedUrl: String?) -> Bool {
         guard let storedUrl else { return false }
-        return storedUrl.contains("blob.vercel-storage.com") || storedUrl.hasPrefix("/api/blob")
+        return storedUrl.contains("blob.vercel-storage.com") || storedUrl.contains("/api/blob")
     }
 }
 

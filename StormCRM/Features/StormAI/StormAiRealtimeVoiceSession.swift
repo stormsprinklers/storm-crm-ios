@@ -24,6 +24,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     var onStatusChange: ((Status) -> Void)?
     var onFrameSavedToJob: ((Bool) -> Void)?
     var onVideoModeChange: ((Bool) -> Void)?
+    var onPartsCard: ((StormAiPartsCardDTO) -> Void)?
 
     private let api: APIClient
     private var conversationId: String?
@@ -42,10 +43,13 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     private var receiveTask: Task<Void, Never>?
     private var periodicFrameTask: Task<Void, Never>?
     private var searchFallbackTask: Task<Void, Never>?
+    private var followUpTask: Task<Void, Never>?
     private var lastFrameAt: Date = .distantPast
     private var frameInFlight = false
     private var awaitingFunctionOutput = false
-    private var pendingResponseAfterTools = Set<String>()
+    private var needsSpokenFollowUp = false
+    private var inFlightTools = 0
+    private var modelResponseActive = false
     private var toolPrefetch: [String: Task<String, Never>] = [:]
     private var lastUserTranscript = ""
     private var searchFallbackUsed = false
@@ -84,7 +88,10 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         closed = false
         handledCallIds.removeAll()
         awaitingFunctionOutput = false
-        pendingResponseAfterTools.removeAll()
+        needsSpokenFollowUp = false
+        inFlightTools = 0
+        modelResponseActive = false
+        clearFollowUpTimer()
         toolPrefetch.values.forEach { $0.cancel() }
         toolPrefetch.removeAll()
         searchFallbackUsed = false
@@ -158,6 +165,9 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             return
         }
 
+        // voiceChat mode can blank the camera preview — switch to videoChat first.
+        try? reconfigureAudioSession(forVideo: true)
+
         let cam = StormAiCameraController()
         let started = await cam.start()
         if !started {
@@ -165,6 +175,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             return
         }
         camera = cam
+        objectWillChange.send()
         videoMode = true
         onVideoModeChange?(true)
         sendJSON([
@@ -190,7 +201,9 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         camera?.stop()
         camera = nil
         videoMode = false
+        objectWillChange.send()
         onVideoModeChange?(false)
+        try? reconfigureAudioSession(forVideo: false)
         sendJSON([
             "type": "conversation.item.create",
             "item": [
@@ -213,6 +226,10 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     private func stopInternal(resetStatus: Bool) {
         closed = true
         clearSearchFallback()
+        clearFollowUpTimer()
+        needsSpokenFollowUp = false
+        inFlightTools = 0
+        modelResponseActive = false
         stopPeriodicFrames()
         receiveTask?.cancel()
         receiveTask = nil
@@ -259,6 +276,22 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     private func clearSearchFallback() {
         searchFallbackTask?.cancel()
         searchFallbackTask = nil
+    }
+
+    private func clearFollowUpTimer() {
+        followUpTask?.cancel()
+        followUpTask = nil
+    }
+
+    private func reconfigureAudioSession(forVideo: Bool) throws {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(
+            .playAndRecord,
+            mode: forVideo ? .videoChat : .voiceChat,
+            options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers]
+        )
+        try session.setPreferredSampleRate(targetSampleRate)
+        try session.setActive(true, options: [])
     }
 
     private func connectWebSocket(clientSecret: String, model: String) async throws {
@@ -408,14 +441,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     }
 
     private func configureAudio() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(
-            .playAndRecord,
-            mode: .voiceChat,
-            options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers]
-        )
-        try session.setPreferredSampleRate(targetSampleRate)
-        try session.setActive(true, options: [])
+        try reconfigureAudioSession(forVideo: videoMode)
 
         let engine = AVAudioEngine()
         let player = AVAudioPlayerNode()
@@ -507,6 +533,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             }
 
         case "response.created", "output_audio_buffer.started":
+            if type == "response.created" { modelResponseActive = true }
             status = .speaking
 
         case "response.output_audio.delta", "response.audio.delta":
@@ -516,7 +543,8 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             }
 
         case "response.cancelled", "output_audio_buffer.stopped":
-            if !awaitingFunctionOutput { status = .listening }
+            if type == "response.cancelled" { modelResponseActive = false }
+            if !awaitingFunctionOutput, !needsSpokenFollowUp { status = .listening }
 
         case "conversation.item.input_audio_transcription.completed",
              "conversation.item.input_audio.transcription.completed":
@@ -579,6 +607,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             }
 
         case "response.done":
+            modelResponseActive = false
             if let response = json["response"] as? [String: Any],
                let outputs = response["output"] as? [[String: Any]] {
                 for item in outputs where (item["type"] as? String) == "function_call" {
@@ -591,11 +620,8 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 }
             }
 
-            if !pendingResponseAfterTools.isEmpty {
-                pendingResponseAfterTools.removeAll()
-                awaitingFunctionOutput = false
-                requestSpokenToolFollowUp()
-            } else if !awaitingFunctionOutput {
+            scheduleSpokenFollowUp(delayNs: 80_000_000)
+            if !awaitingFunctionOutput, !needsSpokenFollowUp, inFlightTools == 0 {
                 status = .listening
             }
 
@@ -650,7 +676,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         handledCallIds.insert(callId)
 
         awaitingFunctionOutput = true
-        pendingResponseAfterTools.insert(callId)
+        inFlightTools += 1
         status = .tool
         activeToolName = name
 
@@ -663,20 +689,71 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             ?? #"{"ok":false,"error":"Tool request failed"}"#
         toolPrefetch[callId] = nil
 
+        publishPartsCard(from: output)
+        let forModel = stripChatCard(from: output)
+
         let sent = sendJSON([
             "type": "conversation.item.create",
             "item": [
                 "type": "function_call_output",
                 "call_id": callId,
-                "output": output,
+                "output": forModel,
             ],
         ])
+        inFlightTools = max(0, inFlightTools - 1)
         if !sent {
             lastError = "Lost connection while looking something up — tap mic to reconnect."
             status = .error
             awaitingFunctionOutput = false
-            pendingResponseAfterTools.remove(callId)
+            return
         }
+
+        if inFlightTools == 0 {
+            awaitingFunctionOutput = false
+            needsSpokenFollowUp = true
+            scheduleSpokenFollowUp(delayNs: 250_000_000)
+        }
+    }
+
+    private func scheduleSpokenFollowUp(delayNs: UInt64) {
+        clearFollowUpTimer()
+        followUpTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delayNs)
+            guard let self, !Task.isCancelled else { return }
+            if self.closed { return }
+            if self.inFlightTools > 0 || self.awaitingFunctionOutput {
+                self.scheduleSpokenFollowUp(delayNs: 150_000_000)
+                return
+            }
+            if self.modelResponseActive {
+                self.scheduleSpokenFollowUp(delayNs: 150_000_000)
+                return
+            }
+            guard self.needsSpokenFollowUp else { return }
+            self.needsSpokenFollowUp = false
+            self.requestSpokenToolFollowUp()
+        }
+    }
+
+    private func publishPartsCard(from resultJson: String) {
+        guard let data = resultJson.data(using: .utf8),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let cardObj = root["chatCard"] as? [String: Any],
+              let cardData = try? JSONSerialization.data(withJSONObject: cardObj),
+              let card = try? JSONDecoder().decode(StormAiPartsCardDTO.self, from: cardData)
+        else { return }
+        onPartsCard?(card)
+    }
+
+    private func stripChatCard(from resultJson: String) -> String {
+        guard let data = resultJson.data(using: .utf8),
+              var root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return resultJson }
+        root.removeValue(forKey: "chatCard")
+        guard let out = try? JSONSerialization.data(withJSONObject: root),
+              let text = String(data: out, encoding: .utf8)
+        else { return resultJson }
+        return text
     }
 
     private func requestSpokenToolFollowUp() {
@@ -686,6 +763,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             status = .error
             return
         }
+        modelResponseActive = true
         activeToolName = nil
         status = .speaking
     }
@@ -729,7 +807,8 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
 
     private func maybeScheduleSearchFallback(_ assistantTranscript: String) {
         guard looksLikeSearchingSpeech(assistantTranscript) else { return }
-        guard !searchFallbackUsed, !awaitingFunctionOutput, pendingResponseAfterTools.isEmpty else { return }
+        guard !searchFallbackUsed, !awaitingFunctionOutput else { return }
+        guard !needsSpokenFollowUp, inFlightTools == 0 else { return }
 
         clearSearchFallback()
         searchFallbackTask = Task { [weak self] in
@@ -741,7 +820,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
 
     private func runSearchFallback() async {
         guard !closed, !searchFallbackUsed, !awaitingFunctionOutput else { return }
-        guard pendingResponseAfterTools.isEmpty, conversationId != nil else { return }
+        guard !needsSpokenFollowUp, inFlightTools == 0, conversationId != nil else { return }
 
         searchFallbackUsed = true
         status = .tool
@@ -765,6 +844,8 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             argText: argText
         )
 
+        publishPartsCard(from: result)
+
         let spoken = formatPartsFallbackSpeech(resultJson: result)
         sendJSON([
             "type": "conversation.item.create",
@@ -774,7 +855,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 "content": [
                     [
                         "type": "input_text",
-                        "text": "[Parts library search already completed. Results JSON follows. Speak the answer to the technician now using only these results. Do not say you are still searching or waiting.]\n\(result)",
+                        "text": "[Parts library search already completed. Results JSON follows. Speak the answer to the technician now using only these results. Do not say you are still searching or waiting. Photos and manuals are already shown in chat.]\n\(stripChatCard(from: result))",
                     ],
                 ],
             ],
@@ -786,6 +867,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                     ?? "Tell the technician the parts library search finished and summarize the tool JSON that was just added. Do not say you are still waiting.",
             ],
         ])
+        modelResponseActive = true
         activeToolName = nil
         status = .speaking
 
