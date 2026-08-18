@@ -91,6 +91,15 @@ enum OfflineCacheBootstrap {
         return try? JSONCoding.makeDecoder().decode(VisitDTO.self, from: cached.jsonData)
     }
 
+    static func cachedVisits(from start: Date, to end: Date, context: ModelContext) -> [VisitDTO] {
+        let descriptor = FetchDescriptor<CachedVisit>(
+            predicate: #Predicate { $0.startAt >= start && $0.startAt <= end },
+            sortBy: [SortDescriptor(\.startAt, order: .forward)]
+        )
+        let rows = (try? context.fetch(descriptor)) ?? []
+        return rows.compactMap { try? JSONCoding.makeDecoder().decode(VisitDTO.self, from: $0.jsonData) }
+    }
+
     private static func pruneOldVisits(context: ModelContext) {
         let cutoff = Calendar.current.date(byAdding: .day, value: -21, to: Date()) ?? Date()
         let descriptor = FetchDescriptor<CachedVisit>(predicate: #Predicate { $0.startAt < cutoff })

@@ -36,6 +36,15 @@ final class APIClient {
         return try await perform(request)
     }
 
+    func getData(
+        path: String,
+        query: [URLQueryItem] = [],
+        authenticated: Bool = true
+    ) async throws -> Data {
+        let request = try await buildRequest(path: path, method: "GET", query: query, authenticated: authenticated)
+        return try await performData(request)
+    }
+
     func post<T: Decodable, B: Encodable>(
         path: String,
         body: B,

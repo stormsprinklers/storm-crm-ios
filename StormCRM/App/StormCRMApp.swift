@@ -53,6 +53,7 @@ struct RootView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var appearanceSettings: AppearanceSettings
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -73,6 +74,10 @@ struct RootView: View {
                         }
                         .onReceive(NotificationCenter.default.publisher(for: .pushDeviceTokenUpdated)) { _ in
                             Task { await PushNotificationManager.shared.syncToken(api: env.apiClient) }
+                        }
+                        .onChange(of: scenePhase) { _, phase in
+                            guard phase == .active else { return }
+                            Task { await env.voice.refreshIncomingCalls() }
                         }
                 } else {
                     LoginView()

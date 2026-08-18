@@ -456,10 +456,6 @@ struct PaymentSheet: View {
                                 .background(Color.white)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                         }
-                        Text(payLink)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                            .multilineTextAlignment(.center)
                         if let lastCardError {
                             Text(lastCardError)
                                 .font(.subheadline.weight(.semibold))
@@ -574,8 +570,8 @@ struct PaymentSheet: View {
                 path: APIPath.paymentsCheckout,
                 body: Body(visitId: visitId, mobileReturn: true, platform: "ios", amount: amountDue)
             )
-            payLink = response.url ?? response.payLink
-            if let urlString = response.url ?? response.payLink, let url = URL(string: urlString) {
+            payLink = response.payLink
+            if let urlString = response.url, let url = URL(string: urlString) {
                 checkoutURL = url
             } else {
                 error = "No checkout URL returned. Check that card payments are configured on the server."
@@ -589,19 +585,13 @@ struct PaymentSheet: View {
         isLoading = true
         error = nil
         defer { isLoading = false }
-        struct Body: Encodable {
-            let visitId: String
-            let mobileReturn: Bool
-            let platform: String
-            let amount: Double
-        }
+        struct Body: Encodable { let send: Bool }
         do {
-            // Prefer Stripe Checkout session.url (Apple Pay / Klarna / branded domain when ready).
-            let response: CheckoutResponse = try await env.apiClient.post(
-                path: APIPath.paymentsCheckout,
-                body: Body(visitId: visitId, mobileReturn: true, platform: "ios", amount: amountDue)
+            let response: VisitInvoiceResponse = try await env.apiClient.post(
+                path: APIPath.visitInvoice(visitId),
+                body: Body(send: false)
             )
-            payLink = response.url ?? response.payLink
+            payLink = response.payLink
             if payLink == nil {
                 error = "Could not create a payment link."
             }

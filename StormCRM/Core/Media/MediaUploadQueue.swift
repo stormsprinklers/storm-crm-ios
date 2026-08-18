@@ -128,6 +128,20 @@ final class MediaUploadQueue: ObservableObject {
         saveManifest()
     }
 
+    func pendingUploads(forVisitId visitId: String) -> [PendingMediaUpload] {
+        items.filter { item in
+            guard item.status == .pending || item.status == .failed || item.status == .uploading else { return false }
+            if case .visitAttachment(let id) = item.target {
+                return id == visitId
+            }
+            return false
+        }
+    }
+
+    func localImage(for item: PendingMediaUpload) -> UIImage? {
+        UIImage(contentsOfFile: localFileURL(for: item).path)
+    }
+
     func pendingCount(for visitId: String? = nil) -> Int {
         items.filter { item in
             guard item.status == .pending || item.status == .failed || item.status == .uploading else { return false }

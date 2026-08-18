@@ -416,7 +416,7 @@ struct VisitWorkSummarySection: View {
     @EnvironmentObject private var env: AppEnvironment
     let visitId: String
     let initialSummary: String?
-    var onSaved: () async -> Void
+    var onSave: (String?) async -> Bool
 
     @State private var text = ""
     @State private var isSaving = false
@@ -468,16 +468,11 @@ struct VisitWorkSummarySection: View {
         error = nil
         defer { isSaving = false }
 
-        struct Body: Encodable { let workSummary: String? }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        do {
-            let _: VisitDetailDTO = try await env.apiClient.patch(
-                path: APIPath.visit(visitId),
-                body: Body(workSummary: trimmed.isEmpty ? nil : trimmed)
-            )
-            await onSaved()
-        } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        let summary = trimmed.isEmpty ? nil : trimmed
+        let saved = await onSave(summary)
+        if !saved {
+            self.error = "Could not save work summary."
         }
     }
 }

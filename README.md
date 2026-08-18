@@ -159,7 +159,9 @@ These must be done manually — they need your Apple and Twilio accounts:
    - **Push Notifications**
    - **Background Modes** → **Voice over IP** and **Remote notifications** (already declared in
      `Info.plist`: `voip`, `remote-notification`, `audio`).
-   - `StormCRM.entitlements` `aps-environment`: `development` for debug, `production` for release.
+   - Entitlements: **Debug** builds use `StormCRM-Debug.entitlements` (`aps-environment: development`);
+     **Release/TestFlight** uses `StormCRM-Release.entitlements` (`aps-environment: production`).
+     After changing these, run `xcodegen generate` and archive a new TestFlight build.
 
 5. Test on a **physical device** (VoIP push is not delivered to the Simulator). Sign in once so the app
    registers its VoIP token with Twilio; then place a call through a call flow whose step rings that user.

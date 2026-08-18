@@ -17,6 +17,9 @@ settings:
     INFOPLIST_FILE: StormCRM/Resources/Info.plist
     PRODUCT_BUNDLE_IDENTIFIER: com.stormsprinklers.stormcrm
     DEVELOPMENT_TEAM: ""
+configs:
+  Debug: debug
+  Release: release
 targets:
   StormCRM:
     type: application
@@ -31,7 +34,11 @@ targets:
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        CODE_SIGN_ENTITLEMENTS: StormCRM/Resources/StormCRM.entitlements
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: StormCRM/Resources/StormCRM-Debug.entitlements
+        Release:
+          CODE_SIGN_ENTITLEMENTS: StormCRM/Resources/StormCRM-Release.entitlements
     scheme:
       environmentVariables:
         - variable: API_BASE_URL

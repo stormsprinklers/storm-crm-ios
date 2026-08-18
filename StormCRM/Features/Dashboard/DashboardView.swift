@@ -31,10 +31,17 @@ final class DashboardViewModel: ObservableObject {
 
     private func loadNextJob(api: APIClient, offlineSync: OfflineSyncManager?) async {
         let calendar = Calendar.current
-        let start = calendar.startOfDay(for: Date())
-        guard let endDay = calendar.date(byAdding: .day, value: 14, to: start),
+        let today = calendar.startOfDay(for: Date())
+        let start = calendar.date(byAdding: .day, value: -OfflineVisitWindow.pastDays, to: today) ?? today
+        guard let endDay = calendar.date(byAdding: .day, value: 14, to: today),
               let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDay)
         else { return }
+
+        if offlineSync?.isOnline == false {
+            let cached = offlineSync?.cachedVisits(from: start, to: end) ?? []
+            nextJob = Self.pickNextJob(from: cached)
+            return
+        }
 
         do {
             let jobs: [VisitDTO] = try await api.get(
@@ -46,8 +53,15 @@ final class DashboardViewModel: ObservableObject {
             )
             nextJob = Self.pickNextJob(from: jobs)
             offlineSync?.cacheVisits(jobs)
+            offlineSync?.prefetchNearbyVisitDetails(from: jobs, api: api)
         } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            let cached = offlineSync?.cachedVisits(from: start, to: end) ?? []
+            if !cached.isEmpty {
+                nextJob = Self.pickNextJob(from: cached)
+                self.error = nil
+            } else {
+                self.error = (error as? APIError)?.message ?? error.localizedDescription
+            }
         }
     }
 

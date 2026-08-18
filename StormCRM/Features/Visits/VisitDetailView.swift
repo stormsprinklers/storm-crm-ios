@@ -12,13 +12,55 @@ final class VisitDetailViewModel: ObservableObject {
     @Published var error: String?
     @Published var actionMessage: String?
 
-    func load(api: APIClient, visitId: String) async {
-        isLoading = true
+    func load(api: APIClient, visitId: String, offlineSync: OfflineSyncManager? = nil) async {
+        isLoading = visit == nil
         error = nil
         defer { isLoading = false }
+
+        let useCache = {
+            if let cached = offlineSync?.cachedVisitDetail(id: visitId) {
+                visit = cached
+                if checklists.isEmpty {
+                    checklists = offlineSync?.cachedChecklists(visitId: visitId) ?? []
+                }
+                if timeEvents.isEmpty {
+                    timeEvents = cached.timeEvents ?? []
+                }
+                error = nil
+                return true
+            }
+            return false
+        } as () -> Bool
+
+        if offlineSync?.hasPendingChanges(forVisitId: visitId) == true {
+            if useCache() {
+                actionMessage = "Unsynced changes are saved on this device and will upload when you're online."
+            }
+            if offlineSync?.isOnline == true {
+                offlineSync?.flushOutbox()
+            }
+            if visit != nil { return }
+        }
+
+        if offlineSync?.isOnline == false {
+            if useCache() {
+                actionMessage = "You're offline — changes will sync when you're back online."
+            } else {
+                error = "This visit isn't available offline. Open it once while you have a connection so it can be cached."
+            }
+            return
+        }
+
         do {
-            visit = try await api.get(path: APIPath.visit(visitId))
-            checklists = (try? await api.get(path: APIPath.visitChecklists(visitId))) ?? []
+            let visitData = try await api.getData(path: APIPath.visit(visitId))
+            offlineSync?.cacheVisitDetailJSON(visitData, id: visitId)
+            visit = try JSONCoding.makeDecoder().decode(VisitDetailDTO.self, from: visitData)
+            if let checklistData = try? await api.getData(path: APIPath.visitChecklists(visitId)) {
+                OfflineVisitDetailStore.saveChecklistsJSON(checklistData, visitId: visitId)
+                checklists = (try? JSONCoding.makeDecoder().decode([ChecklistDTO].self, from: checklistData)) ?? []
+            } else {
+                checklists = (try? await api.get(path: APIPath.visitChecklists(visitId))) ?? checklists
+            }
             timeEvents = (try? await api.get(path: APIPath.visitTime(visitId))) ?? []
 
             if let customerId = visit?.customer?.id {
@@ -28,7 +70,11 @@ final class VisitDetailViewModel: ObservableObject {
                 )
             }
         } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            if useCache() {
+                actionMessage = "Showing cached visit — some details may be out of date."
+            } else {
+                self.error = (error as? APIError)?.message ?? error.localizedDescription
+            }
         }
     }
 
@@ -61,25 +107,54 @@ final class VisitDetailViewModel: ObservableObject {
         }
     }
 
-    func addNote(api: APIClient, visitId: String, body: String, offlineSync: OfflineSyncManager?) async {
+    func addNote(
+        api: APIClient,
+        visitId: String,
+        body: String,
+        offlineSync: OfflineSyncManager?,
+        author: NamedColor?
+    ) async {
         struct Body: Encodable { let body: String }
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        func queueOffline() -> Bool {
+            guard let data = try? JSONCoding.makeEncoder().encode(Body(body: trimmed)) else { return false }
+            offlineSync?.enqueue(
+                path: APIPath.visitNotes(visitId),
+                method: "POST",
+                bodyData: data,
+                relatedVisitId: visitId
+            )
+            let note = VisitNoteDTO(
+                id: "offline-\(UUID().uuidString)",
+                body: trimmed,
+                createdAt: APIDateFormatting.queryString(from: Date()),
+                author: author
+            )
+            if var current = visit {
+                var notes = current.notes ?? []
+                notes.append(note)
+                current.notes = notes
+                visit = current
+            }
+            offlineSync?.applyOfflineNote(visitId: visitId, note: note)
+            actionMessage = "Note saved on this device — will sync when online"
+            return true
+        }
+
         if offlineSync?.isOnline == false {
-            if let data = try? JSONCoding.makeEncoder().encode(Body(body: body)) {
-                offlineSync?.enqueue(path: APIPath.visitNotes(visitId), method: "POST", bodyData: data)
-                actionMessage = "Note saved offline — will sync when online"
+            if !queueOffline() {
+                actionMessage = "Could not save note offline."
             }
             return
         }
         do {
-            let _: VisitNoteDTO = try await api.post(path: APIPath.visitNotes(visitId), body: Body(body: body))
-            await load(api: api, visitId: visitId)
+            let _: VisitNoteDTO = try await api.post(path: APIPath.visitNotes(visitId), body: Body(body: trimmed))
+            await load(api: api, visitId: visitId, offlineSync: offlineSync)
         } catch {
             if offlineSync?.isOnline == false || isLikelyOffline(error) {
-                if let data = try? JSONCoding.makeEncoder().encode(Body(body: body)) {
-                    offlineSync?.enqueue(path: APIPath.visitNotes(visitId), method: "POST", bodyData: data)
-                    actionMessage = "Note saved offline — will sync when online"
-                    return
-                }
+                if queueOffline() { return }
             }
             actionMessage = (error as? APIError)?.message ?? error.localizedDescription
         }
@@ -135,6 +210,51 @@ final class VisitDetailViewModel: ObservableObject {
                 || nsError.code == NSURLErrorNetworkConnectionLost
                 || nsError.code == NSURLErrorTimedOut
         )
+    }
+
+    func saveWorkSummary(
+        api: APIClient,
+        visitId: String,
+        summary: String?,
+        offlineSync: OfflineSyncManager?
+    ) async -> Bool {
+        struct Body: Encodable { let workSummary: String? }
+
+        func queueOffline() -> Bool {
+            guard let data = try? JSONCoding.makeEncoder().encode(Body(workSummary: summary)) else { return false }
+            offlineSync?.enqueue(
+                path: APIPath.visit(visitId),
+                method: "PATCH",
+                bodyData: data,
+                relatedVisitId: visitId
+            )
+            if var current = visit {
+                current.workSummary = summary
+                visit = current
+            }
+            offlineSync?.applyOfflineWorkSummary(visitId: visitId, summary: summary)
+            actionMessage = "Work summary saved on this device — will sync when online"
+            return true
+        }
+
+        if offlineSync?.isOnline == false {
+            return queueOffline()
+        }
+        do {
+            let updated: VisitDetailDTO = try await api.patch(
+                path: APIPath.visit(visitId),
+                body: Body(workSummary: summary)
+            )
+            visit = updated
+            offlineSync?.applyOfflineWorkSummary(visitId: visitId, summary: summary)
+            return true
+        } catch {
+            if offlineSync?.isOnline == false || isLikelyOffline(error) {
+                return queueOffline()
+            }
+            actionMessage = (error as? APIError)?.message ?? error.localizedDescription
+            return false
+        }
     }
 
     func completeChecklist(api: APIClient, visitId: String, checklistId: String) async {
@@ -342,8 +462,13 @@ struct VisitDetailView: View {
                                 VisitWorkSummarySection(
                                     visitId: visitId,
                                     initialSummary: visit.workSummary
-                                ) {
-                                    await reloadVisit()
+                                ) { summary in
+                                    await viewModel.saveWorkSummary(
+                                        api: env.apiClient,
+                                        visitId: visitId,
+                                        summary: summary,
+                                        offlineSync: env.offlineSync
+                                    )
                                 }
 
                                 VisitChecklistLauncherSection(
@@ -387,7 +512,8 @@ struct VisitDetailView: View {
                                         onUpdated: {
                                             await viewModel.load(
                                                 api: env.apiClient,
-                                                visitId: visitId
+                                                visitId: visitId,
+                                                offlineSync: env.offlineSync
                                             )
                                         }
                                     )
@@ -416,13 +542,16 @@ struct VisitDetailView: View {
                                     newNote: $newNote,
                                     onAdd: {
                                         let text = newNote
-                                        newNote = ""
                                         await viewModel.addNote(
                                             api: env.apiClient,
                                             visitId: visitId,
                                             body: text,
-                                            offlineSync: env.offlineSync
+                                            offlineSync: env.offlineSync,
+                                            author: env.auth.user.map {
+                                                NamedColor(id: $0.id, name: $0.name, color: nil, photoUrl: nil)
+                                            }
                                         )
+                                        newNote = ""
                                     }
                                 )
 
@@ -525,17 +654,18 @@ struct VisitDetailView: View {
                 PartsRunSheet(visitId: visitId) {
                     await viewModel.load(
                         api: env.apiClient,
-                        visitId: visitId
+                        visitId: visitId,
+                        offlineSync: env.offlineSync
                     )
                 }
                 .environmentObject(env)
             }
         }
         .refreshable {
-            await viewModel.load(api: env.apiClient, visitId: visitId)
+            await viewModel.load(api: env.apiClient, visitId: visitId, offlineSync: env.offlineSync)
         }
         .task {
-            await viewModel.load(api: env.apiClient, visitId: visitId)
+            await viewModel.load(api: env.apiClient, visitId: visitId, offlineSync: env.offlineSync)
             syncLiveTracking()
         }
         .onChange(of: viewModel.visit?.status) { _, _ in
@@ -629,7 +759,8 @@ struct VisitDetailView: View {
     private func reloadVisit() async {
         await viewModel.load(
             api: env.apiClient,
-            visitId: visitId
+            visitId: visitId,
+            offlineSync: env.offlineSync
         )
         // Keep the finish-billing prompt amount in sync if line items changed underneath it.
         if showFinishBillingPrompt, let visit = viewModel.visit {

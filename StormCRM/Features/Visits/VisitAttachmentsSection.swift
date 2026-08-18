@@ -31,11 +31,17 @@ struct VisitAttachmentsSection: View {
                 }
                 if pendingUploadCount > 0 || uploadQueue.isProcessing {
                     HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("\(pendingUploadCount) photo(s) uploading…")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        if env.offlineSync.isOnline {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(
+                            env.offlineSync.isOnline
+                                ? "\(pendingUploadCount) photo(s) uploading…"
+                                : "\(pendingUploadCount) photo(s) saved on this device — will upload when online"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
                 }
                 ScrollView(.horizontal) {
@@ -51,6 +57,28 @@ struct VisitAttachmentsSection: View {
                                         .frame(width: 80, height: 80)
                                 }
                                 Text(file.fileName).font(.caption2).lineLimit(1)
+                            }
+                        }
+
+                        ForEach(uploadQueue.pendingUploads(forVisitId: visitId)) { item in
+                            VStack {
+                                if let image = uploadQueue.localImage(for: item) {
+                                    Image(uiImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 80, height: 80)
+                                        .clipped()
+                                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                                        .overlay(alignment: .topTrailing) {
+                                            Image(systemName: "arrow.up.circle.fill")
+                                                .foregroundStyle(.white, StormTheme.sky)
+                                                .padding(4)
+                                        }
+                                } else {
+                                    Image(systemName: "photo")
+                                        .frame(width: 80, height: 80)
+                                }
+                                Text(item.fileName).font(.caption2).lineLimit(1)
                             }
                         }
 
@@ -117,11 +145,16 @@ struct VisitAttachmentsSection: View {
     }
 
     private func load() async {
+        if let cached = env.offlineSync.cachedVisitDetail(id: visitId)?.attachments, !cached.isEmpty {
+            attachments = cached
+        }
         guard env.offlineSync.isOnline else { return }
         do {
             attachments = try await env.apiClient.get(path: APIPath.visitAttachments(visitId))
         } catch {
-            self.error = (error as? APIError)?.message
+            if attachments.isEmpty {
+                self.error = (error as? APIError)?.message
+            }
         }
     }
 

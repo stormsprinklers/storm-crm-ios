@@ -22,7 +22,7 @@ struct SyncStatusView: View {
                         .foregroundStyle(.red)
                 }
             } footer: {
-                Text("Visit notes, checklist updates, and offline payments (cash/check, send-link) are queued here and sent when you're back online. Payment payloads are encrypted on device.")
+                Text("Visit notes, work summaries, checklist updates, photos, and offline payments (cash/check, send-link) are queued here and sent when you're back online. Payment payloads are encrypted on device.")
             }
 
             Section("Outbox") {

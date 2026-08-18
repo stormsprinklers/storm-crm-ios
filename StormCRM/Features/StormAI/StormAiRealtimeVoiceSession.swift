@@ -58,6 +58,9 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     private var toolPrefetch: [String: Task<String, Never>] = [:]
     private var lastUserTranscript = ""
     private var searchFallbackUsed = false
+    /// Drop mic packets while the assistant is playing so speaker audio cannot be treated as a new user turn.
+    private var suppressMicCapture = false
+    private var resumeMicTask: Task<Void, Never>?
     private let targetSampleRate: Double = 24_000
     private let frameMinInterval: TimeInterval = 1.5
     private let toolTimeout: TimeInterval = 25
@@ -242,6 +245,9 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         clearVideoTurn()
         receiveTask?.cancel()
         receiveTask = nil
+        resumeMicTask?.cancel()
+        resumeMicTask = nil
+        suppressMicCapture = false
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         urlSession?.invalidateAndCancel()
@@ -277,7 +283,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                             "threshold": 0.78,
                             "prefix_padding_ms": 400,
                             "silence_duration_ms": 900,
-                            "interrupt_response": true,
+                            "interrupt_response": false,
                             "create_response": enabled,
                         ],
                     ],
@@ -339,9 +345,13 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         try session.setCategory(
             .playAndRecord,
             mode: forVideo ? .videoChat : .voiceChat,
-            options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers]
+            options: [.defaultToSpeaker, .allowBluetooth]
         )
         try session.setPreferredSampleRate(targetSampleRate)
+        try session.setPreferredIOBufferDuration(0.02)
+        if session.isInputGainSettable {
+            try? session.setInputGain(0.75)
+        }
         try session.setActive(true, options: [])
     }
 
@@ -505,6 +515,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         engine.attach(player)
 
         let input = engine.inputNode
+        try? input.setVoiceProcessingEnabled(true)
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             throw APIError.server("Microphone is not ready. Check mic permissions and try again.")
@@ -541,7 +552,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     }
 
     private func appendMicAudio(buffer: AVAudioPCMBuffer) {
-        guard !closed, let converter = micConverter else { return }
+        guard !closed, !suppressMicCapture, let converter = micConverter else { return }
         let outFormat = converter.outputFormat
         let ratio = outFormat.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 32
@@ -596,9 +607,11 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 modelResponseActive = true
                 activity("Model started a response")
             }
+            muteMicForPlayback()
             status = .speaking
 
         case "response.output_audio.delta", "response.audio.delta":
+            muteMicForPlayback()
             status = .speaking
             if let delta = json["delta"] as? String {
                 playPCM16Base64(delta)
@@ -609,7 +622,10 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 modelResponseActive = false
                 activity("Model response cancelled", level: .wait)
             }
-            if !awaitingFunctionOutput, !needsSpokenFollowUp { status = .listening }
+            if !awaitingFunctionOutput, !needsSpokenFollowUp {
+                status = .listening
+                unmuteMicAfterPlayback()
+            }
 
         case "conversation.item.input_audio_transcription.completed",
              "conversation.item.input_audio.transcription.completed":
@@ -694,6 +710,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             scheduleSpokenFollowUp(delayNs: 80_000_000)
             if !awaitingFunctionOutput, !needsSpokenFollowUp, inFlightTools == 0 {
                 status = .listening
+                unmuteMicAfterPlayback()
             }
 
         default:
@@ -748,6 +765,22 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             }
         }
         player.scheduleBuffer(buffer, completionHandler: nil)
+    }
+
+    private func muteMicForPlayback() {
+        resumeMicTask?.cancel()
+        resumeMicTask = nil
+        suppressMicCapture = true
+        sendJSON(["type": "input_audio_buffer.clear"])
+    }
+
+    private func unmuteMicAfterPlayback() {
+        resumeMicTask?.cancel()
+        resumeMicTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard let self, !Task.isCancelled, !self.closed else { return }
+            self.suppressMicCapture = false
+        }
     }
 
     private func completeFunctionCall(callId: String, name: String, argText: String) async {
@@ -883,6 +916,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         }
         modelResponseActive = true
         activeToolName = nil
+        muteMicForPlayback()
         status = .speaking
     }
 
@@ -990,6 +1024,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         ])
         modelResponseActive = true
         activeToolName = nil
+        muteMicForPlayback()
         status = .speaking
 
         Task { [weak self] in

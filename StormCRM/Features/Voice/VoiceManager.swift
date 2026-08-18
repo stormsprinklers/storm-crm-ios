@@ -12,6 +12,7 @@ final class VoiceManager: ObservableObject {
     @Published private(set) var isMuted = false
     @Published private(set) var activePhone: String?
     @Published private(set) var isIncoming = false
+    @Published private(set) var isListeningForCalls = false
 
     private let apiClient: APIClient
     private let auth: AuthManager
@@ -58,26 +59,31 @@ final class VoiceManager: ObservableObject {
     struct TokenResponse: Decodable {
         let token: String
         let identity: String
+        let pushCredentialConfigured: Bool?
     }
 
     /// Fetch a Twilio access token for iOS (includes the Push Credential grant used for
     /// incoming-call registration).
     private func fetchToken() async throws -> String {
-        let response: TokenResponse = try await apiClient.post(
-            path: APIPath.voiceTokenPath(platform: "ios")
-        )
-        return response.token
+        try await fetchTokenResponse().token
     }
 
     func prepare() async {
         do {
-            cachedToken = try await fetchToken()
+            let response = try await fetchTokenResponse()
+            cachedToken = response.token
+            if response.pushCredentialConfigured == false {
+                lastError =
+                    "Server push credential missing — add TWILIO_PUSH_CREDENTIAL_SID in Vercel and redeploy the CRM."
+            }
             #if targetEnvironment(simulator)
             status = "Voice ready (simulator — use a real device to call)"
             #else
             status = "Voice ready"
             #endif
-            lastError = nil
+            if response.pushCredentialConfigured != false {
+                lastError = nil
+            }
             #if canImport(TwilioVoice)
             startIncomingCalls()
             #endif
@@ -86,7 +92,28 @@ final class VoiceManager: ObservableObject {
         } catch {
             lastError = (error as? APIError)?.message ?? error.localizedDescription
             status = "Voice unavailable"
+            isListeningForCalls = false
         }
+    }
+
+    /// Re-register for incoming calls when returning to the app or after server config changes.
+    func refreshIncomingCalls() async {
+        guard auth.isAuthenticated else { return }
+        if cachedToken == nil {
+            await prepare()
+            return
+        }
+        #if canImport(TwilioVoice)
+        startIncomingCalls()
+        IncomingCallCoordinator.shared.refreshRegistration()
+        #endif
+        markPresence("AVAILABLE")
+    }
+
+    private func fetchTokenResponse() async throws -> TokenResponse {
+        try await apiClient.post(
+            path: APIPath.voiceTokenPath(platform: "ios")
+        )
     }
 
     /// Register for incoming calls so the app rings on VoIP push (even when closed).
@@ -101,6 +128,7 @@ final class VoiceManager: ObservableObject {
 
     func stopIncomingCalls() {
         markPresence("OFFLINE")
+        isListeningForCalls = false
         #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
         IncomingCallCoordinator.shared.stop()
         #endif
@@ -301,11 +329,14 @@ final class VoiceManager: ObservableObject {
         coordinator.onVoIPRegistrationUpdated = { [weak self] succeeded, message in
             Task { @MainActor in
                 guard let self else { return }
+                self.isListeningForCalls = succeeded
                 if succeeded {
                     if !self.isInCall {
-                        self.status = "Voice ready · listening"
+                        self.status = "Voice ready · listening for calls"
                     }
-                    if self.lastError?.contains("VoIP") == true || self.lastError?.contains("registration") == true {
+                    if self.lastError?.contains("VoIP") == true
+                        || self.lastError?.contains("registration") == true
+                        || self.lastError?.contains("push credential") == true {
                         self.lastError = nil
                     }
                 } else if let message, !message.hasPrefix("Waiting for VoIP") {

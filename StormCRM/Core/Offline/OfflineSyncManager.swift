@@ -83,6 +83,16 @@ final class OfflineSyncManager: ObservableObject {
         }
     }
 
+    func hasPendingChanges(forVisitId visitId: String) -> Bool {
+        pendingMutations().contains { mutation in
+            guard mutation.relatedVisitId == visitId else { return false }
+            let status = mutation.status
+            return status == OutboxMutationStatus.pending.rawValue
+                || status == OutboxMutationStatus.failed.rawValue
+                || status == OutboxMutationStatus.syncing.rawValue
+        }
+    }
+
     /// True when a cash/check (or other payment) mutation for this visit is waiting to sync.
     func hasPendingPayment(forVisitId visitId: String) -> Bool {
         pendingMutations().contains { mutation in
@@ -142,6 +152,82 @@ final class OfflineSyncManager: ObservableObject {
     func cachedVisit(id: String) -> VisitDTO? {
         let context = OfflineStore.sharedContext(from: modelContainer)
         return OfflineCacheBootstrap.cachedVisit(id: id, context: context)
+    }
+
+    func cachedVisits(from start: Date, to end: Date) -> [VisitDTO] {
+        let context = OfflineStore.sharedContext(from: modelContainer)
+        return OfflineCacheBootstrap.cachedVisits(from: start, to: end, context: context)
+    }
+
+    func cacheVisitDetailJSON(_ data: Data, id: String) {
+        OfflineVisitDetailStore.saveVisitJSON(data, id: id)
+    }
+
+    func cachedVisitDetail(id: String) -> VisitDetailDTO? {
+        if let detail = OfflineVisitDetailStore.cachedVisitDetail(id: id) {
+            return detail
+        }
+        guard let list = cachedVisit(id: id) else { return nil }
+        return VisitDetailDTO(fromList: list)
+    }
+
+    func cachedChecklists(visitId: String) -> [ChecklistDTO] {
+        OfflineVisitDetailStore.cachedChecklists(visitId: visitId)
+    }
+
+    func applyOfflineWorkSummary(visitId: String, summary: String?) {
+        seedVisitDetailJSONIfNeeded(visitId: visitId)
+        OfflineVisitDetailStore.applyWorkSummary(visitId: visitId, summary: summary)
+    }
+
+    func applyOfflineNote(visitId: String, note: VisitNoteDTO) {
+        seedVisitDetailJSONIfNeeded(visitId: visitId)
+        var payload: [String: Any] = [
+            "id": note.id,
+            "body": note.body,
+            "createdAt": note.createdAt,
+        ]
+        if let author = note.author {
+            var authorDict: [String: Any] = ["id": author.id, "name": author.name]
+            if let color = author.color { authorDict["color"] = color }
+            if let photoUrl = author.photoUrl { authorDict["photoUrl"] = photoUrl }
+            payload["author"] = authorDict
+        }
+        OfflineVisitDetailStore.appendNote(visitId: visitId, note: payload)
+    }
+
+    private func seedVisitDetailJSONIfNeeded(visitId: String) {
+        guard OfflineVisitDetailStore.visitJSON(id: visitId) == nil,
+              let list = cachedVisit(id: visitId),
+              let data = VisitOfflineCodec.encode(list)
+        else { return }
+        OfflineVisitDetailStore.saveVisitJSON(data, id: visitId)
+    }
+
+    /// Downloads full visit + checklist payloads for jobs in the ±3 day window.
+    func prefetchNearbyVisitDetails(from visits: [VisitDTO], api: APIClient) {
+        let nearby = visits.filter { visit in
+            OfflineVisitWindow.contains(startAt: visit.startAt)
+                && !hasPendingChanges(forVisitId: visit.id)
+        }
+        guard !nearby.isEmpty, isOnline else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await withTaskGroup(of: Void.self) { group in
+                var inFlight = 0
+                for visit in nearby {
+                    if inFlight >= 4 {
+                        await group.next()
+                        inFlight -= 1
+                    }
+                    inFlight += 1
+                    let visitId = visit.id
+                    group.addTask {
+                        await OfflineVisitPrefetch.fetch(id: visitId, api: api)
+                    }
+                }
+            }
+        }
     }
 
     func pendingMutations() -> [OutboxMutation] {

@@ -46,9 +46,11 @@ struct VoiceCallBar: View {
 
     private var shouldShowVoiceStatus: Bool {
         let status = voice.status.lowercased()
-        return status.contains("unavailable")
+        return voice.isListeningForCalls
+            || status.contains("unavailable")
             || status.contains("simulator")
             || status.contains("failed")
+            || status.contains("listening")
     }
 
     @ViewBuilder
@@ -73,7 +75,7 @@ struct VoiceCallBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
-        .background((isError ? Color.red : Color.orange).opacity(0.9))
+        .background((isError ? Color.red : voice.isListeningForCalls ? Color.green : Color.orange).opacity(0.9))
         .task(id: message) {
             guard isError else { return }
             try? await Task.sleep(nanoseconds: 8_000_000_000)

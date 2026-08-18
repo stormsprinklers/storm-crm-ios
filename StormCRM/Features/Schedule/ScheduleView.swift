@@ -19,6 +19,15 @@ final class ScheduleViewModel: ObservableObject {
               let rangeEnd = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: rangeEndDay)
         else { return }
 
+        if offlineSync?.isOnline == false {
+            let cached = offlineSync?.cachedVisits(from: rangeStart, to: rangeEnd) ?? []
+            jobs = cached
+            if cached.isEmpty {
+                error = "You're offline and no cached schedule is available yet."
+            }
+            return
+        }
+
         do {
             jobs = try await api.get(
                 path: APIPath.mobileSchedule,
@@ -28,8 +37,15 @@ final class ScheduleViewModel: ObservableObject {
                 ]
             )
             offlineSync?.cacheVisits(jobs)
+            offlineSync?.prefetchNearbyVisitDetails(from: jobs, api: api)
         } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            let cached = offlineSync?.cachedVisits(from: rangeStart, to: rangeEnd) ?? []
+            if !cached.isEmpty {
+                jobs = cached
+                self.error = nil
+            } else {
+                self.error = (error as? APIError)?.message ?? error.localizedDescription
+            }
         }
     }
 
@@ -211,14 +227,6 @@ struct ScheduleView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
-                if canViewOthers {
-                    employeePickerBar
-                }
-
-                if canViewOthers {
-                    Divider()
-                }
-
                 scheduleContent
             }
             .navigationTitle(canEditSchedule ? "Schedule" : "My Schedule")
@@ -236,17 +244,20 @@ struct ScheduleView: View {
                         Button {
                             showTimeOffRequest = true
                         } label: {
-                            Label("Time off", systemImage: "calendar.badge.minus")
+                            Label("Time off", systemImage: "airplane")
                         }
 
-                        Menu {
-                            Picker("Color by", selection: $colorMode) {
-                                ForEach(ScheduleColorMode.allCases) { mode in
-                                    Text(mode.label).tag(mode)
+                        if canViewOthers {
+                            Menu {
+                                Picker("Whose schedule", selection: $selectedEmployeeId) {
+                                    Text("Everyone").tag("")
+                                    ForEach(employees) { employee in
+                                        Text(employee.name).tag(employee.id)
+                                    }
                                 }
+                            } label: {
+                                Label("Filter schedule", systemImage: "line.3.horizontal.decrease")
                             }
-                        } label: {
-                            Label("Color by \(colorMode.label)", systemImage: "paintpalette")
                         }
                     }
                 }
@@ -298,39 +309,6 @@ struct ScheduleView: View {
             }
         }
         .background(StormTheme.page.ignoresSafeArea())
-    }
-
-    // MARK: - Employee picker
-
-    private var employeePickerBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "person.crop.circle")
-                .foregroundStyle(.secondary)
-            Menu {
-                Picker("Whose schedule", selection: $selectedEmployeeId) {
-                    Text("Everyone").tag("")
-                    ForEach(employees) { employee in
-                        Text(employee.name).tag(employee.id)
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(selectedEmployeeName)
-                        .font(.subheadline.weight(.semibold))
-                    Image(systemName: "chevron.down")
-                        .font(.caption2)
-                }
-                .foregroundStyle(StormTheme.navy)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 6)
-    }
-
-    private var selectedEmployeeName: String {
-        if selectedEmployeeId.isEmpty { return "Everyone" }
-        return employees.first(where: { $0.id == selectedEmployeeId })?.name ?? "Everyone"
     }
 
     // MARK: - Schedule (day) content

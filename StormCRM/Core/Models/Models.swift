@@ -104,9 +104,9 @@ struct VisitDetailDTO: Decodable, Identifiable {
     let startAt: String
     let endAt: String
     let division: String
-    let status: String
+    var status: String
     let tags: [String]?
-    let workSummary: String?
+    var workSummary: String?
     let isCallback: Bool?
     let address: String?
     let city: String?
@@ -120,8 +120,8 @@ struct VisitDetailDTO: Decodable, Identifiable {
     let lineItems: [LineItemDTO]?
     let discounts: [DiscountDTO]?
     let timeEvents: [TimeEventDTO]?
-    let notes: [VisitNoteDTO]?
-    let attachments: [AttachmentDTO]?
+    var notes: [VisitNoteDTO]?
+    var attachments: [AttachmentDTO]?
     let invoices: [InvoiceSummaryDTO]?
     let estimates: [EstimateSummaryDTO]?
     let total: Double?
@@ -133,6 +133,40 @@ struct VisitDetailDTO: Decodable, Identifiable {
 
     var hasInstallPlan: Bool {
         designExportMetadata != nil && designExportMetadata != .null
+    }
+
+    init(fromList visit: VisitDTO) {
+        id = visit.id
+        title = visit.title
+        startAt = visit.startAt
+        endAt = visit.endAt
+        division = visit.division
+        status = visit.status
+        tags = visit.tags
+        workSummary = nil
+        isCallback = visit.isCallback
+        address = visit.address
+        city = visit.city
+        state = visit.state
+        zip = visit.zip
+        customer = visit.customer
+        property = visit.property
+        serviceArea = visit.serviceArea
+        assignedUser = visit.assignedUser
+        crew = visit.crew
+        lineItems = nil
+        discounts = nil
+        timeEvents = nil
+        notes = []
+        attachments = []
+        invoices = nil
+        estimates = nil
+        total = visit.total
+        subtotal = visit.subtotal
+        eta = nil
+        designProjectId = nil
+        installDurationDays = nil
+        designExportMetadata = nil
     }
 }
 
@@ -470,6 +504,13 @@ struct VisitNoteDTO: Decodable, Identifiable {
         } else {
             createdAt = ""
         }
+    }
+
+    init(id: String, body: String, createdAt: String, author: NamedColor?) {
+        self.id = id
+        self.body = body
+        self.createdAt = createdAt
+        self.author = author
     }
 }
 
