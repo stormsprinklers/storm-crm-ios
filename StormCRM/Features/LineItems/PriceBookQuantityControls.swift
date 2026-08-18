@@ -65,7 +65,7 @@ final class PriceBookLineItemQuantities: ObservableObject {
         debounceTasks[item.id] = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 140_000_000)
             guard !Task.isCancelled else { return }
-            await self?.enqueueFlush(item)
+            self?.enqueueFlush(item)
         }
     }
 

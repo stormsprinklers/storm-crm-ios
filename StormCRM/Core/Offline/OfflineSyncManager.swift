@@ -211,8 +211,7 @@ final class OfflineSyncManager: ObservableObject {
                 && !hasPendingChanges(forVisitId: visit.id)
         }
         guard !nearby.isEmpty, isOnline else { return }
-        Task { [weak self] in
-            guard let self else { return }
+        Task {
             await withTaskGroup(of: Void.self) { group in
                 var inFlight = 0
                 for visit in nearby {
