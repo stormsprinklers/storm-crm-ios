@@ -30,9 +30,10 @@ struct StormAiChatView: View {
     @State private var voiceActivity: [StormAiRealtimeActivity] = []
     @State private var videoModeActive = false
     @State private var frameSavedToast: String?
-    /// Explicit visit from Visit detail, or the tech's active job when opened from More.
-    @State private var resolvedVisitId: String?
-    @State private var activeJobTitle: String?
+    /// Set only when Storm AI is opened from a visit. Never inferred from the active job.
+    @State private var linkedVisitTitle: String?
+    @State private var pastConversations: [StormAiConversationDTO] = []
+    @State private var historyExpanded = false
 
     private let maxPhotos = 4
 
@@ -50,6 +51,53 @@ struct StormAiChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !pastConversations.isEmpty {
+                DisclosureGroup("Past chats", isExpanded: $historyExpanded) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(pastConversations) { thread in
+                            Button {
+                                Task { await openConversation(thread.id) }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(thread.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                                         ? thread.title!
+                                         : "Untitled chat")
+                                        .font(.subheadline)
+                                        .foregroundStyle(thread.id == conversationId ? StormTheme.navy : .primary)
+                                        .lineLimit(1)
+                                    if let updated = thread.updatedAt, !updated.isEmpty {
+                                        Text(updated)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(Color(.secondarySystemFill))
+            }
+
+            if videoModeActive, let session = voiceSession?.cameraSession {
+                StormAiCameraPreview(session: session)
+                    .id(ObjectIdentifier(session))
+                    .frame(height: 220)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                Text("Live preview — a still is sent when you ask about what you see")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 6)
+            }
+
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
@@ -59,8 +107,8 @@ struct StormAiChatView: View {
                                 .padding(.top, 24)
                         } else if messages.isEmpty && !isSending && !voiceActive {
                             Text(
-                                effectiveVisitId == nil
-                                    ? "Ask about customers, attach a part photo, or use mic/video. Start or open an active job so a question in video mode can save a frame to that visit."
+                                visitId == nil
+                                    ? "Ask about customers, attach a part photo, or use mic/video."
                                     : "Mic for voice, video to add the camera. A still is sent when you ask about what you see, and saved to this job."
                             )
                                 .font(.subheadline)
@@ -68,21 +116,10 @@ struct StormAiChatView: View {
                                 .padding(.top, 8)
                         }
 
-                        if let activeJobTitle, effectiveVisitId != nil {
-                            Label("Job: \(activeJobTitle)", systemImage: "wrench.and.screwdriver")
+                        if visitId != nil {
+                            Label(linkedVisitTitle ?? "This visit", systemImage: "wrench.and.screwdriver")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                        }
-
-                        if voiceActive, videoModeActive, let session = voiceSession?.cameraSession {
-                            StormAiCameraPreview(session: session)
-                                .id(ObjectIdentifier(session))
-                                .frame(height: 220)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            Text("Live preview — a still is sent when you ask about what you see")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity)
                         }
 
                         ForEach(messages) { message in
@@ -96,39 +133,6 @@ struct StormAiChatView: View {
                                 .foregroundStyle(.secondary)
                                 .id("thinking")
                         }
-                        if voiceActive {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(voiceStatusLabel)
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(StormTheme.navy)
-                                if voiceActivity.isEmpty {
-                                    Text("Live steps will appear here while voice is active.")
-                                        .font(.system(.caption2, design: .monospaced))
-                                        .foregroundStyle(.secondary)
-                                } else {
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        ForEach(voiceActivity.suffix(18)) { entry in
-                                            HStack(alignment: .top, spacing: 6) {
-                                                Text(entry.at, style: .time)
-                                                    .font(.system(.caption2, design: .monospaced))
-                                                    .foregroundStyle(.tertiary)
-                                                    .frame(width: 54, alignment: .leading)
-                                                Text(entry.message)
-                                                    .font(.system(.caption2, design: .monospaced))
-                                                    .foregroundStyle(activityColor(entry.level))
-                                                    .fixedSize(horizontal: false, vertical: true)
-                                            }
-                                        }
-                                    }
-                                    .frame(maxHeight: 140, alignment: .top)
-                                }
-                            }
-                            .padding(10)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color(.secondarySystemFill))
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            .id("voice-status")
-                        }
                     }
                     .padding()
                 }
@@ -138,9 +142,10 @@ struct StormAiChatView: View {
                 .onChange(of: isSending) { _, sending in
                     if sending { scrollToBottom(proxy) }
                 }
-                .onChange(of: voiceActivity.count) { _, _ in
-                    scrollToBottom(proxy)
-                }
+            }
+
+            if voiceActive {
+                voiceLiveSteps
             }
 
             if let error {
@@ -264,14 +269,17 @@ struct StormAiChatView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("New chat") {
-                    Task { await startNewChat() }
+                    beginNewThread()
                 }
                 .disabled(isSending)
             }
         }
         .task {
-            await loadActiveVisitIfNeeded()
-            await loadLatest()
+            beginNewThread()
+            if visitId != nil {
+                linkedVisitTitle = "This visit"
+            }
+            await loadHistory()
         }
         .onDisappear {
             voiceSession?.stop()
@@ -294,8 +302,28 @@ struct StormAiChatView: View {
         }
     }
 
-    private var effectiveVisitId: String? {
-        visitId ?? resolvedVisitId
+    private var voiceLiveSteps: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(voiceStatusLabel)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(StormTheme.navy)
+            if voiceActivity.isEmpty {
+                Text("Live steps will appear here while voice is active.")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            } else if let latest = voiceActivity.last {
+                Text(latest.message)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(activityColor(latest.level))
+                    .lineLimit(2)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemFill))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal)
+        .padding(.bottom, 6)
     }
 
     private func activityColor(_ level: StormAiRealtimeActivity.Level) -> Color {
@@ -327,6 +355,7 @@ struct StormAiChatView: View {
         }
         let session = StormAiRealtimeVoiceSession(api: env.apiClient)
         session.onTranscript = { role, text in
+            if messages.last?.role == role, messages.last?.content == text { return }
             messages.append(
                 StormAiMessageDTO(
                     id: "voice-\(UUID().uuidString)",
@@ -390,14 +419,11 @@ struct StormAiChatView: View {
         }
         error = nil
         warning = nil
-        if effectiveVisitId == nil {
-            await loadActiveVisitIfNeeded()
-        }
         videoModeActive = false
         voiceActivity = []
         await session.start(
             conversationId: conversationId,
-            visitId: effectiveVisitId,
+            visitId: visitId,
             videoMode: false
         )
         voiceStatus = session.status
@@ -416,9 +442,6 @@ struct StormAiChatView: View {
         let session = ensureVoiceSession()
         error = nil
         warning = nil
-        if effectiveVisitId == nil {
-            await loadActiveVisitIfNeeded()
-        }
 
         // Already in a live session: toggle camera without dropping conversation.
         if session.isActive {
@@ -441,7 +464,7 @@ struct StormAiChatView: View {
         voiceActivity = []
         await session.start(
             conversationId: conversationId,
-            visitId: effectiveVisitId,
+            visitId: visitId,
             videoMode: true
         )
         voiceStatus = session.status
@@ -456,22 +479,54 @@ struct StormAiChatView: View {
         }
     }
 
-    private func loadActiveVisitIfNeeded() async {
-        if let visitId {
-            resolvedVisitId = visitId
-            if activeJobTitle == nil {
-                activeJobTitle = "This visit"
-            }
-            return
-        }
+    private func beginNewThread() {
+        voiceSession?.stop()
+        voiceStatus = .idle
+        voiceToolName = nil
+        videoModeActive = false
+        voiceActivity = []
+        conversationId = nil
+        messages = []
+        draft = ""
+        pendingPhotos = []
+        error = nil
+        warning = nil
+        historyExpanded = false
+        isLoading = false
+    }
+
+    private func loadHistory() async {
         do {
-            let response: ActiveVisitResponse = try await env.apiClient.get(
-                path: APIPath.mobileActiveVisit
+            let list: StormAiConversationListResponse = try await env.apiClient.get(
+                path: APIPath.stormAiConversations
             )
-            resolvedVisitId = response.visit?.id
-            activeJobTitle = response.visit?.title
+            pastConversations = list.conversations
         } catch {
-            // Optional context — chat still works without an active job.
+            // History is optional — a new thread still works.
+        }
+    }
+
+    private func openConversation(_ id: String) async {
+        voiceSession?.stop()
+        voiceStatus = .idle
+        voiceToolName = nil
+        videoModeActive = false
+        voiceActivity = []
+        error = nil
+        warning = nil
+        historyExpanded = false
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            let detail: StormAiConversationDetailResponse = try await env.apiClient.get(
+                path: APIPath.stormAiConversation(id)
+            )
+            conversationId = detail.conversation.id
+            messages = detail.conversation.messages
+            draft = ""
+            pendingPhotos = []
+        } catch {
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 
@@ -522,13 +577,44 @@ struct StormAiChatView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(StormTheme.navy)
 
+            if card.visuallyConfirmed == true {
+                Text("Photo match")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.green.opacity(0.85))
+                    .clipShape(Capsule())
+            }
+
             if !card.photos.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(card.photos, id: \.url) { photo in
-                            AuthenticatedBlobImage(urlString: photo.url, contentMode: .fill)
-                                .frame(width: 120, height: 120)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            ZStack(alignment: .topLeading) {
+                                AuthenticatedBlobImage(urlString: photo.url, contentMode: .fill)
+                                    .frame(width: 120, height: 120)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                            .stroke(
+                                                photo.id != nil && photo.id == card.confirmedPhotoId
+                                                    ? Color.green
+                                                    : Color.clear,
+                                                lineWidth: 3
+                                            )
+                                    )
+                                if photo.id != nil, photo.id == card.confirmedPhotoId {
+                                    Text("Match")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 3)
+                                        .background(Color.green.opacity(0.9))
+                                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                        .padding(6)
+                                }
+                            }
                         }
                     }
                 }
@@ -538,20 +624,12 @@ struct StormAiChatView: View {
                 .compactMap { $0 }
                 .filter { !$0.isEmpty }
                 .joined(separator: " · ")
-            if !meta.isEmpty {
-                Text(meta)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            if let visual = card.visualDescription, !visual.isEmpty {
-                Text(visual)
+            let summary = (card.summary?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                ?? ([card.name, meta.isEmpty ? nil : meta].compactMap { $0 }.joined(separator: ". "))
+            if !summary.isEmpty {
+                Text(summary)
                     .font(.subheadline)
                     .foregroundStyle(StormTheme.navy)
-            }
-            if let tech = card.technicalDescription, !tech.isEmpty {
-                Text(tech)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
             }
             if let manualUrl = card.manualUrl, let url = URL(string: manualUrl) {
                 Link(card.manualKind == "pdf" ? "Open manual (PDF)" : "Open manual", destination: url)
@@ -569,45 +647,6 @@ struct StormAiChatView: View {
             proxy.scrollTo("thinking", anchor: .bottom)
         } else if let last = messages.last {
             proxy.scrollTo(last.id, anchor: .bottom)
-        }
-    }
-
-    private func loadLatest() async {
-        isLoading = true
-        error = nil
-        defer { isLoading = false }
-        do {
-            let list: StormAiConversationListResponse = try await env.apiClient.get(
-                path: APIPath.stormAiConversations
-            )
-            guard let latest = list.conversations.first else { return }
-            conversationId = latest.id
-            let detail: StormAiConversationDetailResponse = try await env.apiClient.get(
-                path: APIPath.stormAiConversation(latest.id)
-            )
-            messages = detail.conversation.messages
-        } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
-        }
-    }
-
-    private func startNewChat() async {
-        voiceSession?.stop()
-        voiceStatus = .idle
-        voiceToolName = nil
-        videoModeActive = false
-        error = nil
-        warning = nil
-        do {
-            let created: StormAiConversationCreatedResponse = try await env.apiClient.post(
-                path: APIPath.stormAiConversations
-            )
-            conversationId = created.conversation.id
-            messages = []
-            draft = ""
-            pendingPhotos = []
-        } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 
@@ -716,8 +755,8 @@ struct StormAiChatView: View {
                 content: content,
                 images: imageBodies.isEmpty ? nil : imageBodies,
                 pageContext: StormAiPageContextBody(
-                    pathname: effectiveVisitId.map { "ios://visit/\($0)" } ?? "ios://more",
-                    visitId: effectiveVisitId
+                    pathname: visitId.map { "ios://visit/\($0)" } ?? "ios://more",
+                    visitId: visitId
                 )
             )
             let result: StormAiMessagesResponse = try await env.apiClient.post(
@@ -727,6 +766,7 @@ struct StormAiChatView: View {
             )
             messages = result.messages
             warning = result.warning
+            await loadHistory()
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }

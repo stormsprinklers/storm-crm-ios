@@ -38,46 +38,32 @@ struct VoiceCallBar: View {
             .shadow(radius: 4)
             .transition(.move(edge: .top))
         } else if let error = voice.lastError, !error.isEmpty {
-            voiceBanner(error, isError: true)
-        } else if shouldShowVoiceStatus {
-            voiceBanner(voice.status, isError: false)
+            voiceBanner(error)
         }
     }
 
-    private var shouldShowVoiceStatus: Bool {
-        let status = voice.status.lowercased()
-        return voice.isListeningForCalls
-            || status.contains("unavailable")
-            || status.contains("simulator")
-            || status.contains("failed")
-            || status.contains("listening")
-    }
-
     @ViewBuilder
-    private func voiceBanner(_ message: String, isError: Bool) -> some View {
+    private func voiceBanner(_ message: String) -> some View {
         HStack(spacing: 8) {
             Text(message)
                 .font(.caption)
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.leading)
             Spacer(minLength: 8)
-            if isError {
-                Button {
-                    voice.clearError()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.white.opacity(0.9))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Dismiss")
+            Button {
+                voice.clearError()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.white.opacity(0.9))
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity)
-        .background((isError ? Color.red : voice.isListeningForCalls ? Color.green : Color.orange).opacity(0.9))
+        .background(Color.red.opacity(0.9))
         .task(id: message) {
-            guard isError else { return }
             try? await Task.sleep(nanoseconds: 8_000_000_000)
             voice.clearError()
         }

@@ -1,4 +1,5 @@
 import AVFoundation
+import Darwin
 import Foundation
 import os
 
@@ -62,9 +63,13 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
     /// Drop mic packets while the assistant is playing so speaker audio cannot be treated as a new user turn.
     private var suppressMicCapture = false
     private var resumeMicTask: Task<Void, Never>?
+    private var lastAssistantTranscript = ""
+    private var queuedPlaybackCount = 0
+    private var serverSaidPlaybackEnded = false
     private let targetSampleRate: Double = 24_000
     private let frameMinInterval: TimeInterval = 1.5
     private let toolTimeout: TimeInterval = 25
+    private let partsSearchTimeout: TimeInterval = 55
     private let searchFallbackDelayNs: UInt64 = 2_500_000_000
     private let videoTurnFlushNs: UInt64 = 1_800_000_000
 
@@ -110,6 +115,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         toolPrefetch.removeAll()
         searchFallbackUsed = false
         clearSearchFallback()
+        lastAssistantTranscript = ""
         self.videoMode = videoMode
         self.visitId = visitId
         status = .connecting
@@ -249,6 +255,9 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         resumeMicTask?.cancel()
         resumeMicTask = nil
         suppressMicCapture = false
+        queuedPlaybackCount = 0
+        serverSaidPlaybackEnded = false
+        lastAssistantTranscript = ""
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         urlSession?.invalidateAndCancel()
@@ -277,11 +286,12 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         sendJSON([
             "type": "session.update",
             "session": [
+                "type": "realtime",
                 "audio": [
                     "input": [
                         "turn_detection": [
                             "type": "server_vad",
-                            "threshold": 0.78,
+                            "threshold": 0.82,
                             "prefix_padding_ms": 400,
                             "silence_duration_ms": 900,
                             "interrupt_response": false,
@@ -345,13 +355,14 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(
             .playAndRecord,
-            mode: forVideo ? .videoChat : .voiceChat,
+            mode: forVideo ? .videoChat : .default,
             options: [.defaultToSpeaker, AVAudioSession.CategoryOptions.allowBluetooth]
         )
         try session.setPreferredSampleRate(targetSampleRate)
         try session.setPreferredIOBufferDuration(0.02)
+        try session.overrideOutputAudioPort(.speaker)
         if session.isInputGainSettable {
-            try? session.setInputGain(0.75)
+            try? session.setInputGain(0.7)
         }
         try session.setActive(true, options: [])
     }
@@ -539,17 +550,44 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
             interleaved: false
         )!
         engine.connect(player, to: engine.mainMixerNode, format: playFormat)
+        player.volume = 1
+        engine.mainMixerNode.outputVolume = 1
 
         input.installTap(onBus: 0, bufferSize: 2400, format: inputFormat) { [weak self] buffer, _ in
-            Task { @MainActor in
-                self?.appendMicAudio(buffer: buffer)
+            guard let copy = Self.copyPCMBuffer(buffer) else { return }
+            Task { @MainActor [weak self] in
+                self?.appendMicAudio(buffer: copy)
             }
         }
 
         try engine.start()
+        try? AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
         player.play()
         self.engine = engine
         self.playerNode = player
+    }
+
+    /// The audio tap reuses the engine buffer after it returns — copy immediately off the realtime thread.
+    nonisolated private static func copyPCMBuffer(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else {
+            return nil
+        }
+        copy.frameLength = buffer.frameLength
+        let frameCount = Int(buffer.frameLength)
+        let channels = Int(buffer.format.channelCount)
+        if let src = buffer.floatChannelData, let dst = copy.floatChannelData {
+            for ch in 0..<channels {
+                memcpy(dst[ch], src[ch], frameCount * MemoryLayout<Float>.size)
+            }
+            return copy
+        }
+        if let src = buffer.int16ChannelData, let dst = copy.int16ChannelData {
+            for ch in 0..<channels {
+                memcpy(dst[ch], src[ch], frameCount * MemoryLayout<Int16>.size)
+            }
+            return copy
+        }
+        return nil
     }
 
     private func appendMicAudio(buffer: AVAudioPCMBuffer) {
@@ -594,15 +632,31 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         switch type {
         case "error":
             let err = json["error"] as? [String: Any]
-            lastError = err?["message"] as? String ?? "Realtime error"
-            activity("Server error: \(lastError ?? "Realtime error")", level: .error)
-            status = .error
+            let message = err?["message"] as? String ?? "Realtime error"
+            let param = (err?["param"] as? String ?? "").lowercased()
+            let recoverable = message.localizedCaseInsensitiveContains("session.type")
+                || param.contains("session.type")
+                || message.localizedCaseInsensitiveContains("session.update")
+            activity("Server error: \(message)", level: .error)
+            if recoverable {
+                // Keep the live session up — a bad session.update must not hide camera or kill playback.
+                lastError = nil
+            } else {
+                lastError = message
+                status = .error
+            }
 
         case "input_audio_buffer.speech_started":
+            if shouldIgnoreMicTurn() {
+                sendJSON(["type": "input_audio_buffer.clear"])
+                activity("Ignored echo while Storm AI was speaking", level: .wait)
+                break
+            }
             status = .listening
             activity("Heard speech — listening")
 
         case "input_audio_buffer.speech_stopped":
+            if shouldIgnoreMicTurn() { break }
             if videoMode { beginVideoTurn() }
 
         case "response.created", "output_audio_buffer.started":
@@ -610,6 +664,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 modelResponseActive = true
                 activity("Model started a response")
             }
+            serverSaidPlaybackEnded = false
             muteMicForPlayback()
             status = .speaking
 
@@ -625,14 +680,16 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 modelResponseActive = false
                 activity("Model response cancelled", level: .wait)
             }
-            if !awaitingFunctionOutput, !needsSpokenFollowUp {
-                status = .listening
-                unmuteMicAfterPlayback()
-            }
+            markServerPlaybackEnded()
 
         case "conversation.item.input_audio_transcription.completed",
              "conversation.item.input_audio.transcription.completed":
             if let transcript = json["transcript"] as? String, !transcript.isEmpty {
+                if shouldIgnoreUserTranscript(transcript) {
+                    sendJSON(["type": "input_audio_buffer.clear"])
+                    activity("Dropped echo transcript", level: .wait)
+                    break
+                }
                 lastUserTranscript = transcript
                 onTranscript?("user", transcript)
                 let clipped = transcript.count > 80 ? String(transcript.prefix(80)) + "…" : transcript
@@ -644,6 +701,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
 
         case "response.output_audio_transcript.done", "response.audio_transcript.done":
             if let transcript = json["transcript"] as? String, !transcript.isEmpty {
+                lastAssistantTranscript = transcript
                 onTranscript?("assistant", transcript)
                 let clipped = transcript.count > 80 ? String(transcript.prefix(80)) + "…" : transcript
                 activity("AI said: \(clipped)")
@@ -712,8 +770,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
 
             scheduleSpokenFollowUp(delayNs: 80_000_000)
             if !awaitingFunctionOutput, !needsSpokenFollowUp, inFlightTools == 0 {
-                status = .listening
-                unmuteMicAfterPlayback()
+                markServerPlaybackEnded()
             }
 
         default:
@@ -767,23 +824,65 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                 dst[i] = Float(src[i]) / Float(Int16.max)
             }
         }
-        player.scheduleBuffer(buffer, completionHandler: nil)
+        if !player.isPlaying {
+            player.play()
+        }
+        queuedPlaybackCount += 1
+        player.scheduleBuffer(buffer, completionHandler: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.queuedPlaybackCount = max(0, self.queuedPlaybackCount - 1)
+                self.finishPlaybackIfIdle()
+            }
+        })
+    }
+
+    private func markServerPlaybackEnded() {
+        serverSaidPlaybackEnded = true
+        finishPlaybackIfIdle()
+    }
+
+    private func finishPlaybackIfIdle() {
+        guard serverSaidPlaybackEnded, queuedPlaybackCount == 0 else { return }
+        guard !awaitingFunctionOutput, !needsSpokenFollowUp, inFlightTools == 0, !modelResponseActive else { return }
+        serverSaidPlaybackEnded = false
+        status = .listening
+        unmuteMicAfterPlayback()
     }
 
     private func muteMicForPlayback() {
         resumeMicTask?.cancel()
         resumeMicTask = nil
         suppressMicCapture = true
+        engine?.inputNode.volume = 0
         sendJSON(["type": "input_audio_buffer.clear"])
     }
 
     private func unmuteMicAfterPlayback() {
         resumeMicTask?.cancel()
         resumeMicTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 450_000_000)
+            try? await Task.sleep(nanoseconds: 900_000_000)
             guard let self, !Task.isCancelled, !self.closed else { return }
+            self.engine?.inputNode.volume = 1
             self.suppressMicCapture = false
         }
+    }
+
+    private func shouldIgnoreMicTurn() -> Bool {
+        suppressMicCapture || status == .speaking || modelResponseActive
+    }
+
+    private func shouldIgnoreUserTranscript(_ text: String) -> Bool {
+        if shouldIgnoreMicTurn() { return true }
+        let user = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let assistant = lastAssistantTranscript.lowercased()
+        guard user.count >= 8, assistant.count >= 12 else { return false }
+        if assistant.contains(user) || user.contains(assistant) { return true }
+        let userTokens = Set(user.split(whereSeparator: { !$0.isLetter }).map(String.init).filter { $0.count > 2 })
+        let assistantTokens = Set(assistant.split(whereSeparator: { !$0.isLetter }).map(String.init).filter { $0.count > 2 })
+        guard !userTokens.isEmpty else { return false }
+        let overlap = Double(userTokens.intersection(assistantTokens).count)
+        return overlap / Double(userTokens.count) >= 0.7
     }
 
     private func completeFunctionCall(callId: String, name: String, argText: String) async {
@@ -919,6 +1018,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         }
         modelResponseActive = true
         activeToolName = nil
+        serverSaidPlaybackEnded = false
         muteMicForPlayback()
         status = .speaking
     }
@@ -943,7 +1043,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
                     name: name,
                     arguments: argsObject
                 ),
-                timeoutInterval: toolTimeout
+                timeoutInterval: name == "search_parts_info" ? partsSearchTimeout : toolTimeout
             )
             if let text = String(data: resultData, encoding: .utf8) {
                 return text
@@ -1027,6 +1127,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         ])
         modelResponseActive = true
         activeToolName = nil
+        serverSaidPlaybackEnded = false
         muteMicForPlayback()
         status = .speaking
 
@@ -1041,6 +1142,12 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
         let payload = (root["data"] as? [String: Any]) ?? root
+        let visual = payload["visualMatch"] as? [String: Any]
+        let visionRan = visual?["ran"] as? Bool ?? false
+        let confirmed = visual?["confirmed"] as? Bool ?? false
+        if visionRan && !confirmed {
+            return "Speak this: I compared that photo to the parts library and could not confirm a match. Try a closer, well-lit shot of the part. Then stop and listen."
+        }
         let parts = payload["parts"] as? [[String: Any]] ?? []
         guard let top = parts.first else {
             return "Speak this: I checked the parts library and did not find a match for what you are showing. Then stop and listen."
@@ -1048,6 +1155,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         let name = top["name"] as? String ?? "a matching part"
         let manufacturer = (top["manufacturer"] as? String).flatMap { $0.isEmpty ? nil : " by \($0)" } ?? ""
         let partNumber = (top["partNumber"] as? String).flatMap { $0.isEmpty ? nil : ", part number \($0)" } ?? ""
-        return "Speak this to the technician now, then stop and listen: From the parts library, this looks like \(name)\(manufacturer)\(partNumber)."
+        let prefix = confirmed ? "The library photo matches what you are showing. " : ""
+        return "Speak this to the technician now, then stop and listen: \(prefix)From the parts library, this looks like \(name)\(manufacturer)\(partNumber)."
     }
 }

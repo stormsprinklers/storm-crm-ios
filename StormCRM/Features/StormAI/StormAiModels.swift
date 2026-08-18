@@ -27,11 +27,13 @@ struct StormAiPartsCardDTO: Decodable, Hashable, Identifiable {
     let manufacturer: String?
     let partNumber: String?
     let section: String?
-    let visualDescription: String?
-    let technicalDescription: String?
+    let summary: String?
     let manualUrl: String?
     let manualKind: String?
     let photos: [StormAiPartsCardPhotoDTO]
+    let confirmedPhotoId: String?
+    let matchConfidence: Double?
+    let visuallyConfirmed: Bool?
 
     var id: String { partId }
 }
