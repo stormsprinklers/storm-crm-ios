@@ -378,32 +378,40 @@ private final class RefreshGate: @unchecked Sendable {
     private var inFlight: InFlight?
 
     func run(_ operation: @escaping @Sendable () async throws -> LoginResponse) async throws -> LoginResponse {
-        let box: InFlight
-        lock.lock()
-        if let existing = inFlight {
-            lock.unlock()
-            return try await existing.task.value
+        enum Decision {
+            case join(InFlight)
+            case start(InFlight)
         }
-        let created = InFlight(Task {
-            try await operation()
-        })
-        inFlight = created
-        box = created
-        lock.unlock()
 
-        do {
-            let value = try await box.task.value
-            clearIfCurrent(box)
-            return value
-        } catch {
-            clearIfCurrent(box)
-            throw error
+        let decision: Decision = lock.withLock {
+            if let existing = inFlight {
+                return .join(existing)
+            }
+            let created = InFlight(Task {
+                try await operation()
+            })
+            inFlight = created
+            return .start(created)
+        }
+
+        switch decision {
+        case .join(let existing):
+            return try await existing.task.value
+        case .start(let box):
+            do {
+                let value = try await box.task.value
+                clearIfCurrent(box)
+                return value
+            } catch {
+                clearIfCurrent(box)
+                throw error
+            }
         }
     }
 
     private func clearIfCurrent(_ box: InFlight) {
-        lock.lock()
-        if inFlight === box { inFlight = nil }
-        lock.unlock()
+        lock.withLock {
+            if inFlight === box { inFlight = nil }
+        }
     }
 }

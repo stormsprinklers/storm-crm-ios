@@ -17,20 +17,20 @@ final class VisitDetailViewModel: ObservableObject {
         error = nil
         defer { isLoading = false }
 
-        let useCache = {
+        let useCache = { [self] in
             if let cached = offlineSync?.cachedVisitDetail(id: visitId) {
-                visit = cached
-                if checklists.isEmpty {
-                    checklists = offlineSync?.cachedChecklists(visitId: visitId) ?? []
+                self.visit = cached
+                if self.checklists.isEmpty {
+                    self.checklists = offlineSync?.cachedChecklists(visitId: visitId) ?? []
                 }
-                if timeEvents.isEmpty {
-                    timeEvents = cached.timeEvents ?? []
+                if self.timeEvents.isEmpty {
+                    self.timeEvents = cached.timeEvents ?? []
                 }
-                error = nil
+                self.error = nil
                 return true
             }
             return false
-        } as () -> Bool
+        }
 
         if offlineSync?.hasPendingChanges(forVisitId: visitId) == true {
             if useCache() {

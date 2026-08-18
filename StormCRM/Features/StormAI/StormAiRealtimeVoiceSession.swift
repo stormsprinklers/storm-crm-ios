@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import os
 
 @MainActor
 final class StormAiRealtimeVoiceSession: ObservableObject {
@@ -345,7 +346,7 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         try session.setCategory(
             .playAndRecord,
             mode: forVideo ? .videoChat : .voiceChat,
-            options: [.defaultToSpeaker, .allowBluetooth]
+            options: [.defaultToSpeaker, AVAudioSession.CategoryOptions.allowBluetooth]
         )
         try session.setPreferredSampleRate(targetSampleRate)
         try session.setPreferredIOBufferDuration(0.02)
@@ -559,15 +560,17 @@ final class StormAiRealtimeVoiceSession: ObservableObject {
         guard let outBuffer = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: capacity) else { return }
 
         var error: NSError?
-        var consumed = false
+        let consumed = OSAllocatedUnfairLock(initialState: false)
         let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
-            if consumed {
-                outStatus.pointee = .noDataNow
-                return nil
+            consumed.withLock { consumed in
+                if consumed {
+                    outStatus.pointee = .noDataNow
+                    return nil
+                }
+                consumed = true
+                outStatus.pointee = .haveData
+                return buffer
             }
-            consumed = true
-            outStatus.pointee = .haveData
-            return buffer
         }
         converter.convert(to: outBuffer, error: &error, withInputFrom: inputBlock)
         guard error == nil, outBuffer.frameLength > 0, let channels = outBuffer.int16ChannelData else { return }
