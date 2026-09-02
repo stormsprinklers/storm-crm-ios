@@ -132,7 +132,9 @@ struct LoginView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Verify it's you")
                 .font(.headline)
-            Text("Enter the code we texted to \(pending.phoneMasked).")
+            Text(pending.channel == "EMAIL"
+                 ? "Enter the code we emailed to \(pending.phoneMasked)."
+                 : "Enter the code we texted to \(pending.phoneMasked).")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -193,6 +195,14 @@ struct LoginView: View {
                 }
                 .font(.subheadline)
             }
+
+            Button(pending.channel == "EMAIL" ? "Text me a code instead" : "Email me a code instead") {
+                Task {
+                    await auth.resendMfa(channel: pending.channel == "EMAIL" ? "SMS" : "EMAIL")
+                }
+            }
+            .font(.subheadline)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .padding()
         .background(Color(.systemBackground))

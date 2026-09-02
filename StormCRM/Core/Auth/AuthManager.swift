@@ -5,7 +5,7 @@ final class AuthManager: ObservableObject {
     @Published private(set) var user: UserDTO?
     @Published private(set) var isAuthenticated = false
     @Published var lastError: String?
-    /// Set after password login when SMS MFA is required.
+    /// Set after password login when MFA is required.
     @Published private(set) var pendingMfa: PendingMfaChallenge?
 
     private let tokenStore: TokenStore
@@ -50,7 +50,8 @@ final class AuthManager: ObservableObject {
             if response.mfaRequired == true, let challengeId = response.challengeId {
                 pendingMfa = PendingMfaChallenge(
                     challengeId: challengeId,
-                    phoneMasked: response.phoneMasked ?? "your phone",
+                    phoneMasked: response.destinationMasked ?? response.phoneMasked ?? "your phone",
+                    channel: response.channel ?? "SMS",
                     debugCode: response.debugCode
                 )
                 return
@@ -98,18 +99,22 @@ final class AuthManager: ObservableObject {
         }
     }
 
-    func resendMfa() async {
+    func resendMfa(channel: String? = nil) async {
         guard let pending = pendingMfa else { return }
         lastError = nil
         do {
             let response: MfaResendResponse = try await apiClient.post(
                 path: APIPath.mobileMfaResend,
-                body: MfaResendRequest(challengeId: pending.challengeId),
+                body: MfaResendRequest(
+                    challengeId: pending.challengeId,
+                    channel: channel ?? pending.channel
+                ),
                 authenticated: false
             )
             pendingMfa = PendingMfaChallenge(
                 challengeId: response.challengeId,
-                phoneMasked: response.phoneMasked ?? pending.phoneMasked,
+                phoneMasked: response.destinationMasked ?? response.phoneMasked ?? pending.phoneMasked,
+                channel: response.channel ?? channel ?? pending.channel,
                 debugCode: response.debugCode
             )
         } catch {
@@ -209,6 +214,7 @@ import UIKit
 struct PendingMfaChallenge: Equatable {
     let challengeId: String
     let phoneMasked: String
+    let channel: String
     let debugCode: String?
 }
 
@@ -226,11 +232,14 @@ struct MfaVerifyRequest: Encodable {
 
 struct MfaResendRequest: Encodable {
     let challengeId: String
+    let channel: String?
 }
 
 struct MfaResendResponse: Decodable {
     let challengeId: String
     let phoneMasked: String?
+    let destinationMasked: String?
+    let channel: String?
     let debugCode: String?
 }
 
@@ -246,6 +255,8 @@ struct MobileLoginChallengeResponse: Decodable {
     let mfaRequired: Bool?
     let challengeId: String?
     let phoneMasked: String?
+    let destinationMasked: String?
+    let channel: String?
     let debugCode: String?
     let accessToken: String?
     let refreshToken: String?
