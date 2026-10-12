@@ -7,7 +7,33 @@ import AVFoundation
 @MainActor
 final class VoiceManager: ObservableObject {
     @Published var status = "Ready"
-    @Published var lastError: String?
+    @Published var lastError: String? { didSet { scheduleErrorReport() } }
+    struct ReportedError: Identifiable {
+        let id = UUID()
+        let message: String
+        let occurredAt = Date()
+    }
+    @Published private(set) var reportedErrors: [ReportedError] = []
+    @Published private(set) var unreadErrorCount = 0
+    private var errorReportTask: Task<Void, Never>?
+    private func scheduleErrorReport() {
+        guard oldErrorMessage != lastError else { return }
+        oldErrorMessage = lastError
+        errorReportTask?.cancel()
+        guard let message = lastError, !message.isEmpty else { return }
+        errorReportTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            guard let self, self.lastError == message else { return }
+            if self.reportedErrors.first?.message != message {
+                self.reportedErrors.insert(ReportedError(message: message), at: 0)
+                self.reportedErrors = Array(self.reportedErrors.prefix(50))
+                self.unreadErrorCount += 1
+            }
+        }
+    }
+    private var oldErrorMessage: String?
+    func markErrorsRead() { unreadErrorCount = 0 }
+    func clearReportedErrors() { reportedErrors = []; unreadErrorCount = 0 }
     @Published private(set) var isInCall = false
     @Published private(set) var isMuted = false
     @Published private(set) var activePhone: String?
@@ -38,6 +64,7 @@ final class VoiceManager: ObservableObject {
         #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
         await IncomingCallCoordinator.shared.stop()
         #endif
+        clearReportedErrors()
         cachedToken = nil
         isListeningForCalls = false
         status = "Ready"

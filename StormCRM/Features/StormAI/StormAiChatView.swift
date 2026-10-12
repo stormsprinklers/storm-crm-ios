@@ -11,6 +11,7 @@ private struct StormAiPendingPhoto: Identifiable {
 
 struct StormAiChatView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var branding: CompanyBranding
 
     var visitId: String? = nil
 
@@ -242,7 +243,7 @@ struct StormAiChatView: View {
                 }
                 .disabled(isSending)
 
-                TextField("Ask Storm AI…", text: $draft, axis: .vertical)
+                TextField("Ask \(branding.aiName)…", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.roundedBorder)
                     .disabled(isSending)
@@ -264,7 +265,7 @@ struct StormAiChatView: View {
             .background(.ultraThinMaterial)
         }
         .background(StormTheme.page.ignoresSafeArea())
-        .navigationTitle("Storm AI")
+        .navigationTitle(branding.aiName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -339,7 +340,7 @@ struct StormAiChatView: View {
         switch voiceStatus {
         case .connecting: return "Connecting voice…"
         case .tool: return "Looking up \(voiceToolName ?? "CRM data")…"
-        case .speaking: return "Storm AI speaking…"
+        case .speaking: return "\(branding.aiName) speaking…"
         case .listening:
             return videoModeActive
                 ? "Listening — point the camera and ask about what you see"

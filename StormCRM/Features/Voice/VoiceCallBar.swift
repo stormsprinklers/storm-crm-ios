@@ -37,35 +37,6 @@ struct VoiceCallBar: View {
             .background(StormTheme.brandNavy)
             .shadow(radius: 4)
             .transition(.move(edge: .top))
-        } else if let error = voice.lastError, !error.isEmpty {
-            voiceBanner(error)
-        }
-    }
-
-    @ViewBuilder
-    private func voiceBanner(_ message: String) -> some View {
-        HStack(spacing: 8) {
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.leading)
-            Spacer(minLength: 8)
-            Button {
-                voice.clearError()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.white.opacity(0.9))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Dismiss")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(maxWidth: .infinity)
-        .background(Color.red.opacity(0.9))
-        .task(id: message) {
-            try? await Task.sleep(nanoseconds: 8_000_000_000)
-            voice.clearError()
         }
     }
 }

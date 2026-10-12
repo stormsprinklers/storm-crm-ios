@@ -4,6 +4,7 @@ struct CompanyAccountDTO: Decodable, Identifiable {
     let userId: String
     let companyId: String
     let companyName: String
+    let companyLogoUrl: String?
     let name: String
     let role: String
     var id: String { userId }
@@ -25,7 +26,7 @@ struct CompanySwitcherView: View {
             if loading { ProgressView("Loading companies…") }
             if let accounts {
                 Section("Current company") {
-                    Label(accounts.current.companyName, systemImage: "checkmark.circle.fill")
+                    HStack { CompanyMenuLogo(account: accounts.current); Text(accounts.current.companyName); Spacer(); Image(systemName: "checkmark.circle.fill") }
                 }
                 Section("Switch company") {
                     let available = accounts.switchable.filter {
@@ -44,9 +45,12 @@ struct CompanySwitcherView: View {
                                 }
                             }
                         } label: {
+                            HStack {
+                            CompanyMenuLogo(account: account)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(account.companyName)
                                 Text("\(account.name) · \(account.role)").font(.caption).foregroundStyle(.secondary)
+                            }
                             }
                         }
                     }
@@ -70,5 +74,16 @@ struct CompanySwitcherView: View {
         defer { loading = false }
         do { accounts = try await env.apiClient.get(path: APIPath.accountCompanies) }
         catch { self.error = (error as? APIError)?.message ?? error.localizedDescription }
+    }
+}
+
+private struct CompanyMenuLogo: View {
+    let account: CompanyAccountDTO
+    var body: some View {
+        AsyncImage(url: account.companyLogoUrl.flatMap { URL(string: $0, relativeTo: URL(string: AppConfig.apiBaseURL)) }) { image in
+            image.resizable().scaledToFit()
+        } placeholder: {
+            Text(String(account.companyName.prefix(1))).font(.headline)
+        }.frame(width: 36, height: 36).background(Color(.secondarySystemBackground)).clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }

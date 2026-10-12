@@ -9,7 +9,7 @@ struct MainTabView: View {
             tabContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            MainBottomTabBar(selection: $env.selectedTab)
+            MainBottomTabBar(selection: $env.selectedTab, voice: env.voice)
         }
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .sheet(item: Binding(
@@ -69,6 +69,7 @@ struct MainTabView: View {
 
 private struct MainBottomTabBar: View {
     @Binding var selection: MainTab
+    @ObservedObject var voice: VoiceManager
 
     var body: some View {
         VStack(spacing: 0) {
@@ -81,6 +82,7 @@ private struct MainBottomTabBar: View {
                         VStack(spacing: 4) {
                             Image(systemName: tab.systemImage)
                                 .font(.system(size: 20, weight: selection == tab ? .semibold : .regular))
+                            if tab == .more && voice.unreadErrorCount > 0 { Text("\(voice.unreadErrorCount)").font(.caption2.bold()).foregroundStyle(.orange) }
                             Text(tab.title)
                                 .font(.caption2.weight(selection == tab ? .semibold : .regular))
                                 .lineLimit(1)

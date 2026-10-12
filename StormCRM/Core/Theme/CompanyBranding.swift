@@ -2,6 +2,10 @@ import Foundation
 
 struct CompanyBrandingDTO: Decodable {
     let name: String?
+    let brandLogoUrl: String?
+    let irrigationFeaturesEnabled: Bool?
+    let holidayLightingFeaturesEnabled: Bool?
+    let maintenancePlansFeaturesEnabled: Bool?
     let emailLogoUrl: String?
     let phone: String?
     let termsOfServiceUrl: String?
@@ -44,11 +48,22 @@ final class CompanyBranding: ObservableObject {
     @Published private(set) var privacyPolicyURL: URL?
     @Published private(set) var isLoaded = false
 
+    @Published private(set) var irrigationEnabled = true
+    @Published private(set) var holidayLightingEnabled = false
+    @Published private(set) var maintenancePlansEnabled = true
+    var aiName: String { "\(companyName.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? "Company") AI" }
+    var isHolidayCompany: Bool {
+        companyName.lowercased().replacingOccurrences(of: "&", with: "and") == "chestnut and cheer" || (holidayLightingEnabled && !irrigationEnabled)
+    }
+
     func reset() {
         companyName = "Storm Sprinklers"
         logoUrl = nil
         termsOfServiceURL = nil
         privacyPolicyURL = nil
+        irrigationEnabled = true
+        holidayLightingEnabled = false
+        maintenancePlansEnabled = true
         isLoaded = false
     }
 
@@ -58,7 +73,11 @@ final class CompanyBranding: ObservableObject {
             if let name = settings.name, !name.isEmpty {
                 companyName = name
             }
-            logoUrl = settings.emailLogoUrl
+            logoUrl = settings.brandLogoUrl ?? settings.emailLogoUrl
+            let chestnut = companyName.lowercased().replacingOccurrences(of: "&", with: "and") == "chestnut and cheer"
+            holidayLightingEnabled = chestnut || settings.holidayLightingFeaturesEnabled == true
+            irrigationEnabled = !chestnut && settings.irrigationFeaturesEnabled != false
+            maintenancePlansEnabled = !isHolidayCompany && settings.maintenancePlansFeaturesEnabled != false
             termsOfServiceURL = settings.resolvedTermsOfServiceURL
             privacyPolicyURL = settings.resolvedPrivacyPolicyURL
         } catch {

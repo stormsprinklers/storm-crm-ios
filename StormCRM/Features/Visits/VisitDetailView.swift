@@ -338,6 +338,7 @@ final class VisitDetailViewModel: ObservableObject {
 
 struct VisitDetailView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var branding: CompanyBranding
     @Environment(\.dismiss) private var dismiss
     let visitId: String
     @StateObject private var viewModel = VisitDetailViewModel()
@@ -505,7 +506,7 @@ struct VisitDetailView: View {
                                     customerHistory: viewModel.customerHistory
                                 )
 
-                                if let role = env.auth.user?.role, UserRoles.canViewMaintenancePlans(role) {
+                                if branding.maintenancePlansEnabled, let role = env.auth.user?.role, UserRoles.canViewMaintenancePlans(role) {
                                     VisitMaintenanceSection(
                                         visitId: visitId,
                                         userRole: role,
@@ -518,6 +519,8 @@ struct VisitDetailView: View {
                                         }
                                     )
                                 }
+
+                                if branding.isHolidayCompany { HolidayVisitPlanSection(metadata: visit.designExportMetadata) }
 
                                 VisitEstimatesSection(
                                     visit: visit,
@@ -557,7 +560,7 @@ struct VisitDetailView: View {
 
                                 VisitAttachmentsSection(visitId: visitId)
 
-                                if visit.hasInstallPlan {
+                                if branding.irrigationEnabled && visit.hasInstallPlan {
                                     VisitInstallPlanSection(visit: visit)
                                 }
 
@@ -597,7 +600,7 @@ struct VisitDetailView: View {
                     StormAiChatView(visitId: visitId)
                 } label: {
                     Image(systemName: "sparkles")
-                        .accessibilityLabel("Storm AI")
+                        .accessibilityLabel(branding.aiName)
                 }
             }
             if env.auth.user != nil {
@@ -667,6 +670,13 @@ struct VisitDetailView: View {
         .task {
             await viewModel.load(api: env.apiClient, visitId: visitId, offlineSync: env.offlineSync)
             syncLiveTracking()
+        }
+        .task(id: viewModel.timeEvents.last?.id) {
+            guard viewModel.visit?.status == "EN_ROUTE", let event = VisitTimeTrackingLogic.latestEvent(in: viewModel.timeEvents, type: "EN_ROUTE"), let started = APIDateFormatting.parse(event.occurredAt) else { return }
+            let remaining = max(0, started.addingTimeInterval(7200).timeIntervalSinceNow)
+            do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
+            env.enRouteLocation.stop()
+            await reloadVisit()
         }
         .onChange(of: viewModel.visit?.status) { _, _ in
             syncLiveTracking()
@@ -815,7 +825,7 @@ struct VisitDetailView: View {
 
     private func syncLiveTracking() {
         if viewModel.visit?.status == "EN_ROUTE" {
-            env.enRouteLocation.start(visitId: visitId)
+            env.enRouteLocation.start(visitId: visitId, startedAt: VisitTimeTrackingLogic.latestEvent(in: viewModel.timeEvents, type: "EN_ROUTE").flatMap { APIDateFormatting.parse($0.occurredAt) })
         } else {
             env.enRouteLocation.stop()
         }

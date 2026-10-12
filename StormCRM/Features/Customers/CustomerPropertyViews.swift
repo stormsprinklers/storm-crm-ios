@@ -25,6 +25,8 @@ struct CustomerPropertiesSection: View {
 }
 
 struct CustomerPropertyInlineSection: View {
+    @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var branding: CompanyBranding
     let customerId: String
     let property: CustomerPropertyDTO
 
@@ -50,6 +52,7 @@ struct CustomerPropertyInlineSection: View {
                     PropertyLocationEmbedsView(addressQuery: property.formattedAddress)
                 }
 
+                if branding.irrigationEnabled {
                 PropertyIrrigationInlineSection(
                     customerId: customerId,
                     propertyId: property.id,
@@ -63,6 +66,7 @@ struct CustomerPropertyInlineSection: View {
                     propertyId: property.id,
                     embedded: true
                 )
+                }
             }
         }
     }
@@ -70,6 +74,7 @@ struct CustomerPropertyInlineSection: View {
 
 struct PropertyLocationEmbedsView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var branding: CompanyBranding
     let addressQuery: String
 
     @State private var embeds: MapsEmbedResponse?

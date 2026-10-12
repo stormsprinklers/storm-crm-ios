@@ -11,6 +11,7 @@ final class EnRouteLocationPublisher: ObservableObject {
     private weak var locationManager: LocationManager?
     private var visitId: String?
     private var pollTask: Task<Void, Never>?
+    private var deadline: Date?
     private var lastPostedAt: Date?
     private var lastPostedCoordinate: CLLocationCoordinate2D?
 
@@ -22,17 +23,21 @@ final class EnRouteLocationPublisher: ObservableObject {
         self.locationManager = location
     }
 
-    func start(visitId: String) {
-        if isPublishing, self.visitId == visitId { return }
+    func start(visitId: String, startedAt: Date? = nil) {
+        let nextDeadline = (startedAt ?? Date()).addingTimeInterval(7200)
+        if isPublishing, self.visitId == visitId, deadline == nextDeadline { return }
         stop()
+        deadline = nextDeadline
+        guard let deadline, deadline > Date() else { return }
         self.visitId = visitId
         isPublishing = true
         lastError = nil
         locationManager?.requestPermission()
-        locationManager?.setEnRouteTracking(true)
+        locationManager?.setEnRouteTracking(true, deadline: deadline)
 
         pollTask = Task { [weak self] in
             while let self, !Task.isCancelled, self.isPublishing, self.visitId == visitId {
+                if let deadline = self.deadline, Date() >= deadline { self.stop(); return }
                 await self.publishIfNeeded()
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
             }
@@ -44,6 +49,7 @@ final class EnRouteLocationPublisher: ObservableObject {
         pollTask = nil
         isPublishing = false
         visitId = nil
+        deadline = nil
         lastPostedAt = nil
         lastPostedCoordinate = nil
         locationManager?.setEnRouteTracking(false)
@@ -99,6 +105,10 @@ final class EnRouteLocationPublisher: ObservableObject {
             lastPostedCoordinate = location.coordinate
             lastError = nil
         } catch {
+            if let apiError = error as? APIError {
+                let message = apiError.message
+                if message.localizedCaseInsensitiveContains("not en route") || message.localizedCaseInsensitiveContains("expired") || message.localizedCaseInsensitiveContains("not active") { stop(); return }
+            }
             lastError = (error as? APIError)?.message ?? error.localizedDescription
         }
     }

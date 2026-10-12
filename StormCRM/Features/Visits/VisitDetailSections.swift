@@ -337,6 +337,7 @@ extension Double {
 /// steals gestures from Payment / Parts run controls layered above it.
 struct VisitStreetViewHeader: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var branding: CompanyBranding
     let addressQuery: String?
 
     @State private var embeds: MapsEmbedResponse?
@@ -414,6 +415,7 @@ struct VisitStreetViewHeader: View {
 
 struct VisitWorkSummarySection: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var branding: CompanyBranding
     let visitId: String
     let initialSummary: String?
     var onSave: (String?) async -> Bool
@@ -479,6 +481,7 @@ struct VisitWorkSummarySection: View {
 
 struct VisitChecklistLauncherSection: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var branding: CompanyBranding
     let checklists: [ChecklistDTO]
     let onSaveItem: (String, String, JSONValue) async -> Void
     let onComplete: (String) async -> Void
@@ -581,6 +584,7 @@ struct VisitChecklistLauncherSection: View {
 
 struct VisitCustomerInfoSection: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var branding: CompanyBranding
     let visit: VisitDetailDTO
     @ObservedObject var voice: VoiceManager
     var customerHistory: CustomerHistoryDTO? = nil
@@ -672,7 +676,7 @@ struct VisitCustomerInfoSection: View {
                     }
                 }
 
-                if let customerId = visit.customer?.id, let property = visit.property {
+                if branding.irrigationEnabled, let customerId = visit.customer?.id, let property = visit.property {
                     VisitPropertyIrrigationPreview(customerId: customerId, property: property)
 
                     DisclosureGroup {

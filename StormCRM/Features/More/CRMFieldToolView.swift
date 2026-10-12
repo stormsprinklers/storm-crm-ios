@@ -25,6 +25,8 @@ enum CRMFieldTool: String {
 /// Uses the CRM's complete tools and records, with an isolated ephemeral web session.
 struct CRMFieldToolView: View {
     let tool: CRMFieldTool
+    var query: [URLQueryItem] = []
+    var pathOverride: String? = nil
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var browser = CRMFieldToolBrowser()
@@ -42,23 +44,15 @@ struct CRMFieldToolView: View {
                 } description: {
                     Text(error)
                 } actions: {
-                    Button("Retry") { Task { await browser.open(tool: tool, api: env.apiClient) } }
+                    Button("Retry") { Task { await browser.open(tool: tool, api: env.apiClient, query: query, pathOverride: pathOverride) } }
                 }
                 .background(Color(.systemBackground))
             }
         }
         .navigationTitle(tool.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItemGroup(placement: .bottomBar) {
-                Button { browser.webView.goBack() } label: { Label("Back", systemImage: "chevron.left") }
-                    .disabled(!browser.canGoBack)
-                Spacer()
-                Button { browser.webView.reload() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
-            }
-        }
         .task {
-            await browser.open(tool: tool, api: env.apiClient)
+            await browser.open(tool: tool, api: env.apiClient, query: query, pathOverride: pathOverride)
             // Renew cookies without reloading or discarding an in-progress quote/form.
             while !Task.isCancelled {
                 do { try await Task.sleep(for: .seconds(8 * 60)) } catch { return }
@@ -97,13 +91,15 @@ final class CRMFieldToolBrowser: NSObject, ObservableObject, WKNavigationDelegat
         webView.allowsBackForwardNavigationGestures = true
     }
 
-    func open(tool: CRMFieldTool, api: APIClient) async {
+    func open(tool: CRMFieldTool, api: APIClient, query: [URLQueryItem] = [], pathOverride: String? = nil) async {
         error = nil
         isLoading = true
         do {
             try await authenticate(api: api)
             guard !Task.isCancelled else { isLoading = false; return }
-            guard let url = URL(string: AppConfig.apiBaseURL + tool.path) else { throw APIError.invalidURL }
+            var components = URLComponents(string: AppConfig.apiBaseURL + (pathOverride ?? tool.path))
+            if !query.isEmpty { components?.queryItems = query }
+            guard let url = components?.url else { throw APIError.invalidURL }
             if needsReload || webView.url == nil {
                 webView.load(URLRequest(url: webView.url ?? url))
             } else {

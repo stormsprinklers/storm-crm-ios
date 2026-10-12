@@ -3,6 +3,7 @@ import SwiftUI
 /// Quick "add job" sheet launched by tapping an empty slot on the schedule timeline.
 struct ScheduleJobCreateSheet: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var branding: CompanyBranding
     @Environment(\.dismiss) private var dismiss
 
     let employees: [ScheduleEmployeeDTO]
@@ -128,6 +129,7 @@ struct ScheduleJobCreateSheet: View {
                     Picker("Type", selection: $division) {
                         Text("Service").tag("SERVICE")
                         Text("Install").tag("INSTALL")
+                        Text("Holiday Lights").tag("HOLIDAY_LIGHTS")
                     }
                     .pickerStyle(.segmented)
                 }
@@ -168,6 +170,9 @@ struct ScheduleJobCreateSheet: View {
                         .disabled(isSaving || !canSave)
                 }
             }
+            .onAppear {
+                if branding.isHolidayCompany && title == "Service visit" { title = "Holiday lighting appointment"; division = "HOLIDAY_LIGHTS" }
+            }
             .onChange(of: customerSearch) { _, value in
                 guard selectedCustomer == nil else { return }
                 searchTask?.cancel()
@@ -198,7 +203,7 @@ struct ScheduleJobCreateSheet: View {
         selectedCustomer = customer
         customerSearch = ""
         customerResults = []
-        if title == "Service visit" || title.trimmingCharacters(in: .whitespaces).isEmpty {
+        if !branding.isHolidayCompany && (title == "Service visit" || title.trimmingCharacters(in: .whitespaces).isEmpty) {
             title = customer.name
         }
         await loadProperties(for: customer.id)

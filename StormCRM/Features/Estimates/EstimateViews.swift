@@ -2,6 +2,7 @@ import SwiftUI
 
 struct VisitEstimatesSection: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var branding: CompanyBranding
     let visit: VisitDetailDTO
     let visitId: String
     var onUpdated: () async -> Void
@@ -20,6 +21,12 @@ struct VisitEstimatesSection: View {
                 HStack {
                     StormSectionHeader(title: "Estimates", systemImage: "doc.text")
                     Spacer()
+                    if branding.isHolidayCompany {
+                        NavigationLink {
+                            CRMFieldToolView(tool: .holidayLighting, query: [URLQueryItem(name: "visitId", value: visitId), URLQueryItem(name: "customerId", value: visit.customer?.id), URLQueryItem(name: "propertyId", value: visit.property?.id)], pathOverride: "/holiday-lighting/quote/new")
+                        } label: { Label("New estimate", systemImage: "plus").font(.subheadline) }
+                        .buttonStyle(StormSecondaryButtonStyle()).disabled(visit.customer == nil)
+                    } else {
                     Button {
                         Task { await createEstimate() }
                     } label: {
@@ -32,6 +39,7 @@ struct VisitEstimatesSection: View {
                     }
                     .buttonStyle(StormSecondaryButtonStyle())
                     .disabled(isCreating || visit.customer == nil)
+                    }
                 }
 
                 if let error {
@@ -125,6 +133,7 @@ struct VisitEstimatesSection: View {
 
 struct EstimateDetailView: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var branding: CompanyBranding
     @Environment(\.dismiss) private var dismiss
 
     let estimateId: String
@@ -858,6 +867,7 @@ struct EstimateDetailView: View {
 /// Customer card for estimates — same contact/history UX as visits, without irrigation map.
 struct EstimateCustomerInfoSection: View {
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var branding: CompanyBranding
     let customer: EstimateCustomerDTO
     let property: EstimatePropertyDTO?
     @ObservedObject var voice: VoiceManager

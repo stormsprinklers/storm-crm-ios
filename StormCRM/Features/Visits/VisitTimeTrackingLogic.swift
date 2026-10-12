@@ -63,17 +63,17 @@ enum VisitTimeTrackingLogic {
         var endedAt: Date?
         for event in events {
             guard let at = APIDateFormatting.parse(event.occurredAt), at > enRouteAt else { continue }
-            if event.type == "START" || event.type == "RESUME" || event.type == "FINISH" {
+            if event.type == "START" || event.type == "RESUME" || event.type == "PAUSE" || event.type == "FINISH" {
                 endedAt = at
                 break
             }
         }
 
         if status == "EN_ROUTE", endedAt == nil {
-            return Int(now.timeIntervalSince(enRouteAt))
+            return max(0, min(7200, Int(now.timeIntervalSince(enRouteAt))))
         }
         if let endedAt {
-            return Int(endedAt.timeIntervalSince(enRouteAt))
+            return max(0, min(7200, Int(endedAt.timeIntervalSince(enRouteAt))))
         }
         return 0
     }

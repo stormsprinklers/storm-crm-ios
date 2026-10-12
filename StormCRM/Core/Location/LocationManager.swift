@@ -9,6 +9,7 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
     private let manager = CLLocationManager()
     private var fleetTracking = false
     private var enRouteTracking = false
+    private var enRouteDeadline: Date?
 
     private var isContinuous: Bool { fleetTracking || enRouteTracking }
 
@@ -49,8 +50,9 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
         applyTrackingMode()
     }
 
-    func setEnRouteTracking(_ enabled: Bool) {
+    func setEnRouteTracking(_ enabled: Bool, deadline: Date? = nil) {
         enRouteTracking = enabled
+        enRouteDeadline = enabled ? deadline : nil
         applyTrackingMode()
     }
 
@@ -134,6 +136,7 @@ final class LocationManager: NSObject, ObservableObject, CLLocationManagerDelega
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         Task { @MainActor in
+            if let deadline = enRouteDeadline, Date() >= deadline { setEnRouteTracking(false) }
             lastLocation = locations.last
             if !isContinuous {
                 manager.stopUpdatingLocation()

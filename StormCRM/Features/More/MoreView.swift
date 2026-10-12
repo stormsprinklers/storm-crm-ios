@@ -3,6 +3,7 @@ import SwiftUI
 struct MoreView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var env: AppEnvironment
+    @EnvironmentObject private var branding: CompanyBranding
     @EnvironmentObject private var offlineSync: OfflineSyncManager
     @EnvironmentObject private var appearanceSettings: AppearanceSettings
 
@@ -20,7 +21,7 @@ struct MoreView: View {
                         NavigationLink {
                             CompanySwitcherView()
                         } label: {
-                            LabeledContent("Company", value: env.branding.companyName)
+                            LabeledContent("Company", value: branding.companyName)
                         }
                     }
                 }
@@ -38,6 +39,7 @@ struct MoreView: View {
                 }
 
                 Section("Tools") {
+                    NavigationLink { VoiceErrorsView(voice: env.voice) } label: { VoiceErrorsLabel(voice: env.voice) }
                     NavigationLink {
                         CRMFieldToolView(tool: .vehicles)
                     } label: {
@@ -66,7 +68,7 @@ struct MoreView: View {
                         StormAiChatView()
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
-                            Label("Storm AI", systemImage: "sparkles")
+                            Label(branding.aiName, systemImage: "sparkles")
                             Text("Chat, part photos, live voice & video")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
@@ -112,14 +114,14 @@ struct MoreView: View {
                     }
                 }
 
-                if env.branding.termsOfServiceURL != nil || env.branding.privacyPolicyURL != nil {
+                if branding.termsOfServiceURL != nil || branding.privacyPolicyURL != nil {
                     Section("Legal") {
-                        if let url = env.branding.termsOfServiceURL {
+                        if let url = branding.termsOfServiceURL {
                             Link(destination: url) {
                                 Label("Terms of Service", systemImage: "doc.text")
                             }
                         }
-                        if let url = env.branding.privacyPolicyURL {
+                        if let url = branding.privacyPolicyURL {
                             Link(destination: url) {
                                 Label("Privacy Policy", systemImage: "hand.raised")
                             }
@@ -155,6 +157,33 @@ struct MoreView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             }
+        }
+    }
+}
+
+private struct VoiceErrorsView: View {
+    @ObservedObject var voice: VoiceManager
+    var body: some View {
+        List {
+            if voice.reportedErrors.isEmpty { Text("No sustained errors.").foregroundStyle(.secondary) }
+            ForEach(voice.reportedErrors) { error in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(error.message)
+                    Text(error.occurredAt.formatted()).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }.navigationTitle("Errors").onAppear { voice.markErrorsRead() }
+        .toolbar { Button("Clear") { voice.clearReportedErrors() } }
+    }
+}
+
+private struct VoiceErrorsLabel: View {
+    @ObservedObject var voice: VoiceManager
+    var body: some View {
+        HStack {
+            Label("Errors", systemImage: "exclamationmark.bubble")
+            Spacer()
+            if voice.unreadErrorCount > 0 { Text("\(voice.unreadErrorCount)").font(.caption.bold()).padding(6).background(Color.orange.opacity(0.15)).clipShape(Capsule()) }
         }
     }
 }
