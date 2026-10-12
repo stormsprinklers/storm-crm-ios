@@ -21,6 +21,11 @@ enum OfflineVisitWindow {
 
 /// Raw JSON snapshots of full visit payloads so techs can open jobs and keep working offline.
 enum OfflineVisitDetailStore {
+    static func clear() throws {
+        if FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.removeItem(at: directory)
+        }
+    }
     private static var directory: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return docs.appendingPathComponent("OfflineVisitDetails", isDirectory: true)

@@ -48,6 +48,21 @@ final class OfflineSyncManager: ObservableObject {
         openTimeSegment = segment
     }
 
+    func clearCachesForCompanySwitch() throws {
+        guard pendingCount == 0, !isSyncing, MediaUploadQueue.shared.pendingCount() == 0,
+              !MediaUploadQueue.shared.isProcessing else {
+            throw APIError.badRequest("Sync your pending changes and uploads before switching companies.")
+        }
+        let context = OfflineStore.sharedContext(from: modelContainer)
+        try context.fetch(FetchDescriptor<CachedVisit>()).forEach { context.delete($0) }
+        try context.fetch(FetchDescriptor<CachedCustomer>()).forEach { context.delete($0) }
+        try context.fetch(FetchDescriptor<CachedProperty>()).forEach { context.delete($0) }
+        try context.save()
+        try OfflineVisitDetailStore.clear()
+        openTimeSegment = nil
+        TimerRunningNotificationHelper.cancelScheduledReminder()
+    }
+
     func enqueue(
         path: String,
         method: String,

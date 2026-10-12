@@ -17,6 +17,7 @@ final class VoiceManager: ObservableObject {
     private let apiClient: APIClient
     private let auth: AuthManager
     private var cachedToken: String?
+    private var isPreparingCall = false
     /// True while the active call is being managed by CallKit (both incoming and outgoing).
     private var callKitActive = false
 
@@ -30,6 +31,16 @@ final class VoiceManager: ObservableObject {
     }
 
     func clearError() {
+        lastError = nil
+    }
+
+    func resetForCompanySwitch() async {
+        #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
+        await IncomingCallCoordinator.shared.stop()
+        #endif
+        cachedToken = nil
+        isListeningForCalls = false
+        status = "Ready"
         lastError = nil
     }
 
@@ -99,15 +110,9 @@ final class VoiceManager: ObservableObject {
     /// Re-register for incoming calls when returning to the app or after server config changes.
     func refreshIncomingCalls() async {
         guard auth.isAuthenticated else { return }
-        if cachedToken == nil {
-            await prepare()
-            return
-        }
-        #if canImport(TwilioVoice)
-        startIncomingCalls()
-        IncomingCallCoordinator.shared.refreshRegistration()
-        #endif
-        markPresence("AVAILABLE")
+        guard !isInCall else { return }
+        // Voice tokens expire after an hour; a cached token is not proof of readiness.
+        await prepare()
     }
 
     private func fetchTokenResponse() async throws -> TokenResponse {
@@ -126,15 +131,24 @@ final class VoiceManager: ObservableObject {
         #endif
     }
 
-    func stopIncomingCalls() {
+    func stopIncomingCalls() async {
         markPresence("OFFLINE")
         isListeningForCalls = false
         #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
-        IncomingCallCoordinator.shared.stop()
+        await IncomingCallCoordinator.shared.stop()
         #endif
     }
 
     func call(phone: String, customerId: String? = nil) async {
+        guard !isInCall, !isPreparingCall else { return }
+        #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
+        guard !IncomingCallCoordinator.shared.hasActiveCall else {
+            lastError = "Finish or decline your current call before dialing another number."
+            return
+        }
+        #endif
+        isPreparingCall = true
+        defer { isPreparingCall = false }
         lastError = nil
 
         #if targetEnvironment(simulator)
@@ -165,8 +179,13 @@ final class VoiceManager: ObservableObject {
             return
         }
 
-        if cachedToken == nil {
-            await prepare()
+        // Fetch for every dial so long-running app sessions never use an expired token.
+        do {
+            let response = try await fetchTokenResponse()
+            cachedToken = response.token
+        } catch {
+            lastError = (error as? APIError)?.message ?? error.localizedDescription
+            return
         }
 
         #if canImport(TwilioVoice)

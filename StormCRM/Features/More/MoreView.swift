@@ -17,6 +17,11 @@ struct MoreView: View {
                         LabeledContent("Name", value: user.name)
                         LabeledContent("Email", value: user.email)
                         LabeledContent("Role", value: user.role.replacingOccurrences(of: "_", with: " "))
+                        NavigationLink {
+                            CompanySwitcherView()
+                        } label: {
+                            LabeledContent("Company", value: env.branding.companyName)
+                        }
                     }
                 }
 
@@ -33,6 +38,30 @@ struct MoreView: View {
                 }
 
                 Section("Tools") {
+                    NavigationLink {
+                        CRMFieldToolView(tool: .vehicles)
+                    } label: {
+                        Label("Vehicles", systemImage: "truck.box")
+                    }
+
+                    NavigationLink {
+                        CRMFieldToolView(tool: .holidayLighting)
+                    } label: {
+                        Label("Holiday Lighting", systemImage: "lightbulb.2")
+                    }
+
+                    NavigationLink {
+                        CRMFieldToolView(tool: .priceBook)
+                    } label: {
+                        Label("Price Book", systemImage: "book.closed")
+                    }
+
+                    NavigationLink {
+                        VoiceStatusView()
+                    } label: {
+                        Label("Phone connection", systemImage: "phone.connection")
+                    }
+
                     NavigationLink {
                         StormAiChatView()
                     } label: {

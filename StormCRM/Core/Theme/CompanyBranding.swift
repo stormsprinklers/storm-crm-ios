@@ -44,6 +44,14 @@ final class CompanyBranding: ObservableObject {
     @Published private(set) var privacyPolicyURL: URL?
     @Published private(set) var isLoaded = false
 
+    func reset() {
+        companyName = "Storm Sprinklers"
+        logoUrl = nil
+        termsOfServiceURL = nil
+        privacyPolicyURL = nil
+        isLoaded = false
+    }
+
     func load(api: APIClient) async {
         do {
             let settings: CompanyBrandingDTO = try await api.get(path: APIPath.companySettings)

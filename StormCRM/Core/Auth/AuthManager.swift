@@ -7,6 +7,9 @@ final class AuthManager: ObservableObject {
     @Published var lastError: String?
     /// Set after password login when MFA is required.
     @Published private(set) var pendingMfa: PendingMfaChallenge?
+    @Published private(set) var loginCompanies: [LoginCompanyChoice] = []
+    @Published private(set) var isSwitchingCompany = false
+    @Published var companySwitchError: String?
 
     private let tokenStore: TokenStore
     private let apiClient: APIClient
@@ -33,20 +36,26 @@ final class AuthManager: ObservableObject {
         }
     }
 
-    func login(email: String, password: String) async {
+    func login(email: String, password: String, companyId: String? = nil) async {
         lastError = nil
         pendingMfa = nil
         do {
             let body = LoginRequest(
                 email: email,
                 password: password,
-                deviceName: UIDevice.current.name
+                deviceName: UIDevice.current.name,
+                companyId: companyId
             )
             let response: MobileLoginChallengeResponse = try await apiClient.post(
                 path: APIPath.mobileLogin,
                 body: body,
                 authenticated: false
             )
+            if response.needsCompanyChoice == true, let companies = response.companies {
+                loginCompanies = companies
+                return
+            }
+            loginCompanies = []
             if response.mfaRequired == true, let challengeId = response.challengeId {
                 pendingMfa = PendingMfaChallenge(
                     challengeId: challengeId,
@@ -125,6 +134,27 @@ final class AuthManager: ObservableObject {
     func cancelMfa() {
         pendingMfa = nil
         lastError = nil
+        loginCompanies = []
+    }
+
+    func switchCompany(userId: String, prepare: () async throws -> Void) async throws {
+        guard !isSwitchingCompany else { return }
+        isSwitchingCompany = true
+        apiClient.invalidateInFlightRequests()
+        defer { isSwitchingCompany = false }
+        let oldRefreshToken = tokenStore.tokens?.refreshToken
+        try await prepare()
+        let response: LoginResponse = try await apiClient.post(
+            path: APIPath.mobileAccountSwitch,
+            body: CompanySwitchRequest(userId: userId, deviceName: UIDevice.current.name)
+        )
+        apiClient.invalidateInFlightRequests()
+        applySession(accessToken: response.accessToken, refreshToken: response.refreshToken,
+                     expiresIn: response.expiresIn, user: response.user)
+        if let oldRefreshToken {
+            _ = try? await apiClient.post(path: APIPath.mobileLogout,
+                body: LogoutRequest(refreshToken: oldRefreshToken)) as EmptyResponse
+        }
     }
 
     private func applySession(
@@ -149,7 +179,7 @@ final class AuthManager: ObservableObject {
 
     func logout() async {
         #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
-        IncomingCallCoordinator.shared.stop()
+        await IncomingCallCoordinator.shared.stop()
         #endif
         _ = try? await apiClient.patch(
             path: APIPath.voicePresence,
@@ -222,6 +252,7 @@ struct LoginRequest: Encodable {
     let email: String
     let password: String
     let deviceName: String
+    let companyId: String?
 }
 
 struct MfaVerifyRequest: Encodable {
@@ -252,6 +283,8 @@ struct LogoutRequest: Encodable {
 }
 
 struct MobileLoginChallengeResponse: Decodable {
+    let needsCompanyChoice: Bool?
+    let companies: [LoginCompanyChoice]?
     let mfaRequired: Bool?
     let challengeId: String?
     let phoneMasked: String?
@@ -280,3 +313,15 @@ struct UserDTO: Codable, Identifiable {
 }
 
 struct EmptyResponse: Decodable {}
+
+struct LoginCompanyChoice: Decodable, Identifiable {
+    let companyId: String
+    let companyName: String
+    let userId: String
+    var id: String { userId }
+}
+
+struct CompanySwitchRequest: Encodable {
+    let userId: String
+    let deviceName: String
+}

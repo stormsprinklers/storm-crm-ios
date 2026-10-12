@@ -6,6 +6,21 @@ final class APIClient {
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
     private let refreshGate = RefreshGate()
+    private let identityLock = NSLock()
+    private var identityGeneration = 0
+
+    func invalidateInFlightRequests() {
+        identityLock.withLock { identityGeneration += 1 }
+    }
+
+    private func currentIdentityGeneration() -> Int {
+        identityLock.withLock { identityGeneration }
+    }
+
+    private func checkIdentity(_ generation: Int) throws {
+        try Task.checkCancellation()
+        guard generation == currentIdentityGeneration() else { throw CancellationError() }
+    }
 
     /// Called on the main actor when the refresh token is rejected and the local session was cleared.
     var onSessionInvalidated: (@MainActor () -> Void)?
@@ -150,10 +165,7 @@ final class APIClient {
 
     func delete(path: String, query: [URLQueryItem] = [], authenticated: Bool = true) async throws {
         let request = try await buildRequest(path: path, method: "DELETE", query: query, authenticated: authenticated)
-        let (_, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw APIError.server("Delete failed")
-        }
+        _ = try await performData(request)
     }
 
     func deleteReturningVisit(
@@ -216,6 +228,7 @@ final class APIClient {
         mimeType: String,
         fieldName: String = "file"
     ) async throws -> Data {
+        let generation = currentIdentityGeneration()
         let boundary = UUID().uuidString
         var request = try await buildRequest(path: path, method: "POST", query: query, authenticated: true)
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -229,6 +242,7 @@ final class APIClient {
         request.httpBody = body
 
         let (data, response) = try await session.data(for: request)
+        try checkIdentity(generation)
         guard let http = response as? HTTPURLResponse else { throw APIError.server("No response") }
         guard (200...299).contains(http.statusCode) else {
             throw parseError(data: data, status: http.statusCode)
@@ -243,6 +257,7 @@ final class APIClient {
         authenticated: Bool,
         headers: [String: String] = [:]
     ) async throws -> URLRequest {
+        try Task.checkCancellation()
         guard var components = URLComponents(string: AppConfig.apiBaseURL + path) else {
             throw APIError.invalidURL
         }
@@ -277,12 +292,15 @@ final class APIClient {
     }
 
     private func performData(_ request: URLRequest, retryOn401: Bool = true) async throws -> Data {
+        let generation = currentIdentityGeneration()
         do {
             let (data, response) = try await session.data(for: request)
+            try checkIdentity(generation)
             guard let http = response as? HTTPURLResponse else { throw APIError.server("No response") }
 
             if http.statusCode == 401, retryOn401, request.value(forHTTPHeaderField: "Authorization") != nil {
                 _ = try await refreshSessionTokens()
+                try checkIdentity(generation)
                 var retry = request
                 if let token = tokenStore.accessToken {
                     retry.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -302,6 +320,7 @@ final class APIClient {
     }
 
     private func performTokenRefresh() async throws -> LoginResponse {
+        let generation = currentIdentityGeneration()
         guard let refreshToken = tokenStore.tokens?.refreshToken else {
             throw APIError.unauthorized
         }
@@ -311,6 +330,7 @@ final class APIClient {
                 body: RefreshRequest(refreshToken: refreshToken),
                 authenticated: false
             )
+            try checkIdentity(generation)
             tokenStore.save(
                 accessToken: response.accessToken,
                 refreshToken: response.refreshToken,

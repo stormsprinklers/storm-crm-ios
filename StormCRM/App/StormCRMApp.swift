@@ -58,8 +58,11 @@ struct RootView: View {
     var body: some View {
         ZStack(alignment: .top) {
             Group {
-                if auth.isAuthenticated {
+                if auth.isSwitchingCompany {
+                    ProgressView("Switching company…")
+                } else if auth.isAuthenticated {
                     MainTabView()
+                        .id(auth.user?.id)
                         .task {
                             try? await auth.ensureUserLoaded()
                             env.bootstrapAfterLogin()
@@ -96,5 +99,13 @@ struct RootView: View {
         }
         .background(StormTheme.page.ignoresSafeArea())
         .preferredColorScheme(appearanceSettings.appearance.preferredColorScheme)
+        .alert("Could not switch company", isPresented: Binding(
+            get: { auth.companySwitchError != nil },
+            set: { if !$0 { auth.companySwitchError = nil } }
+        )) {
+            Button("OK") { auth.companySwitchError = nil }
+        } message: {
+            Text(auth.companySwitchError ?? "")
+        }
     }
 }

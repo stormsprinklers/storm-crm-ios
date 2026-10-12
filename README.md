@@ -286,3 +286,13 @@ Pull to refresh on any report screen.
 **Irrigation map:** Full map editor on visit and customer property screens — capture aerial satellite image, draw zone polygons (tap-to-place corners), place markers (POC, timer, valve, filter, backflow), edit zone attributes (vegetation, shade, slope, soil, nozzles, GPM), save draft or publish to portal, and adjust controller program settings (grass season, drought mode, cycle & soak, ETo override). Private blob images load with Bearer auth.
 
 **Still web-only:** design zone viewer (estimate snapshots).
+
+## Company switching and field tools
+
+More → Company switches between active staff accounts available through the CRM's same-email or linked-account rules. Switching requires pending changes/uploads to be synced and calls to be ended. It clears offline records, rebuilds the screens, and reconnects phone/push registration for the destination account and its role. Login also supports selecting a company when the email belongs to multiple accounts.
+
+More → Vehicles, Holiday Lighting, and Price Book open the existing CRM tools in an isolated authenticated web view. These tools require internet access and use the main CRM's records and quote calculations. Price-book changes, including pricing settings, are restricted to admins by the backend; other staff can view the book. Vehicle administration remains restricted to admins/managers, while field staff can view and contribute records.
+
+Deploy the matching CRM backend first: it adds POST `/api/mobile/web-session` and POST `/api/mobile/account/switch`. The web handoff uses a short-lived encrypted Auth.js cookie, renewed without reloading forms. No database migration is required.
+
+Phone connections refresh Twilio credentials before outbound calls and when returning to the foreground. CallKit start/answer actions configure the Twilio audio device before activation. More → Phone connection shows registration/error status and offers reconnection and microphone settings. Validate outbound, inbound, background, and post-company-switch calls on a physical iPhone before release.

@@ -155,6 +155,42 @@ final class AppEnvironment: ObservableObject {
 
     }
 
+    func switchCompany(userId: String) async throws {
+        #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
+        guard !IncomingCallCoordinator.shared.hasActiveCall else {
+            throw APIError.badRequest("Finish or decline your current call before switching companies.")
+        }
+        #endif
+        guard !voice.isInCall else {
+            throw APIError.badRequest("End your current call before switching companies.")
+        }
+        guard offlineSync.pendingCount == 0, !offlineSync.isSyncing,
+              MediaUploadQueue.shared.pendingCount() == 0, !MediaUploadQueue.shared.isProcessing else {
+            throw APIError.badRequest("Sync your pending changes and uploads before switching companies.")
+        }
+        try await auth.switchCompany(userId: userId) {
+            self.deviceLocation.stop()
+            self.enRouteLocation.stop()
+            await self.voice.resetForCompanySwitch()
+            _ = try? await self.apiClient.patch(path: APIPath.voicePresence,
+                body: ["status": "OFFLINE"]) as EmptyResponse
+            await PushNotificationManager.shared.unregister(api: self.apiClient)
+            try self.offlineSync.clearCachesForCompanySwitch()
+            self.branding.reset()
+            self.selectedTab = .dashboard
+            self.pendingInboxConversationId = nil
+            self.pendingInboxCustomer = nil
+            self.pendingVisitId = nil
+            self.pendingCustomerId = nil
+            self.pendingEstimateId = nil
+            self.pendingDeepLink = nil
+            self.deepLinkNavigation = nil
+            self.paymentReturn = nil
+            self.collectingPaymentVisitId = nil
+            PushNotificationManager.shared.clearPendingNavigation()
+        }
+    }
+
 
 
     func applyPushNavigation(from push: PushNotificationManager) {

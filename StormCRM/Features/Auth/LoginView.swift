@@ -29,6 +29,8 @@ struct LoginView: View {
 
                     if let pending = auth.pendingMfa {
                         mfaCard(pending)
+                    } else if !auth.loginCompanies.isEmpty {
+                        companyChoiceCard
                     } else {
                         passwordCard
                     }
@@ -38,6 +40,27 @@ struct LoginView: View {
             .background(StormTheme.page.ignoresSafeArea())
             .navigationBarHidden(true)
         }
+    }
+
+    private var companyChoiceCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Choose your company").font(.headline)
+            ForEach(auth.loginCompanies) { company in
+                Button(company.companyName) {
+                    Task {
+                        isLoading = true
+                        await auth.login(email: email, password: password, companyId: company.companyId)
+                        isLoading = false
+                    }
+                }
+                .disabled(isLoading)
+            }
+            if let error = auth.lastError { Text(error).foregroundStyle(.red) }
+            Button("Back") { auth.cancelMfa() }.disabled(isLoading)
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 
     private var passwordCard: some View {
