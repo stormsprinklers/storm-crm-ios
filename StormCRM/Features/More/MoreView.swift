@@ -39,6 +39,9 @@ struct MoreView: View {
                 }
 
                 Section("Tools") {
+                    NavigationLink { NotificationSettingsView() } label: {
+                        Label("Notifications", systemImage: "bell.badge")
+                    }
                     NavigationLink { VoiceErrorsView(voice: env.voice) } label: { VoiceErrorsLabel(voice: env.voice) }
                     NavigationLink {
                         CRMFieldToolView(tool: .vehicles)
@@ -184,6 +187,48 @@ private struct VoiceErrorsLabel: View {
             Label("Errors", systemImage: "exclamationmark.bubble")
             Spacer()
             if voice.unreadErrorCount > 0 { Text("\(voice.unreadErrorCount)").font(.caption.bold()).padding(6).background(Color.orange.opacity(0.15)).clipShape(Capsule()) }
+        }
+    }
+}
+
+private struct NotificationSettingsView: View {
+    @EnvironmentObject private var env: AppEnvironment
+    @ObservedObject private var push = PushNotificationManager.shared
+    @State private var busy = false
+    var body: some View {
+        List {
+            Section {
+                LabeledContent("iPhone permission", value: push.permissionStatus)
+                LabeledContent("Registration", value: push.registrationStatus)
+                if let configured = push.serverConfigured {
+                    LabeledContent("Server", value: configured ? "Configured" : "Apple push setup required")
+                }
+                Button("Enable / retry registration") {
+                    Task {
+                        busy = true
+                        await push.requestAuthorizationIfNeeded()
+                        await push.syncToken(api: env.apiClient)
+                        await push.checkServer(api: env.apiClient)
+                        busy = false
+                    }
+                }.disabled(busy)
+                Button("Open iPhone notification settings") {
+                    if let url = URL(string: UIApplication.openNotificationSettingsURLString) { UIApplication.shared.open(url) }
+                }
+                Button("Send test notification") {
+                    Task { busy = true; await push.sendTest(api: env.apiClient); busy = false }
+                }.disabled(busy || push.serverConfigured == false)
+            } header: { Text("Push notifications") } footer: {
+                Text("Allow alerts, sounds and badges to receive new messages while Radar is closed or your iPhone is locked.")
+            }
+            if let message = push.lastError { Section("Status") { Text(message).foregroundStyle(.secondary) } }
+            if let message = push.testResult { Section { Text(message) } }
+        }
+        .navigationTitle("Notifications")
+        .task {
+            await push.requestAuthorizationIfNeeded()
+            await push.syncToken(api: env.apiClient)
+            await push.checkServer(api: env.apiClient)
         }
     }
 }

@@ -68,9 +68,9 @@ struct RootView: View {
                             env.bootstrapAfterLogin()
                             env.priceBookPins.setUserId(auth.user?.id)
                             await env.branding.load(api: env.apiClient)
-                            await env.voice.prepare()
                             await PushNotificationManager.shared.requestAuthorizationIfNeeded()
                             await PushNotificationManager.shared.syncToken(api: env.apiClient)
+                            await env.voice.prepare()
                         }
                         .onChange(of: auth.user?.id) { _, userId in
                             env.priceBookPins.setUserId(userId)
@@ -80,7 +80,11 @@ struct RootView: View {
                         }
                         .onChange(of: scenePhase) { _, phase in
                             guard phase == .active else { return }
-                            Task { await env.voice.refreshIncomingCalls() }
+                            Task {
+                                await PushNotificationManager.shared.requestAuthorizationIfNeeded()
+                                await PushNotificationManager.shared.syncToken(api: env.apiClient)
+                                await env.voice.refreshIncomingCalls()
+                            }
                         }
                 } else {
                     LoginView()

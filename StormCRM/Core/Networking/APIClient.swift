@@ -25,9 +25,13 @@ final class APIClient {
     /// Called on the main actor when the refresh token is rejected and the local session was cleared.
     var onSessionInvalidated: (@MainActor () -> Void)?
 
-    init(tokenStore: TokenStore, session: URLSession = .shared) {
+    init(tokenStore: TokenStore, session: URLSession? = nil) {
         self.tokenStore = tokenStore
-        self.session = session
+        let configuration = URLSessionConfiguration.default
+        configuration.httpShouldSetCookies = false
+        configuration.httpCookieStorage = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        self.session = session ?? URLSession(configuration: configuration)
         self.decoder = JSONCoding.makeDecoder()
         self.encoder = JSONCoding.makeEncoder()
     }
@@ -258,6 +262,9 @@ final class APIClient {
         headers: [String: String] = [:]
     ) async throws -> URLRequest {
         try Task.checkCancellation()
+        if authenticated, tokenStore.isAccessTokenExpiringSoon() {
+            _ = try await refreshSessionTokens()
+        }
         guard var components = URLComponents(string: AppConfig.apiBaseURL + path) else {
             throw APIError.invalidURL
         }
@@ -299,7 +306,11 @@ final class APIClient {
             guard let http = response as? HTTPURLResponse else { throw APIError.server("No response") }
 
             if http.statusCode == 401, retryOn401, request.value(forHTTPHeaderField: "Authorization") != nil {
-                _ = try await refreshSessionTokens()
+                // A concurrent request may already have rotated the access token.
+                // Retry with that token rather than rotating the refresh token twice.
+                if request.value(forHTTPHeaderField: "Authorization") == tokenStore.accessToken.map({ "Bearer \($0)" }) {
+                    _ = try await refreshSessionTokens()
+                }
                 try checkIdentity(generation)
                 var retry = request
                 if let token = tokenStore.accessToken {
@@ -376,7 +387,7 @@ final class APIClient {
                 )
             }
             if let msg = body.error, !msg.isEmpty {
-                if status == 401 { return .server(msg) }
+                if status == 401 { return .unauthorized }
                 if status == 403 { return .forbidden(msg) }
                 if status == 400 { return .badRequest(msg) }
                 return .server(msg)

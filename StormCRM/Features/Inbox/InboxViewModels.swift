@@ -4,6 +4,12 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+enum InboxFolder: String, CaseIterable, Identifiable {
+    case open, general
+    var id: String { rawValue }
+    var title: String { self == .open ? "Open" : "General" }
+}
+
 enum InboxScope: String, CaseIterable, Identifiable {
     case customers
     case team
@@ -41,7 +47,7 @@ final class InboxListViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var error: String?
 
-    func load(api: APIClient, scope: InboxScope, useFieldSmsWindow: Bool = false) async {
+    func load(api: APIClient, scope: InboxScope, useFieldSmsWindow: Bool = false, folder: InboxFolder = .open) async {
         isLoading = true
         error = nil
         defer { isLoading = false }
@@ -53,10 +59,12 @@ final class InboxListViewModel: ObservableObject {
             } else {
                 path = APIPath.smsConversations
                 query = [URLQueryItem(name: "scope", value: scope.apiScope)]
+                if scope == .customers { query.append(URLQueryItem(name: "folder", value: folder.rawValue)) }
             }
             let response: ConversationsListResponse = try await api.get(path: path, query: query)
             conversations = response.conversations
         } catch {
+            guard !Task.isCancelled else { return }
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
@@ -95,6 +103,7 @@ final class SmsConversationViewModel: ObservableObject {
         do {
             let response: MessagesResponse = try await api.get(path: APIPath.smsMessages(conversationId))
             conversation = response.conversation
+            if !silent { NotificationCenter.default.post(name: Notification.Name("stormcrm.inboxReadUpdated"), object: nil) }
             // Avoid republishing an identical list — replacing the array every poll rebuilds
             // LazyVStack cells and makes the thread bounce while the user is scrolling.
             let next = response.messages

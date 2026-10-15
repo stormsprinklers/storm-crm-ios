@@ -5,6 +5,7 @@ struct InboxHubView: View {
     @EnvironmentObject private var env: AppEnvironment
     @ObservedObject private var push = PushNotificationManager.shared
     @State private var scope: InboxScope = .customers
+    @State private var folder: InboxFolder = .open
     @State private var navigationPath = NavigationPath()
     @State private var showCompose = false
 
@@ -14,7 +15,7 @@ struct InboxHubView: View {
 
     var body: some View {
         NavigationStack(path: $navigationPath) {
-            InboxListView(scope: scope, useFieldSmsWindow: isField && scope == .customers)
+            InboxListView(scope: scope, useFieldSmsWindow: isField && scope == .customers, folder: folder)
                 .navigationTitle("Messages")
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
@@ -37,6 +38,7 @@ struct InboxHubView: View {
                 }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     if !isField {
+                        VStack(spacing: 0) {
                         Picker("Inbox", selection: $scope) {
                             ForEach(InboxScope.allCases) { item in
                                 Text(item.title).tag(item)
@@ -46,6 +48,16 @@ struct InboxHubView: View {
                         .padding(.horizontal)
                         .padding(.vertical, 8)
                         .background(StormTheme.page)
+                        if scope == .customers {
+                            Picker("Customer inbox", selection: $folder) {
+                                ForEach(InboxFolder.allCases) { item in Text(item.title).tag(item) }
+                            }
+                            .pickerStyle(.segmented)
+                            .padding(.horizontal)
+                            .padding(.bottom, 8)
+                            .background(StormTheme.page)
+                        }
+                        }
                     }
                 }
                 .navigationDestination(for: String.self) { conversationId in
@@ -99,6 +111,7 @@ struct InboxListView: View {
     @EnvironmentObject private var env: AppEnvironment
     let scope: InboxScope
     var useFieldSmsWindow: Bool = false
+    var folder: InboxFolder = .open
     @StateObject private var viewModel = InboxListViewModel()
 
     var body: some View {
@@ -123,10 +136,16 @@ struct InboxListView: View {
             }
         }
         .refreshable {
-            await viewModel.load(api: env.apiClient, scope: scope, useFieldSmsWindow: useFieldSmsWindow)
+            await viewModel.load(api: env.apiClient, scope: scope, useFieldSmsWindow: useFieldSmsWindow, folder: folder)
         }
-        .task(id: "\(scope.rawValue)-\(useFieldSmsWindow)") {
-            await viewModel.load(api: env.apiClient, scope: scope, useFieldSmsWindow: useFieldSmsWindow)
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("stormcrm.inboxReadUpdated"))) { _ in
+            Task { await viewModel.load(api: env.apiClient, scope: scope, useFieldSmsWindow: useFieldSmsWindow, folder: folder) }
+        }
+        .task(id: "\(scope.rawValue)-\(useFieldSmsWindow)-\(folder.rawValue)") {
+            repeat {
+                await viewModel.load(api: env.apiClient, scope: scope, useFieldSmsWindow: useFieldSmsWindow, folder: folder)
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+            } while !Task.isCancelled
         }
     }
 }
@@ -137,8 +156,12 @@ struct InboxConversationRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
+                if conversation.appearsUnread {
+                    Circle().fill(Color.accentColor).frame(width: 9, height: 9)
+                        .accessibilityLabel("Unread")
+                }
                 Text(conversation.displayTitle)
-                    .font(.headline)
+                    .font(.system(.body, weight: conversation.appearsUnread ? .bold : .regular))
                     .lineLimit(1)
                 Spacer()
                 if let lastMessageAt = conversation.lastMessageAt {
@@ -146,6 +169,12 @@ struct InboxConversationRow: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+            }
+            HStack {
+                Text(conversation.appearsUnread ? "Unread" : "Read")
+                    .font(.caption.weight(conversation.appearsUnread ? .semibold : .regular))
+                    .foregroundStyle(conversation.appearsUnread ? Color.accentColor : Color.secondary)
+                if let count = conversation.unreadCount, count > 0 { Text("\(count) new").font(.caption).foregroundStyle(Color.accentColor) }
             }
             if let preview = conversation.previewText, !preview.isEmpty {
                 Text(preview)

@@ -25,8 +25,12 @@ final class PushNotificationManager: ObservableObject {
     @Published var pendingEstimateId: String?
     @Published var pendingDeepLink: String?
 
-    private(set) var deviceToken: String?
-    private var authorizationRequested = false
+    private(set) var deviceToken: String? = UserDefaults.standard.string(forKey: "stormcrm.apnsDeviceToken")
+    @Published private(set) var permissionStatus = "Checking…"
+    @Published private(set) var registrationStatus = "Not registered"
+    @Published private(set) var serverConfigured: Bool?
+    @Published var lastError: String?
+    @Published var testResult: String?
 
     static func registerCategories() {
         let categories = PushNotificationCategory.allCases.map { category in
@@ -36,22 +40,27 @@ final class PushNotificationManager: ObservableObject {
     }
 
     func requestAuthorizationIfNeeded() async {
-        guard !authorizationRequested else { return }
-        authorizationRequested = true
-
         Self.registerCategories()
         let center = UNUserNotificationCenter.current()
         do {
-            let granted = try await center.requestAuthorization(options: [.alert, .badge, .sound])
-            guard granted else { return }
-            UIApplication.shared.registerForRemoteNotifications()
-        } catch {
-            print("Push authorization failed:", error.localizedDescription)
-        }
+            var settings = await center.notificationSettings()
+            if settings.authorizationStatus == .notDetermined {
+                _ = try await center.requestAuthorization(options: [.alert, .badge, .sound])
+                settings = await center.notificationSettings()
+            }
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                permissionStatus = settings.authorizationStatus == .provisional ? "Quiet delivery" : "Allowed"
+                UIApplication.shared.registerForRemoteNotifications()
+            case .denied: permissionStatus = "Disabled in iPhone Settings"
+            default: permissionStatus = "Not enabled"
+            }
+        } catch { lastError = error.localizedDescription }
     }
 
     func setDeviceToken(_ data: Data) {
         deviceToken = data.map { String(format: "%02.2hhx", $0) }.joined()
+        UserDefaults.standard.set(deviceToken, forKey: "stormcrm.apnsDeviceToken")
         NotificationCenter.default.post(name: .pushDeviceTokenUpdated, object: nil)
     }
 
@@ -62,14 +71,47 @@ final class PushNotificationManager: ObservableObject {
             let platform: String
             let bundleId: String
         }
-        _ = try? await api.post(
-            path: APIPath.mobilePushRegister,
-            body: Body(
-                deviceToken: deviceToken,
-                platform: "ios",
-                bundleId: Bundle.main.bundleIdentifier ?? "com.stormsprinklers.stormcrm"
+        do {
+            let _: EmptyResponse = try await api.post(
+                path: APIPath.mobilePushRegister,
+                body: Body(
+                    deviceToken: deviceToken,
+                    platform: "ios",
+                    bundleId: Bundle.main.bundleIdentifier ?? "com.stormsprinklers.stormcrm"
+                )
             )
-        ) as EmptyResponse
+            registrationStatus = "This iPhone registered"
+            lastError = nil
+            await checkServer(api: api)
+        } catch {
+            registrationStatus = "Registration needs retry"
+            lastError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    func checkServer(api: APIClient) async {
+        struct Status: Decodable { let configured: Bool; let registeredDevices: Int }
+        do {
+            let status: Status = try await api.get(path: "/api/mobile/push/status")
+            serverConfigured = status.configured
+            if status.registeredDevices == 0 { registrationStatus = "Not registered for this company" }
+        } catch { lastError = (error as? APIError)?.message ?? error.localizedDescription }
+    }
+
+    func sendTest(api: APIClient) async {
+        testResult = nil
+        await requestAuthorizationIfNeeded()
+        await syncToken(api: api)
+        guard let deviceToken else { lastError = "This iPhone has not received a push token yet."; return }
+        do {
+            let _: EmptyResponse = try await api.post(path: "/api/mobile/push/status", body: ["deviceToken": deviceToken])
+            testResult = "Test sent. Check your notification banner."
+        } catch { lastError = (error as? APIError)?.message ?? error.localizedDescription }
+    }
+
+    func registrationFailed(_ error: Error) {
+        registrationStatus = "Apple registration failed"
+        lastError = error.localizedDescription
     }
 
     func unregister(api: APIClient) async {
@@ -81,7 +123,10 @@ final class PushNotificationManager: ObservableObject {
             path: APIPath.mobilePushUnregister,
             body: Body(deviceToken: deviceToken)
         ) as EmptyResponse
-        self.deviceToken = nil
+        // APNs tokens belong to the phone/app, not to a company login. Keep the
+        // token so it can be registered immediately after switching or signing in.
+        registrationStatus = "Not registered"
+        serverConfigured = nil
     }
 
     func handleNotificationTap(userInfo: [AnyHashable: Any]) {
