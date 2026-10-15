@@ -50,7 +50,7 @@ struct MoreView: View {
                     }
 
                     NavigationLink {
-                        CRMFieldToolView(tool: .holidayLighting)
+                        HolidayQuotesView()
                     } label: {
                         Label("Holiday Lighting", systemImage: "lightbulb.2")
                     }

@@ -23,7 +23,7 @@ struct VisitEstimatesSection: View {
                     Spacer()
                     if branding.isHolidayCompany {
                         NavigationLink {
-                            CRMFieldToolView(tool: .holidayLighting, query: [URLQueryItem(name: "visitId", value: visitId), URLQueryItem(name: "customerId", value: visit.customer?.id), URLQueryItem(name: "propertyId", value: visit.property?.id)], pathOverride: "/holiday-lighting/quote/new")
+                            HolidayQuoteEditor(visitID: visitId, customerID: visit.customer?.id, propertyID: visit.property?.id)
                         } label: { Label("New estimate", systemImage: "plus").font(.subheadline) }
                         .buttonStyle(StormSecondaryButtonStyle()).disabled(visit.customer == nil)
                     } else {

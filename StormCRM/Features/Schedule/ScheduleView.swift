@@ -490,22 +490,26 @@ private struct ScheduleDayTimeline: View {
                 .frame(width: gutter - 8, alignment: .trailing)
                 .offset(y: -6)
 
-            // Tappable empty slot (falls behind job blocks in the ZStack).
-            Button {
-                if canEdit, let date = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: day) {
-                    onTapSlot(date)
-                }
-            } label: {
-                Rectangle().fill(Color.clear)
-                    .frame(width: laneWidth, height: hourHeight)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(!canEdit)
-            .offset(x: gutter)
+            // A Button can fire on release after the simultaneous day-swipe.
+            // TapGesture cancels as soon as the finger drags, including vertical scroll.
+            Rectangle().fill(Color.clear)
+                .frame(width: laneWidth, height: hourHeight)
+                .contentShape(Rectangle())
+                .onTapGesture { createAtHour(hour) }
+                .accessibilityElement()
+                .accessibilityLabel("Add job at \(hourLabel(hour))")
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction { createAtHour(hour) }
+                .allowsHitTesting(canEdit)
+                .offset(x: gutter)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .offset(y: y)
+    }
+
+    private func createAtHour(_ hour: Int) {
+        guard canEdit, let date = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: day) else { return }
+        onTapSlot(date)
     }
 
     @ViewBuilder

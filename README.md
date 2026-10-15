@@ -296,3 +296,11 @@ More → Vehicles, Holiday Lighting, and Price Book open the existing CRM tools 
 Deploy the matching CRM backend first: it adds POST `/api/mobile/web-session` and POST `/api/mobile/account/switch`. The web handoff uses a short-lived encrypted Auth.js cookie, renewed without reloading forms. No database migration is required.
 
 Phone connections refresh Twilio credentials before outbound calls and when returning to the foreground. CallKit start/answer actions configure the Twilio audio device before activation. More → Phone connection shows registration/error status and offers reconnection and microphone settings. Validate outbound, inbound, background, and post-company-switch calls on a physical iPhone before release.
+
+## Native holiday lighting quotes
+
+More → Holiday Lighting and New Estimate on holiday-company visits open the SwiftUI quote builder. It reads and edits the same CRM quote records: customer/property context, up to five independent designs, MapKit aerial measurements, peak allowances, connected strands, tree/bush strand counts and difficulty, colors, purchase/lease/labor/permanent pricing, discounts and custom services. Pricing is calculated by the existing CRM engine after saving.
+
+Property photos come from the camera, photo library or server-proxied Street View. Native photo markup is saved per option; the existing AI preview service generates the customer image. Saved source photos are private and company-scoped. Save conflicts return 409 so another device's newer edits are not overwritten. Estimates open the existing native estimate screens for presentation, approval and sending. Quote saves and previews require a network connection; unsaved changes prompt before leaving.
+
+Run `sh NativeTests/run-holiday-model-checks.sh` to check native model round-trips and geometry without a simulator. The backend `native-builder.test.ts` suite also checks an actual payload emitted by these Swift models against CRM pricing and option parsing.

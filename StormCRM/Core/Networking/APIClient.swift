@@ -224,6 +224,24 @@ final class APIClient {
         )
     }
 
+    /// Shared authenticated multipart transport for native quote photos and AI previews.
+    func uploadImages<T: Decodable>(path: String, fields: [String: String] = [:], images: [(String, Data)], timeout: TimeInterval = 60) async throws -> T {
+        let boundary = UUID().uuidString
+        var request = try await buildRequest(path: path, method: "POST", authenticated: true)
+        request.timeoutInterval = timeout
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        var body = Data()
+        for (key, value) in fields {
+            body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(key)\"\r\n\r\n\(value)\r\n".utf8))
+        }
+        for (key, bytes) in images {
+            body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(key)\"; filename=\"\(key).jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".utf8))
+            body.append(bytes); body.append(Data("\r\n".utf8))
+        }
+        body.append(Data("--\(boundary)--\r\n".utf8)); request.httpBody = body
+        return try await perform(request)
+    }
+
     private func uploadMultipartRaw(
         path: String,
         query: [URLQueryItem] = [],
