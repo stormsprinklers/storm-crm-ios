@@ -99,6 +99,7 @@ struct HLSelections: HLRecord {
     var style: String { get { value("defaultLightStyleKey", fallback: "c9") } set { put("defaultLightStyleKey", newValue); put("installKind", newValue == "permanent" ? "permanent" : "temporary"); if newValue == "permanent" { pricingMode = "permanent" } else if pricingMode == "permanent" { pricingMode = "buy" } } }
     var color: String { get { value("defaultColorPattern", fallback: "Warm White") } set { put("defaultColorPattern", newValue) } }
     var pricingMode: String { get { value("pricingMode", fallback: style == "permanent" ? "permanent" : value("billingMode", fallback: "standard") == "labor_only" ? "labor" : "buy") } set { put("pricingMode", newValue); put("billingMode", "standard") } }
+    var completedSteps: [String] { get { value("completedSteps", fallback: []) } set { put("completedSteps", newValue) } }
     var notes: String { get { value("notes", fallback: "") } set { put("notes", newValue) } }
     var leaseYears: Int { get { value("leaseContractYears", fallback: 1) } set { put("leaseContractYears", newValue) } }
     var services: [HLService] { get { value("customServices", fallback: []) } set { put("customServices", newValue) } }
@@ -106,6 +107,8 @@ struct HLSelections: HLRecord {
     var reinstallPrice: Double? { get { value("reinstallPrice", fallback: Optional<Double>.none) } set { put("reinstallPrice", newValue) } }
 }
 struct HLAdjustment: Codable {
+    var partsPrice: Double?
+    var laborPrice: Double?
     var price: Double?
     var discountLabel: String?
     var discountType: String?
@@ -161,8 +164,9 @@ struct HLCatalog: Decodable {
     let quoteDefaults: Defaults?
 }
 struct HLPricing: Decodable {
-    struct Detail: Decodable { let calculated: Double; let subtotal: Double; let discountTotal: Double; let total: Double }
-    struct Line: Decodable, Identifiable { let key: String; let name: String; let staffDetail: String; let purchaseTotal: Double; let leaseTotal: Double; var id: String { key } }
+    struct DisplayLine: Decodable { let name: String; let description: String; let total: Double }
+    struct Detail: Decodable { let displayLines: [DisplayLine]?; let partsPrice: Double?; let laborPrice: Double?; let calculated: Double; let subtotal: Double; let discountTotal: Double; let total: Double }
+    struct Line: Decodable, Identifiable { let key: String; let name: String; let staffDetail: String; let purchaseTotal: Double; let leaseTotal: Double; let partsTotal: Double; let laborTotal: Double; var id: String { key } }
     let billedLengthFt: Double
     let reinstallTotal: Double
     let year1MinimumApplied: Bool

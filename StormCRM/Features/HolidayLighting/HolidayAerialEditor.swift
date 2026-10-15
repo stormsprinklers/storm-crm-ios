@@ -12,7 +12,6 @@ struct HolidayAerialEditor: View {
             Picker("Map tool", selection: $mode) {
                 Text("Move").tag("move"); Text("Roofline").tag("draw"); Text("Tree").tag("tree"); Text("Bush").tag("bush")
             }.pickerStyle(.segmented).padding()
-            Text(instruction).font(.caption).foregroundStyle(.secondary).padding(.horizontal).padding(.bottom, 8)
             MapReader { proxy in
                 Map(position: $camera, interactionModes: [.pan, .zoom, .rotate]) {
                     ForEach(Array(model.active.measurements.segments.enumerated()), id: \.element.id) { index, segment in
@@ -59,7 +58,7 @@ struct HolidayAerialEditor: View {
                     }.disabled(draft.count < 2)
                 }.font(.subheadline).padding().background(.regularMaterial)
             }
-            NavigationLink("Edit measurements, peaks, bulbs and strands") { HLMeasurementList(model: model) }.padding()
+            NavigationLink("Manual Measurements") { HLMeasurementList(model: model) }.padding()
         }
         .navigationTitle("Aerial lighting plan")
         .navigationBarTitleDisplayMode(.inline)
@@ -67,13 +66,6 @@ struct HolidayAerialEditor: View {
         .onChange(of: model.center) { _, _ in focus() }
         .toolbar { Button("Center property", systemImage: "scope") { focus() } }
         .onChange(of: mode) { _, next in if next != "draw" { draft = [] } }
-    }
-    private var instruction: String {
-        switch mode {
-        case "draw": return "Tap roof corners in order, then Finish run. Pan and pinch to adjust the aerial view."
-        case "tree", "bush": return "Tap to place a \(mode). Set strand count, difficulty and colors in Measurements."
-        default: return "Pan, pinch to zoom and rotate. Select Roofline to measure a run. Aerial measurements should be verified in the field."
-        }
     }
     private func focus() {
         if let point = model.center ?? model.active.measurements.segments.first?.path.first ?? model.active.measurements.placements.first?.point {
@@ -86,33 +78,34 @@ struct HLMeasurementList: View {
     @ObservedObject var model: HolidayQuoteViewModel
     var body: some View {
         List {
-            Section("Roofline runs") {
+            Section("Strands") {
                 ForEach(model.active.measurements.segments) { segment in
-                    NavigationLink { HLSegmentEditor(segment: model.segmentBinding(segment.id), catalog: model.catalog) } label: {
+                    HStack { NavigationLink { HLSegmentEditor(segment: model.segmentBinding(segment.id), catalog: model.catalog) } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(segment.label)
-                            Text("\(segment.length, specifier: "%.1f") ft\(segment.hasPeak ? " · peak × 1.5" : "") · \(segment.style.uppercased()) · \(segment.color)").font(.caption).foregroundStyle(.secondary)
+                            Text("\(segment.length, specifier: "%.1f") ft · \(segment.style.uppercased()) · \(segment.color)").font(.caption).foregroundStyle(.secondary)
                         }
-                    }.swipeActions { Button("Delete", role: .destructive) { model.removeSegment(segment.id) } }
+                    }
+                        Button(role: .destructive) { model.removeSegment(segment.id) } label: { Image(systemName: "trash") }.buttonStyle(.borderless).accessibilityLabel("Delete " + segment.label)
+                    }
                 }
-                Button("Add manually measured run") { model.edit { option in option.measurements.segments.append(HLSegment(path: [], style: option.selections.style, color: option.selections.color, count: option.measurements.segments.count + 1)) } }
+                Button("Add strand") { model.edit { option in option.measurements.segments.append(HLSegment(path: [], style: option.selections.style, color: option.selections.color, count: option.measurements.segments.count + 1)) } }
             }
             Section("Trees and bushes") {
                 ForEach(model.active.measurements.placements) { placement in
-                    NavigationLink { HLPlacementEditor(placement: model.placementBinding(placement.id)) } label: {
+                    HStack { NavigationLink { HLPlacementEditor(placement: model.placementBinding(placement.id)) } label: {
                         VStack(alignment: .leading, spacing: 4) { Text(placement.label); Text("\(placement.strands) strands · difficulty \(placement.difficulty) · \(placement.color)").font(.caption).foregroundStyle(.secondary) }
-                    }.swipeActions { Button("Delete", role: .destructive) { model.edit { $0.measurements.placements.removeAll { $0.id == placement.id } } } }
+                    }
+                        Button(role: .destructive) { model.edit { $0.measurements.placements.removeAll { $0.id == placement.id } } } label: { Image(systemName: "trash") }.buttonStyle(.borderless).accessibilityLabel("Delete " + placement.label)
+                    }
                 }
-                Text("Place trees and bushes on the aerial plan.").font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Connected strands") {
-                ForEach(model.active.measurements.strands) { strand in
-                    NavigationLink { HLStrandEditor(model: model, id: strand.id) } label: { VStack(alignment: .leading) { Text(strand.label); Text("\(strand.segmentIDs.count) runs").font(.caption).foregroundStyle(.secondary) } }
-                        .swipeActions { Button("Delete", role: .destructive) { model.edit { $0.measurements.strands.removeAll { $0.id == strand.id } } } }
+                ForEach(["tree", "bush"], id: \.self) { kind in
+                    Button("Add " + kind) {
+                        model.edit { option in option.measurements.placements.append(HLPlacement(kind: kind, point: model.center ?? HLPoint(lat: 0, lng: 0), color: option.selections.color, count: option.measurements.placements.filter { $0.kind == kind }.count + 1)) }
+                    }
                 }
-                Button("Add strand group") { model.edit { $0.measurements.strands.append(HLStrand(label: "Strand \($0.measurements.strands.count + 1)", segments: [])) } }
             }
-        }.navigationTitle("Measurements")
+        }.navigationTitle("Manual Measurements").background(HLKeyboardDismissal())
     }
 }
 private struct HLSegmentEditor: View {
@@ -122,17 +115,14 @@ private struct HLSegmentEditor: View {
         Form {
             Section("Run") {
                 TextField("Run label", text: $segment.label)
-                Picker("Kind", selection: $segment.kind) { Text("Roofline").tag("roofline"); Text("Peak").tag("peak"); Text("Garland").tag("garland"); Text("Custom").tag("custom") }
                 LabeledContent("Horizontal feet") { TextField("Feet", value: $segment.length, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
-                Toggle("Has peak (1.5× horizontal feet)", isOn: $segment.hasPeak)
-                Text("Billed run: \(segment.length * (segment.hasPeak ? 1.5 : 1), specifier: "%.1f") ft").font(.caption)
             }
             Section("Lights") {
                 Picker("Bulbs", selection: $segment.style) { ForEach(catalog?.lightStyles ?? []) { Text($0.label).tag($0.key) } }
                 HLColorField(value: $segment.color)
             }
         }.navigationTitle(segment.label)
-        .onChange(of: segment.kind) { _, kind in if kind == "peak" { segment.hasPeak = true } }
+        .background(HLKeyboardDismissal())
     }
 }
 private struct HLPlacementEditor: View {
@@ -145,45 +135,22 @@ private struct HLPlacementEditor: View {
             if placement.kind == "tree" { Toggle("Lift rental needed", isOn: $placement.lift) }
             LabeledContent("Bulb type", value: "Mini LEDs")
             HLColorField(value: $placement.color)
-        }.navigationTitle(placement.label)
+        }.navigationTitle(placement.label).background(HLKeyboardDismissal())
     }
 }
-private struct HLStrandEditor: View {
-    @ObservedObject var model: HolidayQuoteViewModel
-    let id: String
-    private var strand: HLStrand { model.active.measurements.strands.first { $0.id == id } ?? HLStrand(fields: [:]) }
-    var body: some View {
-        Form {
-            TextField("Strand name", text: Binding(get: { strand.label }, set: { label in update { $0.label = label } }))
-            Section("Include runs") {
-                ForEach(model.active.measurements.segments) { segment in
-                    Toggle(segment.label, isOn: Binding(get: { strand.segmentIDs.contains(segment.id) }, set: { selected in
-                        model.edit { option in
-                            var groups = option.measurements.strands
-                            for index in groups.indices {
-                                groups[index].segmentIDs.removeAll { $0 == segment.id }
-                                if selected && groups[index].id == id { groups[index].segmentIDs.append(segment.id) }
-                            }
-                            option.measurements.strands = groups
-                        }
-                    }))
-                }
-            }
-        }.navigationTitle("Strand group")
-    }
-    private func update(_ change: (inout HLStrand) -> Void) {
-        model.edit { option in var groups = option.measurements.strands; if let index = groups.firstIndex(where: { $0.id == id }) { change(&groups[index]); option.measurements.strands = groups } }
-    }
-}
-
-struct HLPricingEditor: View {
+struct HLPricingFields: View {
     @ObservedObject var model: HolidayQuoteViewModel
     private var adjustment: HLAdjustment { model.active.selections.adjustments[model.active.selections.pricingMode] ?? HLAdjustment() }
     var body: some View {
-        Form {
-            Section("Option price adjustment") {
-                Toggle("Override calculated subtotal", isOn: Binding(get: { adjustment.price != nil }, set: { enabled in change { $0.price = enabled ? (model.pricing?.optionDetails[model.active.selections.pricingMode]?.calculated ?? 0) : nil } }))
-                if adjustment.price != nil { number("Subtotal", get: { adjustment.price ?? 0 }, set: { value in change { $0.price = max(0, value) } }) }
+        Group {
+            Section("Parts and labor") {
+                if model.active.selections.pricingMode != "labor" {
+                    component("Parts price", get: { adjustment.partsPrice ?? model.pricing?.optionDetails[model.active.selections.pricingMode]?.partsPrice }, set: { value in change { $0.partsPrice = max(0, value); $0.price = nil } })
+                }
+                component("Labor price", get: { adjustment.laborPrice ?? model.pricing?.optionDetails[model.active.selections.pricingMode]?.laborPrice }, set: { value in change { $0.laborPrice = max(0, value); $0.price = nil } })
+                if adjustment.partsPrice != nil || adjustment.laborPrice != nil || adjustment.price != nil {
+                    Button("Reset prices") { change { $0.partsPrice = nil; $0.laborPrice = nil; $0.price = nil } }
+                }
                 TextField("Discount label", text: Binding(get: { adjustment.discountLabel ?? "" }, set: { value in change { $0.discountLabel = value } }))
                 Picker("Discount type", selection: Binding(get: { adjustment.discountType ?? "fixed" }, set: { value in change { $0.discountType = value } })) { Text("Dollar amount").tag("fixed"); Text("Percent").tag("percent") }
                 number("Discount", get: { adjustment.discountAmount ?? 0 }, set: { value in change { $0.discountAmount = max(0, value) } })
@@ -197,10 +164,13 @@ struct HLPricingEditor: View {
                 }
                 Button("Add service") { model.edit(invalidatePreview: false) { $0.selections.services.append(HLService()) } }
             }
-        }.navigationTitle("Price adjustments")
+        }
     }
     private func change(_ update: (inout HLAdjustment) -> Void) {
         model.edit(invalidatePreview: false) { option in var value = adjustment; update(&value); option.selections.adjustments[option.selections.pricingMode] = value }
+    }
+    private func component(_ label: String, get: @escaping () -> Double?, set: @escaping (Double) -> Void) -> some View {
+        LabeledContent(label) { TextField("Calculate or enter price", value: Binding(get: get, set: { set($0 ?? 0) }), format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
     }
     private func number(_ label: String, get: @escaping () -> Double, set: @escaping (Double) -> Void) -> some View {
         LabeledContent(label) { TextField(label, value: Binding(get: get, set: set), format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
@@ -214,6 +184,6 @@ private struct HLServiceEditor: View {
             TextField("Description", text: $service.detail, axis: .vertical)
             LabeledContent("Quantity") { TextField("Quantity", value: $service.quantity, format: .number).keyboardType(.decimalPad) }
             LabeledContent("Unit price") { TextField("Price", value: $service.unitPrice, format: .number).keyboardType(.decimalPad) }
-        }.navigationTitle("Additional service")
+        }.navigationTitle("Additional service").background(HLKeyboardDismissal())
     }
 }

@@ -52,7 +52,6 @@ struct HLPhotoEditor: View {
                     Button { camera = true } label: { Label("Camera", systemImage: "camera") }
                 }
                 DisclosureGroup("Use Street View") {
-                    Text("Aim a Street View photo using heading and pitch. If imagery is unavailable, take a photo of the home.").font(.caption).foregroundStyle(.secondary)
                     LabeledContent("Heading", value: "\(Int(heading))°")
                     Slider(value: $heading, in: 0...360, step: 5)
                     LabeledContent("Pitch", value: "\(Int(pitch))°")
@@ -61,7 +60,6 @@ struct HLPhotoEditor: View {
                 }
                 if let image = model.photo {
                     if model.photoUnsaved { Button("Save photo to quote") { Task { await model.uploadPhoto(image, api: env.apiClient) } }.buttonStyle(.borderedProminent) }
-                    Text("Paint only the areas that should receive lights. Bulb types and colors come from this option’s design.").font(.subheadline)
                     photoCanvas(image)
                     HStack {
                         Text("Brush").font(.caption)
@@ -71,7 +69,6 @@ struct HLPhotoEditor: View {
                     }
                     Button { Task { await model.generatePreview(api: env.apiClient) } } label: { Label("Generate lighting preview", systemImage: "sparkles") }
                         .buttonStyle(.borderedProminent).disabled(model.photoUnsaved || model.active.markup.isEmpty)
-                    Text("AI previews can take a few minutes and are illustrative, not a guarantee of exact light placement.").font(.caption).foregroundStyle(.secondary)
                 } else { ContentUnavailableView("Choose a property photo", systemImage: "photo", description: Text("Take a picture, choose from your library, or load Street View.")) }
                 if let preview = model.active.previewURL {
                     Text("\(model.active.label) preview").font(.headline)

@@ -11,5 +11,5 @@ a = source.index('enum JSONValue:')
 b = source.index('\nstruct PartsRunGetResponse', a)
 Path(sys.argv[1]).write_text('import Foundation\n' + source[a:b])
 PY
-swiftc -module-cache-path "${RADAR_SWIFT_MODULE_CACHE:-$CHECK_DIR/cache}" "$CHECK_DIR/JSONValue.swift" StormCRM/Features/HolidayLighting/HolidayQuoteModels.swift NativeTests/HolidayQuoteModelsChecks.swift -o "$CHECK_DIR/check"
+swiftc -module-cache-path "${RADAR_SWIFT_MODULE_CACHE:-$CHECK_DIR/cache}" "$CHECK_DIR/JSONValue.swift" StormCRM/Features/HolidayLighting/HolidayQuoteModels.swift StormCRM/Features/Schedule/ScheduleTimelineGeometry.swift NativeTests/HolidayQuoteModelsChecks.swift -o "$CHECK_DIR/check"
 "$CHECK_DIR/check" "$@"

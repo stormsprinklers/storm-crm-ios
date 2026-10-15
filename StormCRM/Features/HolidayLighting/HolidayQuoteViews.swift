@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import PhotosUI
+import UIKit
 
 struct HolidayQuotesView: View {
     @EnvironmentObject private var env: AppEnvironment
@@ -53,8 +54,10 @@ struct HolidayQuoteEditor: View {
             if let error = model.error { Section { Text(error).foregroundStyle(.red); if model.quoteID != nil { Button("Reload saved quote…") { confirmReload = true } } } }
             if let notice = model.notice { Section { Text(notice).foregroundStyle(.secondary) } }
             propertySection
+            optionTabs
             optionsSection
             designSection
+            HLPricingFields(model: model)
             pricingSection
             Section {
                 Button {
@@ -63,8 +66,12 @@ struct HolidayQuoteEditor: View {
                 } label: { Label(model.estimateID == nil ? "Create estimate" : "Update / create estimate", systemImage: "doc.text") }
                 .disabled(model.customerID == nil || !model.hasMeasurements)
                 if let id = model.estimateID { NavigationLink("Open linked estimate") { EstimateDetailView(estimateId: id) } }
-            } footer: { Text("Estimates use the same company price book, options and approval flow as the main CRM. Creating an estimate does not send it to the customer.") }
+            }
+            Section {
+                TextField("Notes", text: model.selectionBinding(\.notes, invalidatePreview: false), axis: .vertical).lineLimit(3...8)
+            } header: { stepHeader("Notes", id: "notes") }
         }
+        .background(HLKeyboardDismissal())
         .disabled(model.busy || model.generating)
         .overlay { if model.busy { ProgressView("Saving / loading…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
         .navigationTitle(model.title)
@@ -75,16 +82,16 @@ struct HolidayQuoteEditor: View {
             ToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await model.save(api: env.apiClient) } }.disabled(model.busy || model.generating) }
         }
         .safeAreaInset(edge: .bottom) {
-            HStack { Image(systemName: model.dirty ? "pencil.circle" : "checkmark.icloud"); Text(model.photoUnsaved ? "Property photo not saved" : model.dirty ? "Unsaved changes — Save to sync and calculate" : "Synced with CRM").font(.caption); Spacer() }
+            HStack { Image(systemName: model.dirty ? "pencil.circle" : "checkmark.icloud"); Text(model.photoUnsaved ? "Photo not saved" : model.dirty ? "Unsaved changes" : "Saved").font(.caption); Spacer() }
                 .padding(10).background(.regularMaterial)
         }
-        .task { await model.load(api: env.apiClient) }
-        .sheet(isPresented: $showCustomerPicker) { NavigationStack { HLCustomerPicker { model.chooseCustomer($0); showCustomerPicker = false } } }
+        .task { await model.load(api: env.apiClient); if model.center == nil && !model.address.isEmpty { await model.locate(api: env.apiClient) } }
+        .sheet(isPresented: $showCustomerPicker) { NavigationStack { HLCustomerPicker { model.chooseCustomer($0); showCustomerPicker = false; Task { await model.locate(api: env.apiClient) } } } }
         .confirmationDialog("Select property", isPresented: $showProperties, titleVisibility: .visible) {
-            ForEach(properties) { property in Button(property.name + " — " + property.formattedAddress) { model.applyProperty(property) } }
+            ForEach(properties) { property in Button(property.name + " — " + property.formattedAddress) { model.applyProperty(property); Task { await model.locate(api: env.apiClient) } } }
             Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog("Save your quote before leaving?", isPresented: $confirmLeave, titleVisibility: .visible) {
+        .alert("Save your quote before leaving?", isPresented: $confirmLeave) {
             Button("Save and leave") { Task {
                 if model.photoUnsaved, let photo = model.photo { await model.uploadPhoto(photo, api: env.apiClient) }
                 if !model.photoUnsaved, await model.save(api: env.apiClient) { dismiss() }
@@ -106,10 +113,10 @@ struct HolidayQuoteEditor: View {
         }
     }
     private var propertySection: some View {
-        Section("Customer and property") {
+        Section {
             Button(model.customerName.isEmpty ? "Choose customer" : model.customerName) { showCustomerPicker = true }.disabled(model.linkedVisit)
             if model.customerID != nil {
-                Button("Choose customer property") {
+                Button(model.propertyID == nil ? "Choose customer property" : model.address.isEmpty ? "Selected property" : model.address) {
                     Task {
                         do { properties = try await env.apiClient.get(path: APIPath.customerProperties(model.customerID!)); showProperties = true }
                         catch { model.error = (error as? APIError)?.message ?? error.localizedDescription }
@@ -119,17 +126,38 @@ struct HolidayQuoteEditor: View {
             TextField("Street address", text: addressBinding(\.address)).textContentType(.streetAddressLine1)
             TextField("City", text: addressBinding(\.city)).textContentType(.addressCity)
             HStack { TextField("State", text: addressBinding(\.state)); TextField("ZIP", text: addressBinding(\.zip)).keyboardType(.numbersAndPunctuation) }
-            Button("Find property on aerial map") { Task { await model.locate(api: env.apiClient) } }.disabled(model.address.trimmingCharacters(in: .whitespaces).isEmpty)
-        }
+        } header: { stepHeader("Customer and property", id: "property") }
     }
     private func addressBinding(_ path: ReferenceWritableKeyPath<HolidayQuoteViewModel, String>) -> Binding<String> {
-        Binding(get: { model[keyPath: path] }, set: { model[keyPath: path] = $0; model.dirty = true })
+        Binding(get: { model[keyPath: path] }, set: { model[keyPath: path] = $0; model.center = nil; model.dirty = true })
+    }
+    private func stepHeader(_ title: String, id: String) -> some View {
+        Button {
+            model.edit(invalidatePreview: false) { option in
+                if option.selections.completedSteps.contains(id) { option.selections.completedSteps.removeAll { $0 == id } }
+                else { option.selections.completedSteps.append(id) }
+            }
+        } label: {
+            Label(title, systemImage: model.active.selections.completedSteps.contains(id) ? "checkmark.square.fill" : "square")
+        }.buttonStyle(.plain).textCase(nil).accessibilityLabel("\(title), \(model.active.selections.completedSteps.contains(id) ? "complete" : "incomplete")")
+    }
+    private var optionTabs: some View {
+        Section {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack {
+                    ForEach(model.options) { option in
+                        Button { model.selectOption(option.id) } label: {
+                            Text(option.label).fontWeight(model.activeID == option.id ? .bold : .regular)
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                                .background(model.activeID == option.id ? Color.accentColor.opacity(0.18) : Color.clear, in: Capsule())
+                        }.buttonStyle(.plain).accessibilityAddTraits(model.activeID == option.id ? .isSelected : [])
+                    }
+                }
+            }
+        }
     }
     private var optionsSection: some View {
-        Section("Quote options") {
-            Picker("Editing", selection: Binding(get: { model.activeID }, set: { model.selectOption($0) })) {
-                ForEach(model.options) { option in Text(option.label).tag(option.id) }
-            }
+        Section {
             TextField("Option name", text: model.optionBinding(\.label))
             HStack {
                 Button("Add option") { model.addOption(copy: false) }.disabled(model.options.count >= 5)
@@ -141,7 +169,6 @@ struct HolidayQuoteEditor: View {
                 ForEach(model.catalog?.lightStyles ?? []) { style in Text(style.label).tag(style.key) }
             }
             HLColorField(value: model.selectionBinding(\.color))
-            Text("Default bulbs and colors apply to new runs. Edit existing runs in Measurements.").font(.caption).foregroundStyle(.secondary)
             Picker("Pricing", selection: model.selectionBinding(\.pricingMode, invalidatePreview: false)) {
                 if model.active.selections.style == "permanent" { Text("Permanent").tag("permanent") }
                 else { Text("Buy lights + labor").tag("buy"); Text("Lease").tag("lease"); Text("Labor only").tag("labor") }
@@ -149,17 +176,29 @@ struct HolidayQuoteEditor: View {
             if model.active.selections.pricingMode == "lease" {
                 Picker("Lease term", selection: model.selectionBinding(\.leaseYears, invalidatePreview: false)) { Text("1 year").tag(1); Text("3 years").tag(3); Text("5 years").tag(5) }
             }
-            TextField("Notes", text: model.selectionBinding(\.notes, invalidatePreview: false), axis: .vertical).lineLimit(3...8)
-        }
+        } header: { stepHeader("Options", id: "options") }
     }
-    private var designSection: some View {
-        Section("Design") {
+    @ViewBuilder private var designSection: some View {
+        Section {
+            if let center = model.center {
+                Map(initialPosition: .region(MKCoordinateRegion(center: center.coordinate, latitudinalMeters: 110, longitudinalMeters: 110))) {
+                    ForEach(model.active.measurements.segments) { segment in
+                        MapPolyline(coordinates: segment.path.map(\.coordinate)).stroke(.orange, lineWidth: 4)
+                    }
+                    ForEach(model.active.measurements.placements) { placement in
+                        Marker(placement.label, systemImage: placement.kind == "tree" ? "tree.fill" : "leaf.fill", coordinate: placement.point.coordinate)
+                    }
+                }.mapStyle(.imagery(elevation: .flat)).frame(height: 240).id("\(center.lat),\(center.lng)")
+            }
+            Button(model.center == nil ? "Find property on aerial map" : "Recenter property") { Task { await model.locate(api: env.apiClient) } }
+                .disabled(model.address.trimmingCharacters(in: .whitespaces).isEmpty)
             NavigationLink { HolidayAerialEditor(model: model) } label: { Label("Measure and draw aerial plan", systemImage: "map") }
-            Text("\(model.active.measurements.segments.count) rooflines · \(model.active.measurements.placements.count) trees / bushes · \(model.active.measurements.strands.count) strands").font(.caption).foregroundStyle(.secondary)
-            NavigationLink { HLMeasurementList(model: model) } label: { Label("Measurements, bulbs and strands", systemImage: "ruler") }
+            NavigationLink { HLMeasurementList(model: model) } label: { Label("Manual Measurements", systemImage: "ruler") }
+        } header: { stepHeader("Design", id: "design") }
+        Section {
             NavigationLink { HLPhotoEditor(model: model) } label: { Label("Property photo and lighting preview", systemImage: "paintbrush.pointed") }
             if let preview = model.active.previewURL { AuthenticatedBlobImage(urlString: preview).frame(height: 220) }
-        }
+        } header: { stepHeader("Photo and preview", id: "photo") }
     }
     private var pricingSection: some View {
         Section {
@@ -169,10 +208,13 @@ struct HolidayQuoteEditor: View {
                 LabeledContent("Measured / billed length", value: "\(pricing.billedLengthFt.formatted(.number.precision(.fractionLength(1)))) ft")
                 if detail.discountTotal > 0 { LabeledContent("Discount", value: detail.discountTotal.formatted(.currency(code: "USD"))) }
                 LabeledContent("Reinstall", value: pricing.reinstallTotal.formatted(.currency(code: "USD")))
-                if pricing.year1MinimumApplied || pricing.permanentMinimumApplied { Text("Company minimum pricing applied.").font(.caption).foregroundStyle(.secondary) }
             }
-            NavigationLink("Price adjustments and additional services") { HLPricingEditor(model: model) }
-        } header: { Text("Price") } footer: { Text("Calculated by the CRM using current company prices. Save changes to refresh totals.") }
+            if !model.dirty, let lines = model.pricing?.optionDetails[model.active.selections.pricingMode]?.displayLines {
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    LabeledContent(line.name, value: line.total.formatted(.currency(code: "USD")))
+                }
+            }
+        } header: { stepHeader("Price and line items", id: "price") }
     }
 }
 
@@ -220,4 +262,32 @@ struct HLColorField: View {
             Menu { ForEach(holidayBulbColors, id: \.self) { color in Button(color) { value = color } } } label: { Image(systemName: "paintpalette") }.accessibilityLabel("Choose bulb color")
         }
     }
+}
+
+// Observe taps without swallowing buttons, map gestures, or text-field focus.
+struct HLKeyboardDismissal: UIViewRepresentable {
+    final class TapView: UIView, UIGestureRecognizerDelegate {
+        weak var attachedWindow: UIWindow?
+        lazy var tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            attachedWindow?.removeGestureRecognizer(tap)
+            attachedWindow = window
+            tap.cancelsTouchesInView = false; tap.delegate = self
+            window?.addGestureRecognizer(tap)
+        }
+        @objc private func dismissKeyboard() { window?.endEditing(true) }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            var view = touch.view
+            while let current = view {
+                if current is UITextField || current is UITextView { return false }
+                view = current.superview
+            }
+            return true
+        }
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+    }
+    func makeUIView(context: Context) -> TapView { TapView() }
+    func updateUIView(_ uiView: TapView, context: Context) {}
+    static func dismantleUIView(_ uiView: TapView, coordinator: ()) { uiView.attachedWindow?.removeGestureRecognizer(uiView.tap) }
 }

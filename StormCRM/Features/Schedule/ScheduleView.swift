@@ -191,6 +191,7 @@ struct ScheduleView: View {
     @State private var jobToDelete: VisitDTO?
     @State private var isDeleting = false
     @State private var showTimeOffRequest = false
+    @State private var slideForward = true
 
     private var calendar: Calendar { Calendar.current }
 
@@ -355,6 +356,8 @@ struct ScheduleView: View {
                         shiftDay(by: delta)
                     }
                 )
+                .id(selectedDate)
+                .transition(.asymmetric(insertion: .move(edge: slideForward ? .trailing : .leading), removal: .move(edge: slideForward ? .leading : .trailing)))
                 if canEditSchedule {
                     Text("Tap an empty time to add a job.")
                         .font(.caption2)
@@ -362,7 +365,7 @@ struct ScheduleView: View {
                         .padding(.vertical, 6)
                 }
             }
-        }
+        }.clipped()
     }
 
     // MARK: - Actions
@@ -421,7 +424,8 @@ struct ScheduleView: View {
 
     private func shiftDay(by delta: Int) {
         guard let newDate = calendar.date(byAdding: .day, value: delta, to: selectedDate) else { return }
-        withAnimation(.easeInOut(duration: 0.2)) {
+        slideForward = delta > 0
+        withAnimation(.easeInOut(duration: 0.28)) {
             selectedDate = calendar.startOfDay(for: newDate)
         }
     }
@@ -518,6 +522,7 @@ private struct ScheduleDayTimeline: View {
         NavigationLink(value: job) {
             ScheduleTimelineBlock(job: job, colorMode: colorMode, compact: layout.height < 52)
                 .frame(width: laneWidth, height: layout.height, alignment: .topLeading)
+                .clipped()
         }
         .buttonStyle(.plain)
         .offset(x: gutter, y: layout.y)
@@ -562,11 +567,8 @@ private struct ScheduleDayTimeline: View {
         let end = APIDateFormatting.parse(job.endAt) ?? start.addingTimeInterval(3600)
         let startMinutes = minutesFromDayStart(start)
         let endMinutes = minutesFromDayStart(end)
-        let clampedStart = min(max(startMinutes, 0), CGFloat(endHour - startHour) * 60)
-        let clampedEnd = min(max(endMinutes, clampedStart + 20), CGFloat(endHour - startHour) * 60)
-        let y = vPadding + clampedStart / 60 * hourHeight
-        let height = max((clampedEnd - clampedStart) / 60 * hourHeight, 30)
-        return (y, height)
+        let layout = ScheduleTimelineGeometry.block(start: Double(startMinutes), end: Double(endMinutes), visibleMinutes: Double(endHour - startHour) * 60, hourHeight: Double(hourHeight), padding: Double(vPadding))
+        return (CGFloat(layout.y), CGFloat(layout.height))
     }
 
     private func minutesFromDayStart(_ date: Date) -> CGFloat {
@@ -623,7 +625,7 @@ private struct ScheduleTimelineBlock: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(8)
+        .padding(5)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(ScheduleColors.backgroundColor(for: job, mode: colorMode))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(accent.opacity(0.4), lineWidth: 1))
