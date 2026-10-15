@@ -107,6 +107,7 @@ struct HLSelections: HLRecord {
     var reinstallPrice: Double? { get { value("reinstallPrice", fallback: Optional<Double>.none) } set { put("reinstallPrice", newValue) } }
 }
 struct HLAdjustment: Codable {
+    var lineItems: [HLQuoteLine]?
     var partsPrice: Double?
     var laborPrice: Double?
     var price: Double?
@@ -165,7 +166,7 @@ struct HLCatalog: Decodable {
 }
 struct HLPricing: Decodable {
     struct DisplayLine: Decodable { let name: String; let description: String; let total: Double }
-    struct Detail: Decodable { let displayLines: [DisplayLine]?; let partsPrice: Double?; let laborPrice: Double?; let calculated: Double; let subtotal: Double; let discountTotal: Double; let total: Double }
+    struct Detail: Decodable { let displayLines: [DisplayLine]?; let includedLines: [DisplayLine]?; let partsPrice: Double?; let laborPrice: Double?; let calculated: Double; let subtotal: Double; let discountTotal: Double; let total: Double }
     struct Line: Decodable, Identifiable { let key: String; let name: String; let staffDetail: String; let purchaseTotal: Double; let leaseTotal: Double; let partsTotal: Double; let laborTotal: Double; var id: String { key } }
     let billedLengthFt: Double
     let reinstallTotal: Double
@@ -174,8 +175,27 @@ struct HLPricing: Decodable {
     let optionDetails: [String: Detail]
     let lines: [Line]
 }
-struct HLQuoteResponse: Decodable { let quote: HLQuote; let catalog: HLCatalog?; let pricing: HLPricing? }
+struct HLQuoteResponse: Decodable { let quote: HLQuote; let catalog: HLCatalog?; let pricing: HLPricing?; let optionPricing: [String: HLPricing]? }
 struct HLQuoteListResponse: Decodable { let quotes: [HLQuote] }
 struct HLCatalogResponse: Decodable { let catalog: HLCatalog }
 
 let holidayBulbColors = ["Warm White", "Winter White", "Champagne", "Red", "Green", "Blue", "Yellow", "Pink", "Orange", "Other"]
+
+struct HLQuoteLine: Codable, Identifiable {
+    var id: String
+    var name: String
+    var description: String
+    var quantity: Double = 1
+    var unitPrice: Double
+    var kind: String
+    var total: Double { kind == "included" ? 0 : (quantity * unitPrice * 100).rounded() / 100 }
+}
+
+struct HLQuoteDraftSnapshot: Codable {
+    let customerID: String?
+    let propertyID: String?
+    let address: [String]
+    let center: HLPoint?
+    let options: [HLDesign]
+    func encoded() -> Data? { let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]; return try? encoder.encode(self) }
+}

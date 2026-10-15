@@ -16,6 +16,7 @@ struct CreateLineItemBody: Encodable {
 
 struct CustomLineItemSheet: View {
     @Environment(\.dismiss) private var dismiss
+    var currencyFormatted = false
     let onSave: (CustomLineItemInput) async -> Void
 
     @State private var name = ""
@@ -31,8 +32,11 @@ struct CustomLineItemSheet: View {
                     TextField("Title", text: $name)
                     TextField("Description (optional)", text: $description, axis: .vertical)
                         .lineLimit(2...4)
-                    TextField("Price", text: $unitPrice)
-                        .keyboardType(.decimalPad)
+                    if currencyFormatted {
+                        TextField("Price", value: Binding(get: { Double(unitPrice) }, set: { unitPrice = $0.map(String.init(describing:)) ?? "" }), format: .currency(code: "USD")).keyboardType(.decimalPad)
+                    } else {
+                        TextField("Price", text: $unitPrice).keyboardType(.decimalPad)
+                    }
                 } footer: {
                     Text("Quantity defaults to 1. You can change it after adding.")
                         .font(.caption)

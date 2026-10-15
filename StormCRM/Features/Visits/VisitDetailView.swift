@@ -11,6 +11,10 @@ final class VisitDetailViewModel: ObservableObject {
     @Published var isSaving = false
     @Published var error: String?
     @Published var actionMessage: String?
+    @Published var workSummaryDraft: String?
+    @Published var savingSummary = false
+    @Published var summaryError: String?
+    private var summarySaveTask: Task<Bool, Never>?
 
     func load(api: APIClient, visitId: String, offlineSync: OfflineSyncManager? = nil) async {
         isLoading = visit == nil
@@ -212,6 +216,22 @@ final class VisitDetailViewModel: ObservableObject {
         )
     }
 
+    func flushWorkSummary(api: APIClient, visitId: String, offlineSync: OfflineSyncManager?) async -> Bool {
+        let summary = (workSummaryDraft ?? visit?.workSummary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let previous = summarySaveTask
+        let next = Task { @MainActor in
+            if let previous { _ = await previous.value }
+            if (self.visit?.workSummary ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == summary { return true }
+            self.savingSummary = true; self.summaryError = nil
+            let saved = await self.saveWorkSummary(api: api, visitId: visitId, summary: summary.isEmpty ? nil : summary, offlineSync: offlineSync)
+            self.savingSummary = false
+            if !saved { self.summaryError = "Could not save the work summary. Try again." }
+            return saved
+        }
+        summarySaveTask = next
+        return await next.value
+    }
+
     func saveWorkSummary(
         api: APIClient,
         visitId: String,
@@ -344,6 +364,7 @@ struct VisitDetailView: View {
     @StateObject private var viewModel = VisitDetailViewModel()
     @State private var activeSheet: VisitActiveSheet?
     @State private var showFinishBillingPrompt = false
+    @State private var finishValidationMessage: String?
     @State private var finishBillingAmount: Double = 0
     @State private var showDeleteConfirm = false
     @State private var showCancelConfirm = false
@@ -410,165 +431,13 @@ struct VisitDetailView: View {
                                     }
                                 }
 
-                                TimeTrackingBar(visit: visit, timeEvents: viewModel.timeEvents) { event in
-                                    await handleTimeEvent(
-                                        event,
-                                        visit: visit,
-                                        total: total,
-                                        paymentSummary: paymentSummary
-                                    )
-                                }
+                                visitTimeActions(visit, total: total, paymentSummary: paymentSummary)
 
-                                HStack(spacing: 10) {
-                                    Button {
-                                        activeSheet = .partsRun
-                                    } label: {
-                                        Label("Parts run", systemImage: "shippingbox.fill")
-                                            .lineLimit(1)
-                                            .minimumScaleFactor(0.8)
-                                            .frame(maxWidth: .infinity)
-                                    }
-                                    .buttonStyle(StormSecondaryButtonStyle())
-                                    .frame(maxWidth: .infinity)
+                                workSummarySection(visit)
 
-                                    Button {
-                                        guard paymentSummary.hasBalanceDue else { return }
-                                        activeSheet = .payment(amount: paymentAmountDue(for: visit))
-                                    } label: {
-                                        Group {
-                                            if paymentSummary.isPaid {
-                                                Label("Paid", systemImage: "checkmark.circle.fill")
-                                            } else {
-                                                Label {
-                                                    Text(paymentAmountDue(for: visit), format: .currency(code: "USD"))
-                                                } icon: {
-                                                    Image(systemName: "creditcard.fill")
-                                                }
-                                            }
-                                        }
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.75)
-                                        .frame(maxWidth: .infinity)
-                                    }
-                                    .buttonStyle(
-                                        StormPrimaryButtonStyle(
-                                            tint: paymentSummary.isPaid ? StormTheme.lightGreen : StormTheme.coral
-                                        )
-                                    )
-                                    .frame(maxWidth: .infinity)
-                                    .disabled(!paymentSummary.hasBalanceDue)
-                                    .opacity(paymentSummary.hasBalanceDue || paymentSummary.isPaid ? 1 : 0.55)
-                                }
+                                visitChecklistSection
 
-                                VisitWorkSummarySection(
-                                    visitId: visitId,
-                                    initialSummary: visit.workSummary
-                                ) { summary in
-                                    await viewModel.saveWorkSummary(
-                                        api: env.apiClient,
-                                        visitId: visitId,
-                                        summary: summary,
-                                        offlineSync: env.offlineSync
-                                    )
-                                }
-
-                                VisitChecklistLauncherSection(
-                                    checklists: viewModel.checklists,
-                                    onSaveItem: { checklistId, itemId, response in
-                                        await viewModel.saveChecklistItem(
-                                            api: env.apiClient,
-                                            visitId: visitId,
-                                            checklistId: checklistId,
-                                            itemId: itemId,
-                                            response: response,
-                                            offlineSync: env.offlineSync
-                                        )
-                                    },
-                                    onComplete: { checklistId in
-                                        await viewModel.completeChecklist(
-                                            api: env.apiClient,
-                                            visitId: visitId,
-                                            checklistId: checklistId
-                                        )
-                                    },
-                                    onAssignTemplate: { templateId in
-                                        await viewModel.assignChecklistTemplate(
-                                            api: env.apiClient,
-                                            visitId: visitId,
-                                            templateId: templateId
-                                        )
-                                    }
-                                )
-
-                                VisitCustomerInfoSection(
-                                    visit: visit,
-                                    voice: env.voice,
-                                    customerHistory: viewModel.customerHistory
-                                )
-
-                                if branding.maintenancePlansEnabled, let role = env.auth.user?.role, UserRoles.canViewMaintenancePlans(role) {
-                                    VisitMaintenanceSection(
-                                        visitId: visitId,
-                                        userRole: role,
-                                        onUpdated: {
-                                            await viewModel.load(
-                                                api: env.apiClient,
-                                                visitId: visitId,
-                                                offlineSync: env.offlineSync
-                                            )
-                                        }
-                                    )
-                                }
-
-                                if branding.isHolidayCompany { HolidayVisitPlanSection(metadata: visit.designExportMetadata) }
-
-                                VisitEstimatesSection(
-                                    visit: visit,
-                                    visitId: visitId
-                                ) {
-                                    await reloadVisit()
-                                }
-
-                                LineItemsSummarySection(
-                                    owner: .visit(id: visitId),
-                                    items: visit.lineItems ?? [],
-                                    discounts: visit.discounts ?? [],
-                                    // Live from line items — visit.subtotal/total can lag after edits.
-                                    subtotal: subtotal,
-                                    discountTotal: discountTotal,
-                                    total: total,
-                                    onUpdated: { await reloadVisit() }
-                                )
-
-                                VisitNotesSection(
-                                    notes: visit.notes ?? [],
-                                    newNote: $newNote,
-                                    onAdd: {
-                                        let text = newNote
-                                        await viewModel.addNote(
-                                            api: env.apiClient,
-                                            visitId: visitId,
-                                            body: text,
-                                            offlineSync: env.offlineSync,
-                                            author: env.auth.user.map {
-                                                NamedColor(id: $0.id, name: $0.name, color: nil, photoUrl: nil)
-                                            }
-                                        )
-                                        newNote = ""
-                                    }
-                                )
-
-                                VisitAttachmentsSection(visitId: visitId)
-
-                                if branding.irrigationEnabled && visit.hasInstallPlan {
-                                    VisitInstallPlanSection(visit: visit)
-                                }
-
-                                VisitScheduleEditSection(
-                                    visit: visit,
-                                    canEdit: canEditSchedule,
-                                    onSaved: { await reloadVisit() }
-                                )
+                                visitDetails(visit, subtotal: subtotal, discountTotal: discountTotal, total: total, canEditSchedule: canEditSchedule)
                             }
                             .padding()
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -671,6 +540,14 @@ struct VisitDetailView: View {
             await viewModel.load(api: env.apiClient, visitId: visitId, offlineSync: env.offlineSync)
             syncLiveTracking()
         }
+        .alert("Cannot finish visit", isPresented: Binding(get: { finishValidationMessage != nil }, set: { if !$0 { finishValidationMessage = nil } })) {
+            Button("OK", role: .cancel) { finishValidationMessage = nil }
+        } message: { Text(finishValidationMessage ?? "") }
+        .task(id: viewModel.workSummaryDraft) {
+            guard viewModel.workSummaryDraft != nil else { return }
+            do { try await Task.sleep(for: .milliseconds(650)); try Task.checkCancellation() } catch { return }
+            _ = await viewModel.flushWorkSummary(api: env.apiClient, visitId: visitId, offlineSync: env.offlineSync)
+        }
         .task(id: viewModel.timeEvents.last?.id) {
             guard viewModel.visit?.status == "EN_ROUTE", let event = VisitTimeTrackingLogic.latestEvent(in: viewModel.timeEvents, type: "EN_ROUTE"), let started = APIDateFormatting.parse(event.occurredAt) else { return }
             let remaining = max(0, started.addingTimeInterval(7200).timeIntervalSinceNow)
@@ -683,6 +560,7 @@ struct VisitDetailView: View {
         }
         .onDisappear {
             env.enRouteLocation.stop()
+            if viewModel.workSummaryDraft != nil { Task { _ = await viewModel.flushWorkSummary(api: env.apiClient, visitId: visitId, offlineSync: env.offlineSync) } }
         }
         .onReceive(NotificationCenter.default.publisher(for: .visitPaymentCompleted)) { notification in
             guard let visitId = notification.userInfo?["visitId"] as? String, visitId == self.visitId else { return }
@@ -778,6 +656,165 @@ struct VisitDetailView: View {
         }
     }
 
+    @ViewBuilder private func visitTimeActions(_ visit: VisitDetailDTO, total: Double, paymentSummary: VisitPaymentSummary) -> some View {
+        TimeTrackingBar(visit: visit, timeEvents: viewModel.timeEvents) { event in
+            await handleTimeEvent(
+                event,
+                visit: visit,
+                total: total,
+                paymentSummary: paymentSummary
+            )
+        }
+
+        HStack(spacing: 10) {
+            Button {
+                activeSheet = .partsRun
+            } label: {
+                Label("Parts run", systemImage: "shippingbox.fill")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(StormSecondaryButtonStyle())
+            .frame(maxWidth: .infinity)
+
+            Button {
+                guard paymentSummary.hasBalanceDue else { return }
+                activeSheet = .payment(amount: paymentAmountDue(for: visit))
+            } label: {
+                Group {
+                    if paymentSummary.isPaid {
+                        Label("Paid", systemImage: "checkmark.circle.fill")
+                    } else {
+                        Label {
+                            Text(paymentAmountDue(for: visit), format: .currency(code: "USD"))
+                        } icon: {
+                            Image(systemName: "creditcard.fill")
+                        }
+                    }
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(
+                StormPrimaryButtonStyle(
+                    tint: paymentSummary.isPaid ? StormTheme.lightGreen : StormTheme.coral
+                )
+            )
+            .frame(maxWidth: .infinity)
+            .disabled(!paymentSummary.hasBalanceDue)
+            .opacity(paymentSummary.hasBalanceDue || paymentSummary.isPaid ? 1 : 0.55)
+        }
+    }
+
+    private var visitChecklistSection: some View {
+        VisitChecklistLauncherSection(
+            checklists: viewModel.checklists,
+            onSaveItem: { checklistId, itemId, response in
+                await viewModel.saveChecklistItem(
+                    api: env.apiClient,
+                    visitId: visitId,
+                    checklistId: checklistId,
+                    itemId: itemId,
+                    response: response,
+                    offlineSync: env.offlineSync
+                )
+            },
+            onComplete: { checklistId in
+                await viewModel.completeChecklist(
+                    api: env.apiClient,
+                    visitId: visitId,
+                    checklistId: checklistId
+                )
+            },
+            onAssignTemplate: { templateId in
+                await viewModel.assignChecklistTemplate(
+                    api: env.apiClient,
+                    visitId: visitId,
+                    templateId: templateId
+                )
+            }
+        )
+    }
+
+    @ViewBuilder private func visitDetails(_ visit: VisitDetailDTO, subtotal: Double, discountTotal: Double, total: Double, canEditSchedule: Bool) -> some View {
+        VisitCustomerInfoSection(
+            visit: visit,
+            voice: env.voice,
+            customerHistory: viewModel.customerHistory
+        )
+
+        if branding.maintenancePlansEnabled, let role = env.auth.user?.role, UserRoles.canViewMaintenancePlans(role) {
+            VisitMaintenanceSection(
+                visitId: visitId,
+                userRole: role,
+                onUpdated: {
+                    await viewModel.load(
+                        api: env.apiClient,
+                        visitId: visitId,
+                        offlineSync: env.offlineSync
+                    )
+                }
+            )
+        }
+
+        if branding.isHolidayCompany { HolidayVisitPlanSection(metadata: visit.designExportMetadata) }
+
+        VisitEstimatesSection(
+            visit: visit,
+            visitId: visitId
+        ) {
+            await reloadVisit()
+        }
+
+        LineItemsSummarySection(
+            owner: .visit(id: visitId),
+            items: visit.lineItems ?? [],
+            discounts: visit.discounts ?? [],
+            // Live from line items — visit.subtotal/total can lag after edits.
+            subtotal: subtotal,
+            discountTotal: discountTotal,
+            total: total,
+            onUpdated: { await reloadVisit() }
+        )
+
+        VisitNotesSection(
+            notes: visit.notes ?? [],
+            newNote: $newNote,
+            onAdd: {
+                let text = newNote
+                await viewModel.addNote(
+                    api: env.apiClient,
+                    visitId: visitId,
+                    body: text,
+                    offlineSync: env.offlineSync,
+                    author: env.auth.user.map {
+                        NamedColor(id: $0.id, name: $0.name, color: nil, photoUrl: nil)
+                    }
+                )
+                newNote = ""
+            }
+        )
+
+        VisitAttachmentsSection(visitId: visitId)
+
+        if branding.irrigationEnabled && visit.hasInstallPlan {
+            VisitInstallPlanSection(visit: visit)
+        }
+
+        VisitScheduleEditSection(
+            visit: visit,
+            canEdit: canEditSchedule,
+            onSaved: { await reloadVisit() }
+        )
+    }
+
+    private func workSummarySection(_ visit: VisitDetailDTO) -> some View {
+        let binding = Binding<String>(get: { viewModel.workSummaryDraft ?? visit.workSummary ?? "" }, set: { viewModel.workSummaryDraft = $0 })
+        return VisitWorkSummarySection(text: binding, isSaving: viewModel.savingSummary, error: viewModel.summaryError)
+    }
+
     private func handleTimeEvent(
         _ type: String,
         visit: VisitDetailDTO,
@@ -793,16 +830,19 @@ struct VisitDetailView: View {
             }
         }
         if type == "FINISH" {
-            let summary = (visit.workSummary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let summary = (viewModel.workSummaryDraft ?? viewModel.visit?.workSummary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if summary.isEmpty {
-                viewModel.actionMessage = "Add a work summary before completing the visit."
+                finishValidationMessage = "Add a summary of work before completing the visit. Your summary saves automatically."
                 return
+            }
+            guard await viewModel.flushWorkSummary(api: env.apiClient, visitId: visitId, offlineSync: env.offlineSync) else {
+                finishValidationMessage = "The work summary could not be saved. Please try finishing again."; return
             }
             let incompleteRequired = viewModel.checklists.contains { checklist in
                 (checklist.requiredForCompletion == true) && checklist.completedAt == nil
             }
             if incompleteRequired {
-                viewModel.actionMessage = "Complete required checklists before finishing."
+                finishValidationMessage = "Complete the required checklists before finishing."
                 return
             }
         }

@@ -425,7 +425,7 @@ struct ScheduleView: View {
     private func shiftDay(by delta: Int) {
         guard let newDate = calendar.date(byAdding: .day, value: delta, to: selectedDate) else { return }
         slideForward = delta > 0
-        withAnimation(.easeInOut(duration: 0.28)) {
+        withAnimation(.interactiveSpring(response: 0.16, dampingFraction: 1)) {
             selectedDate = calendar.startOfDay(for: newDate)
         }
     }
@@ -656,11 +656,11 @@ private struct ScheduleHorizontalSwipe: ViewModifier {
 
     func body(content: Content) -> some View {
         content.simultaneousGesture(
-            DragGesture(minimumDistance: 40, coordinateSpace: .local)
+            DragGesture(minimumDistance: 15, coordinateSpace: .local)
                 .onEnded { value in
                     let dx = value.translation.width
                     let dy = value.translation.height
-                    guard abs(dx) > 60, abs(dx) > abs(dy) * 1.4 else { return }
+                    guard max(abs(dx), abs(value.predictedEndTranslation.width)) > 45, abs(dx) > abs(dy) * 1.4 else { return }
                     onSwipe(dx < 0 ? 1 : -1)
                 }
         )

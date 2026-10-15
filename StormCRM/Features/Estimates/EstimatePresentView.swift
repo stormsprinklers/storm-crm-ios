@@ -75,11 +75,7 @@ struct EstimatePresentView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save and send") {
-                        if estimate?.hasBeenSent == true {
-                            showResendConfirm = true
-                        } else {
-                            Task { await sendAndClose() }
-                        }
+                        showResendConfirm = true
                     }
                 }
                 if let url = estimate?.financingUrl, !url.isEmpty {
@@ -112,8 +108,8 @@ struct EstimatePresentView: View {
                     renameOptionId = nil
                 }
             }
-            .alert("Are you sure you want to send this estimate again?", isPresented: $showResendConfirm) {
-                Button("Send again") {
+            .alert(estimate?.hasBeenSent == true ? "Send this estimate again?" : "Send this estimate to the customer?", isPresented: $showResendConfirm) {
+                Button(estimate?.hasBeenSent == true ? "Send again" : "Send to customer") {
                     Task { await sendAndClose() }
                 }
                 Button("Cancel", role: .cancel) {}

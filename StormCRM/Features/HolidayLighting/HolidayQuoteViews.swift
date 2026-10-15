@@ -65,12 +65,13 @@ struct HolidayQuoteEditor: View {
                     else { Task { estimateDestination = await model.createEstimate(api: env.apiClient, revise: false) } }
                 } label: { Label(model.estimateID == nil ? "Create estimate" : "Update / create estimate", systemImage: "doc.text") }
                 .disabled(model.customerID == nil || !model.hasMeasurements)
-                if let id = model.estimateID { NavigationLink("Open linked estimate") { EstimateDetailView(estimateId: id) } }
+                if let id = model.estimateID { Button("View estimate") { estimateDestination = id } }
             }
             Section {
                 TextField("Notes", text: model.selectionBinding(\.notes, invalidatePreview: false), axis: .vertical).lineLimit(3...8)
             } header: { stepHeader("Notes", id: "notes") }
         }
+        .buttonStyle(.borderless)
         .background(HLKeyboardDismissal())
         .disabled(model.busy || model.generating)
         .overlay { if model.busy { ProgressView("Saving / loading…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
@@ -78,7 +79,7 @@ struct HolidayQuoteEditor: View {
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) { Button("Back") { if model.dirty || model.photoUnsaved { confirmLeave = true } else { dismiss() } }.disabled(model.busy || model.generating) }
+            ToolbarItem(placement: .topBarLeading) { Button(model.visitID != nil ? "Back to visit" : "Done") { if model.dirty || model.photoUnsaved { confirmLeave = true } else { dismiss() } }.disabled(model.busy || model.generating) }
             ToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await model.save(api: env.apiClient) } }.disabled(model.busy || model.generating) }
         }
         .safeAreaInset(edge: .bottom) {
@@ -108,15 +109,20 @@ struct HolidayQuoteEditor: View {
             Button("Create a new estimate") { Task { estimateDestination = await model.createEstimate(api: env.apiClient, revise: false) } }
             Button("Cancel", role: .cancel) {}
         }
-        .navigationDestination(isPresented: Binding(get: { estimateDestination != nil }, set: { if !$0 { estimateDestination = nil } })) {
-            if let id = estimateDestination { EstimateDetailView(estimateId: id) }
+        .sheet(isPresented: Binding(get: { estimateDestination != nil }, set: { if !$0 { estimateDestination = nil } })) {
+            if let id = estimateDestination {
+                NavigationStack {
+                    EstimateDetailView(estimateId: id, sourceVisitId: model.visitID)
+                        .toolbar { ToolbarItem(placement: .topBarLeading) { Button(model.visitID != nil ? "Back to visit" : "Done") { estimateDestination = nil; if !model.dirty && !model.photoUnsaved { dismiss() } } } }
+                }
+            }
         }
     }
     private var propertySection: some View {
         Section {
             Button(model.customerName.isEmpty ? "Choose customer" : model.customerName) { showCustomerPicker = true }.disabled(model.linkedVisit)
             if model.customerID != nil {
-                Button(model.propertyID == nil ? "Choose customer property" : model.address.isEmpty ? "Selected property" : model.address) {
+                Button(model.address.isEmpty ? "Select property" : model.address) {
                     Task {
                         do { properties = try await env.apiClient.get(path: APIPath.customerProperties(model.customerID!)); showProperties = true }
                         catch { model.error = (error as? APIError)?.message ?? error.localizedDescription }
@@ -152,6 +158,11 @@ struct HolidayQuoteEditor: View {
                                 .background(model.activeID == option.id ? Color.accentColor.opacity(0.18) : Color.clear, in: Capsule())
                         }.buttonStyle(.plain).accessibilityAddTraits(model.activeID == option.id ? .isSelected : [])
                     }
+                    Menu {
+                        Button("New option", systemImage: "plus") { model.addOption(copy: false) }
+                        Button("Duplicate " + model.active.label, systemImage: "document.on.document") { model.addOption(copy: true) }
+                    } label: { Image(systemName: "plus.circle.fill").font(.title2).padding(8) }
+                    .disabled(model.options.count >= 5).accessibilityLabel("Add quote option")
                 }
             }
         }
@@ -159,11 +170,6 @@ struct HolidayQuoteEditor: View {
     private var optionsSection: some View {
         Section {
             TextField("Option name", text: model.optionBinding(\.label))
-            HStack {
-                Button("Add option") { model.addOption(copy: false) }.disabled(model.options.count >= 5)
-                Spacer()
-                Button("Copy option") { model.addOption(copy: true) }.disabled(model.options.count >= 5)
-            }
             if model.options.count > 1 { Button("Remove this option", role: .destructive) { model.deleteOption() } }
             Picker("Default bulbs", selection: model.selectionBinding(\.style)) {
                 ForEach(model.catalog?.lightStyles ?? []) { style in Text(style.label).tag(style.key) }
@@ -180,20 +186,8 @@ struct HolidayQuoteEditor: View {
     }
     @ViewBuilder private var designSection: some View {
         Section {
-            if let center = model.center {
-                Map(initialPosition: .region(MKCoordinateRegion(center: center.coordinate, latitudinalMeters: 110, longitudinalMeters: 110))) {
-                    ForEach(model.active.measurements.segments) { segment in
-                        MapPolyline(coordinates: segment.path.map(\.coordinate)).stroke(.orange, lineWidth: 4)
-                    }
-                    ForEach(model.active.measurements.placements) { placement in
-                        Marker(placement.label, systemImage: placement.kind == "tree" ? "tree.fill" : "leaf.fill", coordinate: placement.point.coordinate)
-                    }
-                }.mapStyle(.imagery(elevation: .flat)).frame(height: 240).id("\(center.lat),\(center.lng)")
-            }
-            Button(model.center == nil ? "Find property on aerial map" : "Recenter property") { Task { await model.locate(api: env.apiClient) } }
-                .disabled(model.address.trimmingCharacters(in: .whitespaces).isEmpty)
-            NavigationLink { HolidayAerialEditor(model: model) } label: { Label("Measure and draw aerial plan", systemImage: "map") }
-            NavigationLink { HLMeasurementList(model: model) } label: { Label("Manual Measurements", systemImage: "ruler") }
+            HolidayAerialEditor(model: model, embedded: true).frame(height: 440).listRowInsets(EdgeInsets())
+            if model.center == nil { Button("Locate property") { Task { await model.locate(api: env.apiClient) } } }
         } header: { stepHeader("Design", id: "design") }
         Section {
             NavigationLink { HLPhotoEditor(model: model) } label: { Label("Property photo and lighting preview", systemImage: "paintbrush.pointed") }
@@ -202,17 +196,13 @@ struct HolidayQuoteEditor: View {
     }
     private var pricingSection: some View {
         Section {
+            if model.active.selections.adjustments[model.active.selections.pricingMode]?.lineItems != nil { LabeledContent("Subtotal", value: model.quoteLines.reduce(0) { $0 + $1.total }.formatted(.currency(code: "USD"))) }
             Button("Save and calculate price") { Task { await model.save(api: env.apiClient) } }
             if !model.dirty, let pricing = model.pricing, let detail = pricing.optionDetails[model.active.selections.pricingMode] {
                 LabeledContent("Option total", value: detail.total.formatted(.currency(code: "USD")))
                 LabeledContent("Measured / billed length", value: "\(pricing.billedLengthFt.formatted(.number.precision(.fractionLength(1)))) ft")
                 if detail.discountTotal > 0 { LabeledContent("Discount", value: detail.discountTotal.formatted(.currency(code: "USD"))) }
                 LabeledContent("Reinstall", value: pricing.reinstallTotal.formatted(.currency(code: "USD")))
-            }
-            if !model.dirty, let lines = model.pricing?.optionDetails[model.active.selections.pricingMode]?.displayLines {
-                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                    LabeledContent(line.name, value: line.total.formatted(.currency(code: "USD")))
-                }
             }
         } header: { stepHeader("Price and line items", id: "price") }
     }

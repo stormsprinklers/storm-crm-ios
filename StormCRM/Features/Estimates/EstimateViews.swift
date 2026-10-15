@@ -272,7 +272,8 @@ struct EstimateDetailView: View {
             EstimateApprovalSheet(
                 estimateTotal: context.total,
                 canApprove: context.canApprove,
-                isSaving: $isSaving
+                isSaving: $isSaving,
+                onApproveWithoutSignature: { await approveAsEmployee() }
             ) { png in
                 await approveWithSignature(pngData: png)
             }
@@ -320,8 +321,8 @@ struct EstimateDetailView: View {
                 if estimate?.status != "SENT" { break }
             }
         }
-        .alert("Are you sure you want to send this estimate again?", isPresented: $showResendConfirm) {
-            Button("Send again") {
+        .alert(estimate?.hasBeenSent == true ? "Send this estimate again?" : "Send this estimate to the customer?", isPresented: $showResendConfirm) {
+            Button(estimate?.hasBeenSent == true ? "Send again" : "Send to customer") {
                 Task { await sendEstimate() }
             }
             Button("Cancel", role: .cancel) {}
@@ -346,6 +347,7 @@ struct EstimateDetailView: View {
                     Text(estimate.status == "CONVERTED" ? "Estimate converted" : "Estimate approved")
                         .font(.headline)
                         .foregroundStyle(StormTheme.navy)
+                    if let employee = estimate.employeeApproval { Text("Approved by employee " + employee.employeeName + " without signature").font(.caption).foregroundStyle(.secondary) }
                     if let signedAt = estimate.signedAt {
                         Text("Customer signed \(APIDateFormatting.displayString(from: signedAt))")
                             .font(.caption)
@@ -710,11 +712,7 @@ struct EstimateDetailView: View {
                     tint: StormTheme.coral,
                     accessibilityLabel: "Send to customer"
                 ) {
-                    if estimate.hasBeenSent {
-                        showResendConfirm = true
-                    } else {
-                        Task { await sendEstimate() }
-                    }
+                    showResendConfirm = true
                 }
             )
         }
@@ -830,6 +828,17 @@ struct EstimateDetailView: View {
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }
+    }
+
+    private func approveAsEmployee() async -> String? {
+        isSaving = true; defer { isSaving = false }
+        struct Body: Encodable { let confirmEmployeeApproval = true; let selectedOptionId: String? }
+        do {
+            let _: EmptyResponse = try await env.apiClient.post(path: "/api/estimates/\(estimateId)/employee-approval", body: Body(selectedOptionId: activeOptionId))
+            await load(); actionMessage = "Approved by employee without signature"
+            postApprovalMode = .choose; pendingPostApproval = true; approvalSheet = nil
+            await onUpdated(); return nil
+        } catch { return (error as? APIError)?.message ?? error.localizedDescription }
     }
 
     /// Returns `nil` on success, otherwise an error message for the approval popup.

@@ -414,67 +414,18 @@ struct VisitStreetViewHeader: View {
 }
 
 struct VisitWorkSummarySection: View {
-    @EnvironmentObject private var env: AppEnvironment
-    @EnvironmentObject private var branding: CompanyBranding
-    let visitId: String
-    let initialSummary: String?
-    var onSave: (String?) async -> Bool
-
-    @State private var text = ""
-    @State private var isSaving = false
-    @State private var error: String?
-    @State private var didLoad = false
-
+    @Binding var text: String
+    let isSaving: Bool
+    let error: String?
     var body: some View {
         StormCard {
             VStack(alignment: .leading, spacing: 10) {
                 StormSectionHeader(title: "Summary of work", systemImage: "text.alignleft")
-
-                TextField(
-                    "Describe what was done on this visit…",
-                    text: $text,
-                    axis: .vertical
-                )
-                .lineLimit(3...8)
-                .textFieldStyle(.roundedBorder)
-
-                HStack {
-                    if let error {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                    Spacer()
-                    Button(isSaving ? "Saving…" : "Save") {
-                        Task { await save() }
-                    }
-                    .buttonStyle(StormSecondaryButtonStyle())
-                    .disabled(isSaving || text == (initialSummary ?? ""))
-                }
+                TextField("Describe what was done on this visit…", text: $text, axis: .vertical)
+                    .lineLimit(3...8).textFieldStyle(.roundedBorder)
+                if isSaving { ProgressView("Saving…") }
+                if let error { Text(error).font(.caption).foregroundStyle(.red) }
             }
-        }
-        .onAppear {
-            guard !didLoad else { return }
-            text = initialSummary ?? ""
-            didLoad = true
-        }
-        .onChange(of: initialSummary) { _, newValue in
-            if !isSaving {
-                text = newValue ?? ""
-            }
-        }
-    }
-
-    private func save() async {
-        isSaving = true
-        error = nil
-        defer { isSaving = false }
-
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let summary = trimmed.isEmpty ? nil : trimmed
-        let saved = await onSave(summary)
-        if !saved {
-            self.error = "Could not save work summary."
         }
     }
 }

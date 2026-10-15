@@ -210,24 +210,26 @@ struct SmsConversationView: View {
     @State private var showCamera = false
     /// When false, the user has scrolled up to read history — don't yank them to the latest message.
     @State private var isPinnedToBottom = true
+    @State private var viewportHeight: CGFloat = 0
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 12) {
+                VStack(spacing: 12) {
                     ForEach(viewModel.messages) { message in
                         SmsMessageBubble(message: message)
                             .id(message.id)
                     }
-                    // Sentinel: when this leaves the viewport the user is reading older messages.
-                    Color.clear
-                        .frame(height: 1)
-                        .id("threadBottom")
-                        .onAppear { isPinnedToBottom = true }
-                        .onDisappear { isPinnedToBottom = false }
+                    GeometryReader { geometry in
+                        Color.clear.preference(key: SmsThreadBottomPreference.self, value: geometry.frame(in: .named("smsViewport")).maxY)
+                    }.frame(height: 0)
                 }
                 .padding()
             }
+            .coordinateSpace(name: "smsViewport")
+            .background(GeometryReader { geometry in Color.clear.onAppear { viewportHeight = geometry.size.height }.onChange(of: geometry.size.height) { _, height in viewportHeight = height } })
+            .onPreferenceChange(SmsThreadBottomPreference.self) { bottom in isPinnedToBottom = bottom <= viewportHeight + 48 }
+            .defaultScrollAnchor(.bottom)
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: viewModel.messages.last?.id) { oldId, newId in
                 guard let newId, newId != oldId else { return }
@@ -235,7 +237,7 @@ struct SmsConversationView: View {
                 guard oldId == nil || isPinnedToBottom else { return }
                 DispatchQueue.main.async {
                     withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo("threadBottom", anchor: .bottom)
+                        proxy.scrollTo(newId, anchor: .bottom)
                     }
                 }
             }
@@ -633,3 +635,8 @@ struct OutboxAttachmentChip: View {
 }
 
 typealias MessagesHubView = InboxHubView
+
+private struct SmsThreadBottomPreference: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}

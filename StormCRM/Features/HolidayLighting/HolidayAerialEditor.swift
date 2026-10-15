@@ -3,6 +3,9 @@ import MapKit
 
 struct HolidayAerialEditor: View {
     @ObservedObject var model: HolidayQuoteViewModel
+    var embedded = false
+    @State private var distance = 80.0
+    @State private var mapCenter: CLLocationCoordinate2D?
     @State private var camera: MapCameraPosition = .automatic
     @State private var mode = "move"
     @State private var draft: [HLPoint] = []
@@ -13,7 +16,7 @@ struct HolidayAerialEditor: View {
                 Text("Move").tag("move"); Text("Roofline").tag("draw"); Text("Tree").tag("tree"); Text("Bush").tag("bush")
             }.pickerStyle(.segmented).padding()
             MapReader { proxy in
-                Map(position: $camera, interactionModes: [.pan, .zoom, .rotate]) {
+                Map(position: $camera, bounds: MapCameraBounds(minimumDistance: 1, maximumDistance: 100_000), interactionModes: [.pan, .zoom, .rotate]) {
                     ForEach(Array(model.active.measurements.segments.enumerated()), id: \.element.id) { index, segment in
                         MapPolyline(coordinates: segment.path.map(\.coordinate)).stroke(colors[index % colors.count], lineWidth: 5)
                         if let point = segment.path.first {
@@ -32,6 +35,8 @@ struct HolidayAerialEditor: View {
                         }
                     }
                 }
+                .onMapCameraChange { context in distance = context.camera.distance; mapCenter = context.camera.centerCoordinate }
+                .overlay(alignment: .topTrailing) { VStack { Button { zoom(0.5) } label: { Image(systemName: "plus.magnifyingglass") }; Button { zoom(2) } label: { Image(systemName: "minus.magnifyingglass") } }.buttonStyle(.bordered).padding(8).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10)) }
                 .mapStyle(.imagery(elevation: .flat))
                 .mapControls { MapCompass(); MapScaleView() }
                 .onTapGesture { location in
@@ -60,16 +65,18 @@ struct HolidayAerialEditor: View {
             }
             NavigationLink("Manual Measurements") { HLMeasurementList(model: model) }.padding()
         }
-        .navigationTitle("Aerial lighting plan")
-        .navigationBarTitleDisplayMode(.inline)
         .onAppear { focus() }
         .onChange(of: model.center) { _, _ in focus() }
-        .toolbar { Button("Center property", systemImage: "scope") { focus() } }
+
         .onChange(of: mode) { _, next in if next != "draw" { draft = [] } }
+    }
+    private func zoom(_ factor: Double) {
+        guard let center = mapCenter ?? model.center?.coordinate else { return }
+        camera = .camera(MapCamera(centerCoordinate: center, distance: min(100_000, max(1, distance * factor)), heading: 0, pitch: 0))
     }
     private func focus() {
         if let point = model.center ?? model.active.measurements.segments.first?.path.first ?? model.active.measurements.placements.first?.point {
-            camera = .region(MKCoordinateRegion(center: point.coordinate, span: MKCoordinateSpan(latitudeDelta: 0.001, longitudeDelta: 0.001)))
+            camera = .camera(MapCamera(centerCoordinate: point.coordinate, distance: 80, heading: 0, pitch: 0))
         }
     }
 }
@@ -130,60 +137,11 @@ private struct HLPlacementEditor: View {
     var body: some View {
         Form {
             TextField("Label", text: $placement.label)
-            Stepper("\(placement.strands) strands", value: $placement.strands, in: 1...100)
+            LabeledContent("Strand count") { TextField("Strands", value: $placement.strands, format: .number).keyboardType(.numberPad).multilineTextAlignment(.trailing) }
             Picker("Difficulty", selection: $placement.difficulty) { Text("1 — Standard").tag(1); Text("2 — Moderate").tag(2); Text("3 — Difficult").tag(3) }
             if placement.kind == "tree" { Toggle("Lift rental needed", isOn: $placement.lift) }
             LabeledContent("Bulb type", value: "Mini LEDs")
             HLColorField(value: $placement.color)
         }.navigationTitle(placement.label).background(HLKeyboardDismissal())
-    }
-}
-struct HLPricingFields: View {
-    @ObservedObject var model: HolidayQuoteViewModel
-    private var adjustment: HLAdjustment { model.active.selections.adjustments[model.active.selections.pricingMode] ?? HLAdjustment() }
-    var body: some View {
-        Group {
-            Section("Parts and labor") {
-                if model.active.selections.pricingMode != "labor" {
-                    component("Parts price", get: { adjustment.partsPrice ?? model.pricing?.optionDetails[model.active.selections.pricingMode]?.partsPrice }, set: { value in change { $0.partsPrice = max(0, value); $0.price = nil } })
-                }
-                component("Labor price", get: { adjustment.laborPrice ?? model.pricing?.optionDetails[model.active.selections.pricingMode]?.laborPrice }, set: { value in change { $0.laborPrice = max(0, value); $0.price = nil } })
-                if adjustment.partsPrice != nil || adjustment.laborPrice != nil || adjustment.price != nil {
-                    Button("Reset prices") { change { $0.partsPrice = nil; $0.laborPrice = nil; $0.price = nil } }
-                }
-                TextField("Discount label", text: Binding(get: { adjustment.discountLabel ?? "" }, set: { value in change { $0.discountLabel = value } }))
-                Picker("Discount type", selection: Binding(get: { adjustment.discountType ?? "fixed" }, set: { value in change { $0.discountType = value } })) { Text("Dollar amount").tag("fixed"); Text("Percent").tag("percent") }
-                number("Discount", get: { adjustment.discountAmount ?? 0 }, set: { value in change { $0.discountAmount = max(0, value) } })
-                Toggle("Override reinstall price", isOn: Binding(get: { model.active.selections.reinstallPrice != nil }, set: { enabled in model.edit(invalidatePreview: false) { $0.selections.reinstallPrice = enabled ? (model.pricing?.reinstallTotal ?? 0) : nil } }))
-                if model.active.selections.reinstallPrice != nil { number("Reinstall price", get: { model.active.selections.reinstallPrice ?? 0 }, set: { value in model.edit(invalidatePreview: false) { $0.selections.reinstallPrice = max(0, value) } }) }
-            }
-            Section("Additional services") {
-                ForEach(model.active.selections.services) { service in
-                    NavigationLink { HLServiceEditor(service: model.serviceBinding(service.id)) } label: { Text(service.name.isEmpty ? "Unnamed service" : service.name) }
-                        .swipeActions { Button("Delete", role: .destructive) { model.edit(invalidatePreview: false) { $0.selections.services.removeAll { $0.id == service.id } } } }
-                }
-                Button("Add service") { model.edit(invalidatePreview: false) { $0.selections.services.append(HLService()) } }
-            }
-        }
-    }
-    private func change(_ update: (inout HLAdjustment) -> Void) {
-        model.edit(invalidatePreview: false) { option in var value = adjustment; update(&value); option.selections.adjustments[option.selections.pricingMode] = value }
-    }
-    private func component(_ label: String, get: @escaping () -> Double?, set: @escaping (Double) -> Void) -> some View {
-        LabeledContent(label) { TextField("Calculate or enter price", value: Binding(get: get, set: { set($0 ?? 0) }), format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
-    }
-    private func number(_ label: String, get: @escaping () -> Double, set: @escaping (Double) -> Void) -> some View {
-        LabeledContent(label) { TextField(label, value: Binding(get: get, set: set), format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing) }
-    }
-}
-private struct HLServiceEditor: View {
-    @Binding var service: HLService
-    var body: some View {
-        Form {
-            TextField("Service name", text: $service.name)
-            TextField("Description", text: $service.detail, axis: .vertical)
-            LabeledContent("Quantity") { TextField("Quantity", value: $service.quantity, format: .number).keyboardType(.decimalPad) }
-            LabeledContent("Unit price") { TextField("Price", value: $service.unitPrice, format: .number).keyboardType(.decimalPad) }
-        }.navigationTitle("Additional service").background(HLKeyboardDismissal())
     }
 }

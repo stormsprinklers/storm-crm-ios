@@ -68,6 +68,8 @@ struct LineItemEditRow: View {
     let isSaving: Bool
     let onSave: () -> Void
     let onDelete: () -> Void
+    var currencyFormatted = false
+    var priceReadOnly = false
 
     private var previewTotal: Double {
         let qty = Double(quantity.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
@@ -100,9 +102,12 @@ struct LineItemEditRow: View {
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Unit price").font(.caption2).foregroundStyle(.secondary)
-                    TextField("Price", text: $unitPrice)
-                        .keyboardType(.decimalPad)
-                        .textFieldStyle(.roundedBorder)
+                    if currencyFormatted {
+                        TextField("Price", value: Binding(get: { Double(unitPrice) ?? 0 }, set: { unitPrice = String($0) }), format: .currency(code: "USD"))
+                            .keyboardType(.decimalPad).textFieldStyle(.roundedBorder).disabled(priceReadOnly)
+                    } else {
+                        TextField("Price", text: $unitPrice).keyboardType(.decimalPad).textFieldStyle(.roundedBorder)
+                    }
                 }
                 Button(action: onSave) {
                     if isSaving {

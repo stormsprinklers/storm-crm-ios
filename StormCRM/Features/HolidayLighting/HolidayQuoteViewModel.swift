@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import UIKit
+import CoreLocation
 
 @MainActor
 final class HolidayQuoteViewModel: ObservableObject {
@@ -24,7 +25,15 @@ final class HolidayQuoteViewModel: ObservableObject {
     @Published var estimateID: String?
     @Published var busy = false
     @Published var generating = false
-    @Published var dirty = false
+    @Published private var savedDraft: Data?
+    private var pricingByOption: [String: HLPricing] = [:]
+    var dirty: Bool {
+        get { savedDraft == nil || draftData() != savedDraft }
+        set { if !newValue { savedDraft = draftData() } }
+    }
+    private func draftData() -> Data? {
+        HLQuoteDraftSnapshot(customerID: customerID, propertyID: propertyID, address: [address, city, state, zip], center: center, options: options).encoded()
+    }
     @Published var error: String?
     @Published var notice: String?
     private var updatedAt: String?
@@ -43,7 +52,7 @@ final class HolidayQuoteViewModel: ObservableObject {
     var active: HLDesign { options[activeIndex] }
     var title: String { customerName.isEmpty ? (address.isEmpty ? "Holiday quote" : address) : customerName }
     var path: String { "/api/holiday-lighting/quotes/\(quoteID ?? "")" }
-    var hasMeasurements: Bool { options.allSatisfy { $0.measurements.segments.contains { $0.length > 0 } || !$0.measurements.placements.isEmpty || !$0.selections.services.isEmpty } }
+    var hasMeasurements: Bool { options.allSatisfy { $0.measurements.segments.contains { $0.length > 0 } || !$0.measurements.placements.isEmpty || !$0.selections.services.isEmpty || ($0.selections.adjustments[$0.selections.pricingMode]?.lineItems?.contains { $0.kind != "included" } ?? false) } }
 
     func edit(invalidatePreview: Bool = true, _ update: (inout HLDesign) -> Void) {
         var next = active
@@ -58,17 +67,36 @@ final class HolidayQuoteViewModel: ObservableObject {
     func selectionBinding<T>(_ keyPath: WritableKeyPath<HLSelections, T>, invalidatePreview: Bool = true) -> Binding<T> {
         Binding(get: { self.active.selections[keyPath: keyPath] }, set: { value in self.edit(invalidatePreview: invalidatePreview) { $0.selections[keyPath: keyPath] = value } })
     }
-    func selectOption(_ id: String) { activeID = id; pricing = nil; dirty = true }
+    func selectOption(_ id: String) { guard id != activeID, options.contains(where: { $0.id == id }) else { return }; activeID = id; pricing = pricingByOption[id] }
     func addOption(copy: Bool) {
         guard options.count < 5 else { return }
         var option = copy ? active : HLDesign(selections: active.selections)
         option.id = UUID().uuidString; option.label = "Option \(options.count + 1)"
-        if !copy { option.previewURL = nil }
+        if !copy { option.previewURL = nil; option.selections.completedSteps = []; option.selections.adjustments = [:]; option.selections.services = []; option.selections.notes = "" }
         options.append(option); activeID = option.id; dirty = true; pricing = nil
     }
     func deleteOption() {
         guard options.count > 1 else { return }
-        options.remove(at: activeIndex); activeID = options[0].id; dirty = true; pricing = nil
+        options.remove(at: activeIndex); activeID = options[0].id; dirty = true; pricing = pricingByOption[activeID]
+    }
+    var quoteLines: [HLQuoteLine] {
+        if let lines = active.selections.adjustments[active.selections.pricingMode]?.lineItems { return lines }
+        var lines = (pricing?.optionDetails[active.selections.pricingMode]?.displayLines ?? []).enumerated().map { index, line in
+            HLQuoteLine(id: "\(activeID)-\(active.selections.pricingMode)-\(index)", name: line.name, description: line.description, unitPrice: line.total, kind: line.name.lowercased().contains("parts") ? "parts" : "labor")
+        }
+        lines += active.selections.services.map { HLQuoteLine(id: $0.id, name: $0.name, description: $0.detail, quantity: $0.quantity, unitPrice: $0.unitPrice, kind: "service") }
+        let included = pricing?.optionDetails[active.selections.pricingMode]?.includedLines ?? []
+        lines += included.enumerated().map { index, line in HLQuoteLine(id: "\(activeID)-included-\(index)", name: line.name, description: line.description, unitPrice: 0, kind: "included") }
+        return lines
+    }
+    func updateQuoteLines(_ update: (inout [HLQuoteLine]) -> Void) {
+        var lines = quoteLines; update(&lines)
+        edit(invalidatePreview: false) { option in
+            var adjustment = option.selections.adjustments[option.selections.pricingMode] ?? HLAdjustment()
+            adjustment.lineItems = lines; adjustment.price = nil; adjustment.partsPrice = nil; adjustment.laborPrice = nil
+            option.selections.adjustments[option.selections.pricingMode] = adjustment
+            option.selections.services = []; option.selections.reinstallPrice = nil
+        }
     }
     func removeSegment(_ id: String) {
         edit { option in
@@ -92,8 +120,9 @@ final class HolidayQuoteViewModel: ObservableObject {
                 if let style = catalog?.quoteDefaults?.defaultLightStyleKey { options[0].selections.style = style }
                 if let visitID {
                     let visit: VisitDetailDTO = try await api.get(path: APIPath.visit(visitID))
-                    customerID = visit.customer?.id; propertyID = visit.property?.id; customerName = visit.customer?.name ?? ""
-                    address = visit.address ?? ""; city = visit.city ?? ""; state = visit.state ?? ""; zip = visit.zip ?? ""
+                    customerID = visit.customer?.id; propertyID = visit.property?.id ?? initialPropertyID; customerName = visit.customer?.name ?? ""
+                    address = visit.property?.address ?? visit.address ?? ""; city = visit.property?.city ?? visit.city ?? ""; state = visit.property?.state ?? visit.state ?? ""; zip = visit.property?.zip ?? visit.zip ?? ""
+                    if let lat = visit.property?.latitude, let lng = visit.property?.longitude { center = HLPoint(lat: lat, lng: lng) }
                 } else if let customerID {
                     let customer: CustomerDTO = try await api.get(path: APIPath.customer(customerID))
                     customerName = customer.name; address = customer.address ?? ""; city = customer.city ?? ""; state = customer.state ?? ""; zip = customer.zip ?? ""
@@ -143,6 +172,8 @@ final class HolidayQuoteViewModel: ObservableObject {
         activeID = designs.contains(where: { $0.id == selected }) ? selected : designs[0].id
         if options[activeIndex].previewURL == nil, let preview = quote.previewImageUrl { options[activeIndex].previewURL = preview }
         catalog = response.catalog ?? catalog; pricing = response.pricing
+        pricingByOption = response.optionPricing ?? [:]
+        if let pricing { pricingByOption[activeID] = pricing }
         updatedAt = quote.updatedAt; sourcePhotoURL = quote.sourcePhotoUrl; estimateID = quote.estimate?.id
         dirty = false
     }
@@ -178,6 +209,7 @@ final class HolidayQuoteViewModel: ObservableObject {
     @discardableResult
     func save(api: APIClient) async -> Bool {
         guard !busy && !generating else { return false }
+        if !dirty && quoteID != nil { return true }
         busy = true; error = nil; notice = nil
         defer { busy = false }
         do {
@@ -201,7 +233,14 @@ final class HolidayQuoteViewModel: ObservableObject {
         do {
             let point: HLPoint = try await api.post(path: "/api/holiday-lighting/geocode", body: ["address": address, "city": city, "state": state, "zip": zip])
             center = point; dirty = true
-        } catch { self.error = (error as? APIError)?.message ?? error.localizedDescription }
+        } catch {
+            guard !Task.isCancelled else { return }
+            do {
+                let locations = try await CLGeocoder().geocodeAddressString([address, city, state, zip].filter { !$0.isEmpty }.joined(separator: ", "))
+                if let point = locations.first?.location?.coordinate { center = HLPoint(point); dirty = true }
+                else { self.error = "Could not locate this address. Check the street, city and ZIP." }
+            } catch { self.error = "Could not locate this address. Check the street, city and ZIP." }
+        }
     }
     func createEstimate(api: APIClient, revise: Bool) async -> String? {
         guard customerID != nil else { error = "Select a customer before creating an estimate."; return nil }

@@ -46,6 +46,8 @@ struct EstimateDetailDTO: Decodable, Identifiable {
     let discountTotal: Double
     let total: Double
     let signedAt: String?
+    struct EmployeeApproval: Decodable { let employeeId: String; let employeeName: String; let approvedAt: String }
+    let employeeApproval: EmployeeApproval?
     let approvedAt: String?
     let sentAt: String?
     let signatureBlobUrl: String?
@@ -61,7 +63,7 @@ struct EstimateDetailDTO: Decodable, Identifiable {
     enum CodingKeys: String, CodingKey {
         case id, estimateNumber, status, expiresAt, selectedOptionId
         case subtotal, discountTotal, total
-        case signedAt, approvedAt, sentAt, signatureBlobUrl, createdAt, customer, property, visit
+        case signedAt, employeeApproval, approvedAt, sentAt, signatureBlobUrl, createdAt, customer, property, visit
         case options, lineItems, discounts, financingUrl
     }
 
@@ -76,6 +78,7 @@ struct EstimateDetailDTO: Decodable, Identifiable {
         discountTotal = try container.decodeFlexibleDouble(forKey: .discountTotal) ?? 0
         total = try container.decodeFlexibleDouble(forKey: .total) ?? 0
         signedAt = try container.decodeIfPresent(String.self, forKey: .signedAt)
+        employeeApproval = try container.decodeIfPresent(EmployeeApproval.self, forKey: .employeeApproval)
         approvedAt = try container.decodeIfPresent(String.self, forKey: .approvedAt)
         sentAt = try container.decodeIfPresent(String.self, forKey: .sentAt)
         signatureBlobUrl = try container.decodeIfPresent(String.self, forKey: .signatureBlobUrl)

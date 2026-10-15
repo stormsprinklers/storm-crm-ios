@@ -10,8 +10,10 @@ struct EstimateApprovalSheet: View {
     let canApprove: Bool
     @Binding var isSaving: Bool
     /// Called with PNG bytes when the user confirms approval. Return `nil` on success, or an error message.
+    var onApproveWithoutSignature: (() async -> String?)? = nil
     var onApprove: (Data) async -> String?
 
+    @State private var confirmEmployeeApproval = false
     @State private var hasSignatureInk = false
     @State private var localError: String?
     @StateObject private var signatureController = EstimateSignatureController()
@@ -78,6 +80,10 @@ struct EstimateApprovalSheet: View {
                 }
                 .buttonStyle(StormPrimaryButtonStyle())
                 .disabled(isSaving || !hasSignatureInk || !canApprove)
+                if onApproveWithoutSignature != nil {
+                    Button("Approve without signature") { confirmEmployeeApproval = true }
+                        .buttonStyle(StormSecondaryButtonStyle()).disabled(isSaving || !canApprove)
+                }
             }
             .padding()
             .background(StormTheme.page.ignoresSafeArea())
@@ -90,6 +96,15 @@ struct EstimateApprovalSheet: View {
                 }
             }
             .interactiveDismissDisabled(isSaving)
+            .alert("Approve as employee?", isPresented: $confirmEmployeeApproval) {
+                Button("Approve without signature") {
+                    Task {
+                        if let message = await onApproveWithoutSignature?() { localError = message }
+                        else { dismiss() }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { Text("This records employee approval without a customer signature.") }
         }
     }
 

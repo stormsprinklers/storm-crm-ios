@@ -72,9 +72,6 @@ struct MoreView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Label(branding.aiName, systemImage: "sparkles")
-                            Text("Chat, part photos, live voice & video")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
                         }
                     }
 

@@ -33,7 +33,7 @@ import Foundation
         first.previewURL = "https://example.com/option-a.jpg"
         first.selections.notes = "Keep existing clips"
         first.selections.completedSteps = ["design", "notes"]
-        first.selections.adjustments["buy"] = HLAdjustment(partsPrice: 75.25, laborPrice: 42.5)
+        first.selections.adjustments["buy"] = HLAdjustment(lineItems: [HLQuoteLine(id: "labor", name: "Install", description: "Front roof", unitPrice: 45.5, kind: "labor")], partsPrice: 75.25, laborPrice: 42.5)
         var second = first
         second.id = UUID().uuidString; second.label = "Lease"; second.selections.pricingMode = "lease"
         second.measurements.segments[0].color = "Warm White"
@@ -45,6 +45,12 @@ import Foundation
         precondition(options[0].selections.completedSteps == ["design", "notes"])
         precondition(options[0].selections.adjustments["buy"]?.partsPrice == 75.25)
         precondition(options[0].selections.adjustments["buy"]?.laborPrice == 42.5)
+        precondition(options[0].selections.adjustments["buy"]?.lineItems?.first?.unitPrice == 45.5)
+        let snapshot = HLQuoteDraftSnapshot(customerID: "customer", propertyID: "property", address: ["100 Main"], center: nil, options: options)
+        let restored = try JSONDecoder().decode(HLQuoteDraftSnapshot.self, from: snapshot.encoded()!)
+        precondition(snapshot.encoded() == restored.encoded())
+        var changed = options; changed[0].label = "Changed"
+        precondition(snapshot.encoded() != HLQuoteDraftSnapshot(customerID: "customer", propertyID: "property", address: ["100 Main"], center: nil, options: changed).encoded())
         precondition(options[0].previewURL == "https://example.com/option-a.jpg")
         precondition(options[1].measurements.strands[0].segmentIDs == ["run-a"])
         var service = HLService(); service.name = "Wreath"; service.quantity = 2; service.unitPrice = 40
