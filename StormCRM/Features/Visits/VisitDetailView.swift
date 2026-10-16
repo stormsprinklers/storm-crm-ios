@@ -824,6 +824,18 @@ struct VisitDetailView: View {
                     }
                 )
                 newNote = ""
+            },
+            onUpdate: { noteId, body in
+                try await viewModel.updateNote(
+                    api: env.apiClient, visitId: visitId, noteId: noteId,
+                    body: body, offlineSync: env.offlineSync
+                )
+            },
+            onDelete: { noteId in
+                try await viewModel.deleteNote(
+                    api: env.apiClient, visitId: visitId, noteId: noteId,
+                    offlineSync: env.offlineSync
+                )
             }
         )
 
