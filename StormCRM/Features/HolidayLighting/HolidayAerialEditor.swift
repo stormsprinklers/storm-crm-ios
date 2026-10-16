@@ -9,11 +9,12 @@ struct HolidayAerialEditor: View {
     @State private var camera: MapCameraPosition = .automatic
     @State private var mode = "move"
     @State private var draft: [HLPoint] = []
+    @State private var showingManualMeasurements = false
     private let colors: [Color] = [.orange, .cyan, .pink, .green, .purple, .yellow]
     var body: some View {
         VStack(spacing: 0) {
             Picker("Map tool", selection: $mode) {
-                Text("Move").tag("move"); Text("Roofline").tag("draw"); Text("Tree").tag("tree"); Text("Bush").tag("bush")
+                Text("Move").tag("move"); Text("Strands").tag("draw"); Text("Tree").tag("tree"); Text("Bush").tag("bush")
             }.pickerStyle(.segmented).padding()
             MapReader { proxy in
                 Map(position: $camera, bounds: MapCameraBounds(minimumDistance: 1, maximumDistance: 100_000), interactionModes: [.pan, .zoom, .rotate]) {
@@ -63,7 +64,21 @@ struct HolidayAerialEditor: View {
                     }.disabled(draft.count < 2)
                 }.font(.subheadline).padding().background(.regularMaterial)
             }
-            NavigationLink("Manual Measurements") { HLMeasurementList(model: model) }.padding()
+            Button("Manual Measurements") { showingManualMeasurements = true }
+                .buttonStyle(.borderless)
+                .padding()
+        }
+        // A NavigationLink inside this composite Form row makes the entire map a link.
+        .buttonStyle(.borderless)
+        .sheet(isPresented: $showingManualMeasurements) {
+            NavigationStack {
+                HLMeasurementList(model: model)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showingManualMeasurements = false }
+                        }
+                    }
+            }
         }
         .onAppear { focus() }
         .onChange(of: model.center) { _, _ in focus() }
