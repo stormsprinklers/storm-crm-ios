@@ -98,17 +98,9 @@ final class VoiceManager: ObservableObject {
         let token: String
         let identity: String
         let pushCredentialConfigured: Bool?
-        let identities: [Identity]?
+        let incomingToken: String?
 
-        struct Identity: Decodable {
-            let token: String
-            let identity: String
-        }
-
-        var incomingTokens: [String] {
-            let tokens = identities?.map(\.token) ?? []
-            return tokens.isEmpty ? [token] : tokens
-        }
+        var incomingRegistrationToken: String { incomingToken ?? token }
     }
 
     /// Fetch a Twilio access token for iOS (includes the Push Credential grant used for
@@ -164,7 +156,7 @@ final class VoiceManager: ObservableObject {
         #if canImport(TwilioVoice) && canImport(PushKit) && canImport(CallKit)
         IncomingCallCoordinator.shared.start { [weak self] in
             guard let self else { return nil }
-            return try? await self.fetchTokenResponse().incomingTokens
+            return try? await self.fetchTokenResponse().incomingRegistrationToken
         }
         #endif
     }

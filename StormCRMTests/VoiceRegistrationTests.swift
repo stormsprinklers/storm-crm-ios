@@ -3,15 +3,13 @@ import XCTest
 
 @MainActor
 final class VoiceRegistrationTests: XCTestCase {
-    func testRegistersEveryLinkedCompanyRatherThanOnlySelectedCompany() throws {
-        let response = try JSONDecoder().decode(VoiceManager.TokenResponse.self, from: Data(#"{"token":"selected","identity":"storm_user","identities":[{"token":"storm-token","identity":"storm_user"},{"token":"chestnut-token","identity":"chestnut_user"}]}"#.utf8))
-        XCTAssertEqual(response.incomingTokens, ["storm-token", "chestnut-token"])
+    func testIncomingUsesDedicatedMobileIdentityWithoutChangingOutboundIdentity() throws {
+        let response = try JSONDecoder().decode(VoiceManager.TokenResponse.self, from: Data(#"{"token":"outbound","identity":"company_user","incomingToken":"mobile-token"}"#.utf8))
+        XCTAssertEqual(response.incomingRegistrationToken, "mobile-token")
+        XCTAssertEqual(response.token, "outbound")
     }
-
-    func testLegacyAndEmptyIdentityResponsesStillRegisterPrimaryAccount() throws {
-        for payload in [#"{"token":"primary","identity":"company_user"}"#, #"{"token":"primary","identity":"company_user","identities":[]}"#] {
-            let response = try JSONDecoder().decode(VoiceManager.TokenResponse.self, from: Data(payload.utf8))
-            XCTAssertEqual(response.incomingTokens, ["primary"])
-        }
+    func testLegacyServerResponseStillRegistersPrimaryAccount() throws {
+        let response = try JSONDecoder().decode(VoiceManager.TokenResponse.self, from: Data(#"{"token":"primary","identity":"company_user"}"#.utf8))
+        XCTAssertEqual(response.incomingRegistrationToken, "primary")
     }
 }
