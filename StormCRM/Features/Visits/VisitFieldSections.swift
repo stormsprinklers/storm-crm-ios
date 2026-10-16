@@ -120,6 +120,12 @@ struct VisitNotesSection: View {
     let notes: [VisitNoteDTO]
     @Binding var newNote: String
     let onAdd: () async -> Void
+    let onUpdate: (String, String) async throws -> Void
+    let onDelete: (String) async throws -> Void
+
+    @State private var editingNote: VisitNoteDTO?
+    @State private var deletingNote: VisitNoteDTO?
+    @State private var actionError: String?
 
     var body: some View {
         StormCard {
@@ -156,6 +162,24 @@ struct VisitNotesSection: View {
                                     Text(APIDateFormatting.displayString(from: note.createdAt))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                    Spacer()
+                                    if !note.id.hasPrefix("offline-") {
+                                        Menu {
+                                            Button {
+                                                editingNote = note
+                                            } label: {
+                                                Label("Edit", systemImage: "pencil")
+                                            }
+                                            Button(role: .destructive) {
+                                                deletingNote = note
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                        } label: {
+                                            Image(systemName: "ellipsis")
+                                                .frame(width: 28, height: 28)
+                                        }
+                                    }
                                 }
                                 Text(note.body)
                                     .font(.subheadline)
@@ -177,6 +201,83 @@ struct VisitNotesSection: View {
                     Button("Add") { Task { await onAdd() } }
                         .buttonStyle(StormSecondaryButtonStyle())
                         .disabled(newNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                if let actionError {
+                    Text(actionError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+        .sheet(item: $editingNote) { note in
+            VisitNoteEditSheet(note: note) { body in
+                do {
+                    try await onUpdate(note.id, body)
+                    editingNote = nil
+                } catch {
+                    actionError = (error as? APIError)?.message ?? error.localizedDescription
+                }
+            }
+        }
+        .confirmationDialog(
+            "Delete this note?",
+            isPresented: Binding(
+                get: { deletingNote != nil },
+                set: { if !$0 { deletingNote = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete note", role: .destructive) {
+                guard let note = deletingNote else { return }
+                deletingNote = nil
+                Task {
+                    do {
+                        try await onDelete(note.id)
+                    } catch {
+                        actionError = (error as? APIError)?.message ?? error.localizedDescription
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) { deletingNote = nil }
+        }
+    }
+}
+
+private struct VisitNoteEditSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let note: VisitNoteDTO
+    let onSave: (String) async -> Void
+
+    @State private var noteBody: String
+    @State private var saving = false
+
+    init(note: VisitNoteDTO, onSave: @escaping (String) async -> Void) {
+        self.note = note
+        self.onSave = onSave
+        _noteBody = State(initialValue: note.body)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextEditor(text: $noteBody)
+                    .frame(minHeight: 140)
+            }
+            .navigationTitle("Edit note")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(saving ? "Saving…" : "Save") {
+                        saving = true
+                        Task {
+                            await onSave(noteBody.trimmingCharacters(in: .whitespacesAndNewlines))
+                            saving = false
+                        }
+                    }
+                    .disabled(saving || noteBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
         }

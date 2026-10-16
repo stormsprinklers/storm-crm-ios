@@ -37,6 +37,25 @@ final class CustomerDetailViewModel: ObservableObject {
         notes.insert(note, at: 0)
     }
 
+    func updateNote(api: APIClient, customerId: String, noteId: String, body: String) async throws {
+        struct Body: Encodable { let noteId: String; let body: String }
+        let note: CustomerNoteDTO = try await api.patch(
+            path: APIPath.customerNotes(customerId),
+            body: Body(noteId: noteId, body: body)
+        )
+        if let index = notes.firstIndex(where: { $0.id == noteId }) {
+            notes[index] = note
+        }
+    }
+
+    func deleteNote(api: APIClient, customerId: String, noteId: String) async throws {
+        try await api.delete(
+            path: APIPath.customerNotes(customerId),
+            query: [URLQueryItem(name: "noteId", value: noteId)]
+        )
+        notes.removeAll { $0.id == noteId }
+    }
+
     func saveCustomer(api: APIClient, customerId: String, update: CustomerUpdateBody) async throws -> CustomerDTO {
         let updated: CustomerDTO = try await api.patch(
             path: APIPath.customer(customerId),
@@ -164,7 +183,22 @@ struct CustomerDetailView: View {
                         notes: viewModel.notes,
                         noteDraft: $noteDraft,
                         isAddingNote: isAddingNote,
-                        onAdd: { Task { await submitNote() } }
+                        onAdd: { Task { await submitNote() } },
+                        onUpdate: { noteId, body in
+                            try await viewModel.updateNote(
+                                api: env.apiClient,
+                                customerId: customerId,
+                                noteId: noteId,
+                                body: body
+                            )
+                        },
+                        onDelete: { noteId in
+                            try await viewModel.deleteNote(
+                                api: env.apiClient,
+                                customerId: customerId,
+                                noteId: noteId
+                            )
+                        }
                     )
 
                     CustomerAttachmentsSection(customerId: customerId)
@@ -603,6 +637,12 @@ struct CustomerNotesSection: View {
     @Binding var noteDraft: String
     let isAddingNote: Bool
     let onAdd: () -> Void
+    let onUpdate: (String, String) async throws -> Void
+    let onDelete: (String) async throws -> Void
+
+    @State private var editingNote: CustomerNoteDTO?
+    @State private var deletingNote: CustomerNoteDTO?
+    @State private var actionError: String?
 
     var body: some View {
         StormCard {
@@ -634,6 +674,21 @@ struct CustomerNotesSection: View {
                                 Text(APIDateFormatting.displayString(from: note.createdAt))
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
+                                Menu {
+                                    Button {
+                                        editingNote = note
+                                    } label: {
+                                        Label("Edit", systemImage: "pencil")
+                                    }
+                                    Button(role: .destructive) {
+                                        deletingNote = note
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis")
+                                        .frame(width: 28, height: 28)
+                                }
                             }
                             Text(note.body)
                                 .font(.subheadline)
@@ -644,9 +699,87 @@ struct CustomerNotesSection: View {
                         }
                     }
                 }
+                if let actionError {
+                    Text(actionError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+        .sheet(item: $editingNote) { note in
+            CustomerNoteEditSheet(note: note) { body in
+                do {
+                    try await onUpdate(note.id, body)
+                    editingNote = nil
+                } catch {
+                    actionError = (error as? APIError)?.message ?? error.localizedDescription
+                }
+            }
+        }
+        .confirmationDialog(
+            "Delete this note?",
+            isPresented: Binding(
+                get: { deletingNote != nil },
+                set: { if !$0 { deletingNote = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete note", role: .destructive) {
+                guard let note = deletingNote else { return }
+                deletingNote = nil
+                Task {
+                    do {
+                        try await onDelete(note.id)
+                    } catch {
+                        actionError = (error as? APIError)?.message ?? error.localizedDescription
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) { deletingNote = nil }
+        }
+    }
+}
+
+private struct CustomerNoteEditSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let note: CustomerNoteDTO
+    let onSave: (String) async -> Void
+
+    @State private var noteBody: String
+    @State private var saving = false
+
+    init(note: CustomerNoteDTO, onSave: @escaping (String) async -> Void) {
+        self.note = note
+        self.onSave = onSave
+        _noteBody = State(initialValue: note.body)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextEditor(text: $noteBody)
+                    .frame(minHeight: 140)
+            }
+            .navigationTitle("Edit note")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(saving ? "Saving…" : "Save") {
+                        saving = true
+                        Task {
+                            await onSave(noteBody.trimmingCharacters(in: .whitespacesAndNewlines))
+                            saving = false
+                        }
+                    }
+                    .disabled(saving || noteBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
         }
     }
+
 }
 
 struct CustomerEditView: View {

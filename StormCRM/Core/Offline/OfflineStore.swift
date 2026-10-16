@@ -18,7 +18,12 @@ enum OfflineStore {
             url: storeURL,
             cloudKitDatabase: .none
         )
-        return try ModelContainer(for: schema, configurations: [config])
+        let container = try ModelContainer(for: schema, configurations: [config])
+        try? FileManager.default.setAttributes(
+            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+            ofItemAtPath: storeURL.path
+        )
+        return container
     }
 
     /// SwiftData/Core Data will log a long sandbox diagnostic dump if Application Support
@@ -34,6 +39,10 @@ enum OfflineStore {
         if !fileManager.fileExists(atPath: root.path) {
             try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
         }
+        try fileManager.setAttributes(
+            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+            ofItemAtPath: root.path
+        )
         return root
     }
 

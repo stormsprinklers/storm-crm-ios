@@ -44,3 +44,13 @@ targets:
         - variable: API_BASE_URL
           value: https://crm.stormsprinklers.com
           isEnabled: true
+  StormCRMTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: StormCRMTests
+    dependencies:
+      - target: StormCRM
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.stormsprinklers.stormcrm.tests

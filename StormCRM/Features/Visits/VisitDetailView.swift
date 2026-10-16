@@ -164,6 +164,36 @@ final class VisitDetailViewModel: ObservableObject {
         }
     }
 
+    func updateNote(
+        api: APIClient,
+        visitId: String,
+        noteId: String,
+        body: String,
+        offlineSync: OfflineSyncManager?
+    ) async throws {
+        struct Body: Encodable { let noteId: String; let body: String }
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let _: VisitNoteDTO = try await api.patch(
+            path: APIPath.visitNotes(visitId),
+            body: Body(noteId: noteId, body: trimmed)
+        )
+        await load(api: api, visitId: visitId, offlineSync: offlineSync)
+    }
+
+    func deleteNote(
+        api: APIClient,
+        visitId: String,
+        noteId: String,
+        offlineSync: OfflineSyncManager?
+    ) async throws {
+        try await api.delete(
+            path: APIPath.visitNotes(visitId),
+            query: [URLQueryItem(name: "noteId", value: noteId)]
+        )
+        await load(api: api, visitId: visitId, offlineSync: offlineSync)
+    }
+
     func saveChecklistItem(
         api: APIClient,
         visitId: String,

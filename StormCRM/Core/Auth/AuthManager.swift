@@ -17,9 +17,14 @@ final class AuthManager: ObservableObject {
     init(tokenStore: TokenStore, apiClient: APIClient) {
         self.tokenStore = tokenStore
         self.apiClient = apiClient
-        if let data = UserDefaults.standard.data(forKey: Self.userStorageKey),
+        if let data = tokenStore.userData,
            let saved = try? JSONDecoder().decode(UserDTO.self, from: data) {
             user = saved
+        } else if let legacy = UserDefaults.standard.data(forKey: Self.userStorageKey),
+                  let saved = try? JSONDecoder().decode(UserDTO.self, from: legacy) {
+            user = saved
+            tokenStore.userData = legacy
+            UserDefaults.standard.removeObject(forKey: Self.userStorageKey)
         }
         if tokenStore.tokens != nil {
             isAuthenticated = true
@@ -30,10 +35,11 @@ final class AuthManager: ObservableObject {
 
     private func persistUser(_ user: UserDTO?) {
         if let user, let data = try? JSONEncoder().encode(user) {
-            UserDefaults.standard.set(data, forKey: Self.userStorageKey)
+            tokenStore.userData = data
         } else {
-            UserDefaults.standard.removeObject(forKey: Self.userStorageKey)
+            tokenStore.userData = nil
         }
+        UserDefaults.standard.removeObject(forKey: Self.userStorageKey)
     }
 
     func login(email: String, password: String, companyId: String? = nil) async {
