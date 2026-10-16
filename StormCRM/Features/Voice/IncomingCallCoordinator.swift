@@ -24,9 +24,9 @@ final class IncomingCallCoordinator: NSObject, @unchecked Sendable {
     private let audioDevice = DefaultAudioDevice()
 
     private var voipDeviceToken: Data?
-    private var accessTokenProvider: (() async -> String?)?
+    private var accessTokenProvider: (() async -> [String]?)?
     private var isConfigured = false
-    private var registeredAccessToken: String?
+    private var registeredAccessTokens: [String] = []
     private var registrationGeneration = 0
     private var registrationTask: Task<Void, Never>?
 
@@ -79,7 +79,7 @@ final class IncomingCallCoordinator: NSObject, @unchecked Sendable {
 
     /// Provide the Twilio access-token source and register this device for incoming calls.
     /// `accessTokenProvider` returns a fresh token (issued with a Push Credential grant).
-    func start(accessTokenProvider: @escaping () async -> String?) {
+    func start(accessTokenProvider: @escaping () async -> [String]?) {
         configure()
         self.accessTokenProvider = accessTokenProvider
         refreshRegistration()
@@ -95,11 +95,13 @@ final class IncomingCallCoordinator: NSObject, @unchecked Sendable {
         registrationTask = nil
         // Unregister while the old account is still selected, using a fresh token
         // if the original registration token has already expired.
-        let unregisterToken = await previousTokenProvider?() ?? registeredAccessToken
-        if let token = unregisterToken, let deviceToken = voipDeviceToken {
-            await unregisterFromTwilio(token: token, deviceToken: deviceToken)
+        let tokens = await previousTokenProvider?() ?? registeredAccessTokens
+        if let deviceToken = voipDeviceToken {
+            for token in tokens {
+                await unregisterFromTwilio(token: token, deviceToken: deviceToken)
+            }
         }
-        registeredAccessToken = nil
+        registeredAccessTokens = []
     }
 
     /// Refresh the Twilio registration with a new access token (call after token refresh).
@@ -120,29 +122,34 @@ final class IncomingCallCoordinator: NSObject, @unchecked Sendable {
             await notifyVoIPRegistration(succeeded: false, message: "Waiting for VoIP push token from iOS")
             return
         }
-        guard let token = await accessTokenProvider?() else {
+        guard let tokens = await accessTokenProvider?(), !tokens.isEmpty else {
             await notifyVoIPRegistration(succeeded: false, message: "Voice token unavailable for registration")
             return
         }
         guard generation == registrationGeneration else { return }
 
-        do {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                TwilioVoiceSDK.register(accessToken: token, deviceToken: voipDeviceToken) { error in
-                    if let error {
-                        continuation.resume(throwing: error)
-                    } else {
-                        continuation.resume()
+        var failures: [String] = []
+        for token in tokens {
+            guard generation == registrationGeneration else { return }
+            do {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    TwilioVoiceSDK.register(accessToken: token, deviceToken: voipDeviceToken) { error in
+                        if let error { continuation.resume(throwing: error) }
+                        else { continuation.resume() }
                     }
                 }
+                // Retain every successful registration, even if a switch starts while awaiting it.
+                registeredAccessTokens.append(token)
+            } catch {
+                failures.append(error.localizedDescription)
             }
-            registeredAccessToken = token
-            guard generation == registrationGeneration else { return }
+        }
+        guard generation == registrationGeneration else { return }
+        if failures.isEmpty {
+            registeredAccessTokens = tokens
             await notifyVoIPRegistration(succeeded: true, message: nil)
-        } catch {
-            guard generation == registrationGeneration else { return }
-            print("Twilio VoIP register failed:", error.localizedDescription)
-            await notifyVoIPRegistration(succeeded: false, message: error.localizedDescription)
+        } else {
+            await notifyVoIPRegistration(succeeded: false, message: failures.joined(separator: "; "))
         }
     }
 
@@ -271,10 +278,16 @@ extension IncomingCallCoordinator: PKPushRegistryDelegate {
 
     func pushRegistry(_ registry: PKPushRegistry, didInvalidatePushTokenFor type: PKPushType) {
         guard type == .voIP else { return }
-        if let token = registeredAccessToken, let deviceToken = voipDeviceToken {
-            Task { await self.unregisterFromTwilio(token: token, deviceToken: deviceToken) }
+        registrationGeneration += 1
+        let previousRegistration = registrationTask
+        if let deviceToken = voipDeviceToken {
+            registrationTask = Task {
+                await previousRegistration?.value
+                let tokens = self.registeredAccessTokens
+                self.registeredAccessTokens = []
+                for token in tokens { await self.unregisterFromTwilio(token: token, deviceToken: deviceToken) }
+            }
         }
-        registeredAccessToken = nil
         voipDeviceToken = nil
     }
 
