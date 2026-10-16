@@ -23,11 +23,32 @@ struct HolidayVisitPlanSection: View {
         guard let value = metadata?["strandMap"], let data = try? JSONEncoder().encode(value) else { return nil }
         return try? JSONDecoder().decode(HolidayPlan.self, from: data)
     }
+    private var notes: String {
+        guard let value = metadata?["notes"],
+              let data = try? JSONEncoder().encode(value),
+              let text = try? JSONDecoder().decode(String.self, from: data) else { return "" }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
     var body: some View {
         if let plan, !plan.features.isEmpty {
             StormCard {
                 VStack(alignment: .leading, spacing: 12) {
                     StormSectionHeader(title: "Holiday lighting plan", systemImage: "lightbulb.2")
+                    LabeledContent("Total strand length including margin", value: String(format: "%.1f ft", plan.features.reduce(0) { $0 + $1.lengthFtWithMargin }))
+                        .font(.subheadline.bold())
+                    ForEach(Array(Set(plan.features.map(\.lightStyleLabel))).sorted(), id: \.self) { bulbType in
+                        let feet = plan.features.filter { $0.lightStyleLabel == bulbType }.reduce(0) { $0 + $1.lengthFtWithMargin }
+                        if feet > 0 {
+                            LabeledContent("Bulb type: " + bulbType, value: String(format: "%.1f ft", feet))
+                                .font(.subheadline)
+                        } else {
+                            Text("Bulb type: " + bulbType).font(.subheadline)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Notes").font(.subheadline.bold())
+                        Text(notes.isEmpty ? "No quote notes" : notes).font(.subheadline)
+                    }
                     Map {
                         ForEach(plan.features) { feature in
                             ForEach(Array(feature.paths.enumerated()), id: \.offset) { _, path in
