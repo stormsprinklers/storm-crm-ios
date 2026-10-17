@@ -186,12 +186,23 @@ struct EstimateDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         header(for: estimate)
-                        HStack(spacing: 24) {
-                            ForEach(actionItems(for: estimate).filter { ["approve", "send", "present"].contains($0.id) }) { item in
-                                Button(action: item.action) { Image(systemName: item.systemImage) }.accessibilityLabel(item.accessibilityLabel)
+                        HStack(spacing: 6) {
+                            ForEach(actionItems(for: estimate).filter { ["present", "send", "approve"].contains($0.id) }) { item in
+                                Button(action: item.action) {
+                                    VStack(spacing: 4) {
+                                        Image(systemName: item.systemImage)
+                                        Text(item.title).font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.75)
+                                    }.frame(maxWidth: .infinity).padding(.vertical, 10)
+                                }.accessibilityLabel(item.accessibilityLabel)
                             }
-                            Button { showPayment = true } label: { Image(systemName: "creditcard") }.accessibilityLabel("Collect payment")
-                        }.font(.title3).buttonStyle(.borderless)
+                            Button { showPayment = true } label: {
+                                VStack(spacing: 4) {
+                                    Image(systemName: "creditcard")
+                                    Text("Pay").font(.caption.weight(.semibold))
+                                }.frame(maxWidth: .infinity).padding(.vertical, 10)
+                            }.accessibilityLabel("Collect payment")
+                        }.font(.body).buttonStyle(.bordered).tint(StormTheme.sky)
+
 
                         optionTabs(for: estimate)
 
@@ -604,35 +615,9 @@ struct EstimateDetailView: View {
                     .foregroundStyle(.secondary)
             }
         } else {
-            StormCard {
-                VStack(alignment: .leading, spacing: 10) {
-                    StormSectionHeader(title: "Actions", systemImage: "bolt")
-
-                    let items = actionItems(for: estimate)
-                    let primary: [EstimateActionItem] = []
-                    let secondary = items.filter { !["present", "send", "approve"].contains($0.id) }
-
-                    if !primary.isEmpty {
-                        actionChipRow(
-                            primary,
-                            sentCaption: estimate.hasBeenSent ? sentCaption(for: estimate) : nil
-                        )
-                    }
-
-                    if !secondary.isEmpty {
-                        actionChipRow(secondary)
-                    }
-
-                    if !estimate.isApproved, estimate.lineItems.isEmpty {
-                        Text("Add line items first, then collect the customer signature.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else if let signedAt = estimate.signedAt {
-                        Text("Signed \(APIDateFormatting.displayString(from: signedAt))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+            let secondary = actionItems(for: estimate).filter { !["present", "send", "approve"].contains($0.id) }
+            if !secondary.isEmpty {
+                actionChipRow(secondary)
             }
         }
     }

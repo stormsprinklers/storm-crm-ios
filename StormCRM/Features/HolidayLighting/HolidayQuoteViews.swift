@@ -139,14 +139,7 @@ struct HolidayQuoteEditor: View {
         Binding(get: { model[keyPath: path] }, set: { model[keyPath: path] = $0; model.center = nil; model.dirty = true })
     }
     private func stepHeader(_ title: String, id: String) -> some View {
-        Button {
-            model.edit(invalidatePreview: false) { option in
-                if option.selections.completedSteps.contains(id) { option.selections.completedSteps.removeAll { $0 == id } }
-                else { option.selections.completedSteps.append(id) }
-            }
-        } label: {
-            Label(title, systemImage: model.active.selections.completedSteps.contains(id) ? "checkmark.square.fill" : "square")
-        }.buttonStyle(.plain).textCase(nil).accessibilityLabel("\(title), \(model.active.selections.completedSteps.contains(id) ? "complete" : "incomplete")")
+        Text(title).textCase(nil)
     }
     private var optionTabs: some View {
         Section {

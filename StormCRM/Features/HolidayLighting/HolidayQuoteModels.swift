@@ -129,6 +129,8 @@ struct HLDesign: HLRecord, Identifiable {
     var measurements: HLMeasurements { get { value("measurements", fallback: HLMeasurements()) } set { put("measurements", newValue) } }
     var selections: HLSelections { get { value("selections", fallback: HLSelections()) } set { put("selections", newValue) } }
     var previewURL: String? { get { value("previewImageUrl", fallback: Optional<String>.none) } set { put("previewImageUrl", newValue) } }
+    var previewBackgroundURL: String? { get { value("previewBackgroundUrl", fallback: Optional<String>.none) } set { put("previewBackgroundUrl", newValue) } }
+    var previewLightsURL: String? { get { value("previewLightsUrl", fallback: Optional<String>.none) } set { put("previewLightsUrl", newValue) } }
     var markup: [HLMarkupStroke] { get { value("photoMarkup", fallback: []) } set { put("photoMarkup", newValue) } }
     init(fields: [String: JSONValue]) { self.fields = fields }
     init(label: String = "Option 1", measurements: HLMeasurements = .init(), selections: HLSelections = .init()) {

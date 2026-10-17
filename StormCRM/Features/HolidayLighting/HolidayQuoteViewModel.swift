@@ -60,7 +60,7 @@ final class HolidayQuoteViewModel: ObservableObject {
     func edit(invalidatePreview: Bool = true, _ update: (inout HLDesign) -> Void) {
         var next = active
         update(&next)
-        if invalidatePreview { next.previewURL = nil }
+        if invalidatePreview { next.previewURL = nil; next.previewBackgroundURL = nil; next.previewLightsURL = nil }
         options[activeIndex] = next
         dirty = true; notice = nil
     }
@@ -75,7 +75,7 @@ final class HolidayQuoteViewModel: ObservableObject {
         guard options.count < 5 else { return }
         var option = copy ? active : HLDesign(selections: active.selections)
         option.id = UUID().uuidString; option.label = "Option \(options.count + 1)"
-        if !copy { option.previewURL = nil; option.selections.completedSteps = []; option.selections.adjustments = [:]; option.selections.services = []; option.selections.notes = "" }
+        if !copy { option.previewURL = nil; option.previewBackgroundURL = nil; option.previewLightsURL = nil; option.selections.completedSteps = []; option.selections.adjustments = [:]; option.selections.services = []; option.selections.notes = "" }
         options.append(option); activeID = option.id; dirty = true; pricing = nil
     }
     func deleteOption() {
@@ -312,7 +312,7 @@ final class HolidayQuoteViewModel: ObservableObject {
             let marked = try HLPhotoRenderer.jpeg(photo, strokes: active.markup)
             let mask = try HLPhotoRenderer.mask(photo, strokes: active.markup)
             guard clean.count + marked.count + mask.count < 4 * 1024 * 1024 else { throw APIError.badRequest("Photo is too large. Select a smaller image.") }
-            struct Preview: Decodable { let previewImageUrl: String }
+            struct Preview: Decodable { let previewImageUrl: String; let previewBackgroundUrl: String?; let previewLightsUrl: String? }
             previewProgress = 0.4; previewStage = "Generating lighting preview"
             let preview: Preview = try await api.uploadImages(path: path + "/visualize", fields: ["optionId": optionID, "persistOptionPreview": "true"], images: [("clean", clean), ("marked", marked), ("editMask", mask)], timeout: 290)
             previewProgress = 0.85; previewStage = "Saving preview"
@@ -322,6 +322,8 @@ final class HolidayQuoteViewModel: ObservableObject {
                (try? snapshotEncoder.encode(options[index])) == snapshot {
                 let hadLocalEdits = dirty
                 options[index].previewURL = preview.previewImageUrl
+                options[index].previewBackgroundURL = preview.previewBackgroundUrl
+                options[index].previewLightsURL = preview.previewLightsUrl
                 if !hadLocalEdits { dirty = false }
             }
             previewProgress = 1; previewStage = "Preview ready"; previewComplete = true

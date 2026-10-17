@@ -61,6 +61,7 @@ struct HLPhotoEditor: View {
     @State private var brushWidth = 0.012
     @State private var streetView = false
     @State private var showClear = false
+    @State private var erasePreview = false
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -86,6 +87,9 @@ struct HLPhotoEditor: View {
                 if let preview = model.active.previewURL {
                     Text("\(model.active.label) preview").font(.headline)
                     AuthenticatedBlobImage(urlString: preview).frame(height: 300)
+                    if model.active.previewBackgroundURL != nil && model.active.previewLightsURL != nil {
+                        Button { erasePreview = true } label: { Label("Erase lights", systemImage: "eraser") }.disabled(model.generating)
+                    }
                 }
                 if model.generating { ProgressView("Generating and saving this option’s preview…").padding(.vertical) }
             }.padding()
@@ -95,6 +99,7 @@ struct HLPhotoEditor: View {
         .navigationTitle("Photo and preview")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top) { HLPreviewProgress(model: model) }
+        .sheet(isPresented: $erasePreview) { HLPreviewEraser(model: model, option: model.active) }
         .sheet(isPresented: $streetView) { HLStreetViewCapture(model: model) }
         .sheet(isPresented: $camera) { CameraImagePicker { image in Task { await model.uploadPhoto(image, api: env.apiClient) } }.ignoresSafeArea() }
         .onChange(of: selectedPhoto) { _, item in
