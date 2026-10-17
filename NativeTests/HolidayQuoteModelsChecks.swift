@@ -31,6 +31,7 @@ import Foundation
         var first = HLDesign(label: "Buy", measurements: measurements)
         first.markup = [HLMarkupStroke(points: [HLMarkupPoint(x: 0.25, y: 0.75)])]
         first.previewURL = "https://example.com/option-a.jpg"
+        first.previewPrompt = "Warm white roofline; leave trees unlit."
         first.selections.notes = "Keep existing clips"
         first.selections.completedSteps = ["design", "notes"]
         first.selections.adjustments["buy"] = HLAdjustment(lineItems: [HLQuoteLine(id: "labor", name: "Install", description: "Front roof", unitPrice: 45.5, kind: "labor")], partsPrice: 75.25, laborPrice: 42.5)
@@ -52,6 +53,7 @@ import Foundation
         var changed = options; changed[0].label = "Changed"
         precondition(snapshot.encoded() != HLQuoteDraftSnapshot(customerID: "customer", propertyID: "property", address: ["100 Main"], center: nil, options: changed).encoded())
         precondition(options[0].previewURL == "https://example.com/option-a.jpg")
+        precondition(options[0].previewPrompt == "Warm white roofline; leave trees unlit.")
         precondition(options[1].measurements.strands[0].segmentIDs == ["run-a"])
         var service = HLService(); service.name = "Wreath"; service.quantity = 2; service.unitPrice = 40
         var selections = HLSelections(); selections.services = [service]; selections.reinstallPrice = nil
