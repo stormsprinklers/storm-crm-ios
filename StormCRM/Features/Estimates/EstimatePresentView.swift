@@ -16,6 +16,8 @@ struct EstimatePresentView: View {
     @State private var renameOptionId: String?
     @State private var renameDraft = ""
     @State private var showResendConfirm = false
+    @State private var scheduleSend = false
+    @State private var tool: String?
 
     private let canvasGray = Color(uiColor: .systemGray6)
 
@@ -71,12 +73,17 @@ struct EstimatePresentView: View {
             .toolbarBackground(.visible, for: .bottomBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Save and exit") { dismiss() }
+                    Button { dismiss() } label: { Image(systemName: "chevron.left") }.accessibilityLabel("Back")
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save and send") {
-                        showResendConfirm = true
-                    }
+                    Button { showResendConfirm = true } label: { Image(systemName: "paperplane.fill") }.accessibilityLabel("Send estimate")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("View PDF", systemImage: "doc.richtext") { tool = "pdf" }
+                        Button("Schedule send", systemImage: "clock") { scheduleSend = true }
+                        Button("Edit presentation", systemImage: "pencil") { tool = "edit" }
+                    } label: { Image(systemName: "ellipsis") }.accessibilityLabel("More")
                 }
                 if let url = estimate?.financingUrl, !url.isEmpty {
                     ToolbarItem(placement: .bottomBar) {
@@ -95,6 +102,17 @@ struct EstimatePresentView: View {
                         .environmentObject(env)
                 }
             }
+            .sheet(isPresented: $scheduleSend) {
+                EstimateSendComposer(estimateId: estimateId, scheduled: true) { await onUpdated() }
+            }
+            .sheet(isPresented: Binding(get: {tool != nil}, set:{if !$0 {tool=nil}})) {
+                NavigationStack {
+                    Group {
+                        if tool == "pdf" { EstimatePDFView(estimateId: estimateId, optionCount: ranked.count) }
+                        else { EstimatePresentationEditor(estimateId: estimateId, options: ranked) { await reload(); await onUpdated() } }
+                    }.toolbar { ToolbarItem(placement:.cancellationAction) { Button("Done") {tool=nil} } }
+                }
+            }
             .task { await prepare() }
             .alert("Rename option", isPresented: Binding(
                 get: { renameOptionId != nil },
@@ -108,11 +126,8 @@ struct EstimatePresentView: View {
                     renameOptionId = nil
                 }
             }
-            .alert(estimate?.hasBeenSent == true ? "Send this estimate again?" : "Send this estimate to the customer?", isPresented: $showResendConfirm) {
-                Button(estimate?.hasBeenSent == true ? "Send again" : "Send to customer") {
-                    Task { await sendAndClose() }
-                }
-                Button("Cancel", role: .cancel) {}
+            .sheet(isPresented: $showResendConfirm) {
+                EstimateSendComposer(estimateId: estimateId) { await reload(); await onUpdated() }
             }
         }
     }
@@ -127,18 +142,7 @@ struct EstimatePresentView: View {
                     .font(.title3.weight(.bold))
                     .lineLimit(2)
                 Spacer(minLength: 0)
-                Button {
-                    renameDraft = option.label
-                    renameOptionId = option.id
-                } label: {
-                    Image(systemName: "pencil")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(StormTheme.sky)
-                        .padding(8)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Rename option")
+
             }
             .padding()
             presentPhoto(url: option.photoUrl, height: 160)
@@ -247,6 +251,10 @@ struct EstimatePresentView: View {
         }
     }
 
+    private func reload() async {
+        do { estimate = try await env.apiClient.get(path: APIPath.estimate(estimateId)) }
+        catch { self.error = (error as? APIError)?.message ?? error.localizedDescription }
+    }
     private func prepare() async {
         isLoading = true
         error = nil
@@ -286,16 +294,6 @@ struct EstimatePresentView: View {
             )
             openOptionId = nil
             await onUpdated()
-        } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
-        }
-    }
-
-    private func sendAndClose() async {
-        do {
-            estimate = try await env.apiClient.post(path: APIPath.estimateSend(estimateId))
-            await onUpdated()
-            dismiss()
         } catch {
             self.error = (error as? APIError)?.message ?? error.localizedDescription
         }

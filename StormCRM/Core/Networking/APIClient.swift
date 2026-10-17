@@ -235,7 +235,10 @@ final class APIClient {
             body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(key)\"\r\n\r\n\(value)\r\n".utf8))
         }
         for (key, bytes) in images {
-            body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(key)\"; filename=\"\(key).jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".utf8))
+            let isPNG = bytes.starts(with: [0x89, 0x50, 0x4e, 0x47])
+            let fileExtension = isPNG ? "png" : "jpg"
+            let contentType = isPNG ? "image/png" : "image/jpeg"
+            body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(key)\"; filename=\"\(key).\(fileExtension)\"\r\nContent-Type: \(contentType)\r\n\r\n".utf8))
             body.append(bytes); body.append(Data("\r\n".utf8))
         }
         body.append(Data("--\(boundary)--\r\n".utf8)); request.httpBody = body

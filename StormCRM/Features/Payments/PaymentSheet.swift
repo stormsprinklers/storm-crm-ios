@@ -262,7 +262,13 @@ struct PaymentSheet: View {
     @EnvironmentObject private var env: AppEnvironment
     @Environment(\.dismiss) private var dismiss
     let visitId: String
-    let amountDue: Double
+    private let maximumAmount: Double
+    @State private var requestedAmount: Double
+    private var amountDue: Double { requestedAmount }
+    init(visitId: String, amountDue: Double, onCompleted: @escaping () -> Void) {
+        self.visitId = visitId; self.maximumAmount = amountDue
+        self._requestedAmount = State(initialValue: amountDue); self.onCompleted = onCompleted
+    }
     var onCompleted: () -> Void
 
     @State private var selectedMethod: PaymentCollectMethod?
@@ -357,9 +363,9 @@ struct PaymentSheet: View {
 
     private var methodPicker: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(amountDue, format: .currency(code: "USD"))
-                .font(.title.weight(.bold))
-                .foregroundStyle(StormTheme.navy)
+            TextField("Payment amount", value: $requestedAmount, format: .currency(code: "USD"))
+                .keyboardType(.decimalPad).font(.title.weight(.bold))
+                .onChange(of: requestedAmount) { _, value in requestedAmount = min(maximumAmount, max(0, value)) }
 
             Text("How do you want to collect?")
                 .font(.subheadline)
@@ -532,6 +538,7 @@ struct PaymentSheet: View {
     }
 
     private func selectMethod(_ method: PaymentCollectMethod) {
+        guard requestedAmount > 0, requestedAmount <= maximumAmount else { error = "Enter a valid payment amount"; return }
         lastCardError = nil
         error = nil
         statusMessage = nil

@@ -605,13 +605,13 @@ private struct ScheduleTimelineBlock: View {
         HStack(alignment: .top, spacing: 8) {
             RoundedRectangle(cornerRadius: 2).fill(accent).frame(width: 3)
             VStack(alignment: .leading, spacing: 2) {
-                Text(job.title)
+                Text(appointmentTitle)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(StormTheme.navy)
                     .lineLimit(1)
                 if !compact {
-                    if let customer = job.customer {
-                        Text(customer.name).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    if job.title != job.customer?.name {
+                        Text(job.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                     HStack(spacing: 6) {
                         Text(timeRange).font(.caption2).foregroundStyle(.secondary)
@@ -630,6 +630,14 @@ private struct ScheduleTimelineBlock: View {
         .background(ScheduleColors.backgroundColor(for: job, mode: colorMode))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(accent.opacity(0.4), lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var appointmentTitle: String {
+        let name = job.customer?.name ?? job.title
+        let city = [job.city, job.property?.city, job.customer?.city]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+        return city.map { "\(name) · \($0)" } ?? name
     }
 
     private var timeRange: String {

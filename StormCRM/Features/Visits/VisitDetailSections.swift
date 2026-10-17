@@ -546,8 +546,6 @@ struct VisitCustomerInfoSection: View {
     var body: some View {
         StormCard {
             VStack(alignment: .leading, spacing: 12) {
-                StormSectionHeader(title: "Customer", systemImage: "person.crop.circle")
-
                 if let customer = visit.customer {
                     NavigationLink(value: CustomerListRoute.detail(id: customer.id)) {
                         HStack(spacing: 6) {
@@ -562,8 +560,8 @@ struct VisitCustomerInfoSection: View {
                     .buttonStyle(.plain)
                     .accessibilityHint("View customer profile")
 
-                    if let phone = customer.phone, !phone.isEmpty {
-                        HStack(spacing: 16) {
+                    HStack(spacing: 16) {
+                        if let phone = customer.phone, !phone.isEmpty {
                             Button {
                                 env.openCustomerSmsInbox(
                                     customerId: customer.id,
@@ -588,17 +586,20 @@ struct VisitCustomerInfoSection: View {
                             .foregroundStyle(StormTheme.sky)
                             .accessibilityLabel("Call customer")
 
-                            Text(phone)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
                         }
-                    }
-
-                    if let email = customer.email, !email.isEmpty {
-                        Link(destination: URL(string: "mailto:\(email)")!) {
-                            Label(email, systemImage: "envelope")
+                        if let address = AppleMapsURL.formattedAddress(for: visit),
+                           let url = AppleMapsURL.directionsURL(
+                            latitude: visit.property?.latitude,
+                            longitude: visit.property?.longitude,
+                            address: address
+                           ) {
+                            Link(destination: url) {
+                                Image(systemName: "mappin.and.ellipse")
+                                    .font(.title3)
+                            }
+                            .foregroundStyle(StormTheme.sky)
+                            .accessibilityLabel("Open address in Maps")
                         }
-                        .font(.subheadline)
                     }
                 }
 
@@ -606,15 +607,6 @@ struct VisitCustomerInfoSection: View {
                     Text(address)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    if let url = AppleMapsURL.directionsURL(
-                        latitude: visit.property?.latitude,
-                        longitude: visit.property?.longitude,
-                        address: address
-                    ) {
-                        Link("Open in Maps", destination: url)
-                            .font(.subheadline)
-                            .foregroundStyle(StormTheme.sky)
-                    }
                 }
 
                 if visit.customer != nil {

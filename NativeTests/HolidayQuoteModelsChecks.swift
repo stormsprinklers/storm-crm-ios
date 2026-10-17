@@ -68,6 +68,11 @@ import Foundation
             envelope.put("measurements", options[1].measurements); envelope.put("selections", root)
             try JSONEncoder().encode(envelope).write(to: URL(fileURLWithPath: path))
         }
+        // Select a run near its middle, endpoints, or a repeated point at any map scale.
+        precondition(HLMapHitTesting.distance(CGPoint(x: 50, y: 4), to: CGPoint(x: 0, y: 0), end: CGPoint(x: 100, y: 0)) == 4)
+        precondition(HLMapHitTesting.distance(CGPoint(x: -3, y: 4), to: CGPoint(x: 0, y: 0), end: CGPoint(x: 100, y: 0)) == 5)
+        precondition(HLMapHitTesting.distance(CGPoint(x: 103, y: 4), to: CGPoint(x: 0, y: 0), end: CGPoint(x: 100, y: 0)) == 5)
+        precondition(HLMapHitTesting.distance(CGPoint(x: 3, y: 4), to: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: 0)) == 5)
         print("PASS: legacy fields, CRM-compatible measurements, independent options, photo markup, strands, and pricing selections")
     }
 }

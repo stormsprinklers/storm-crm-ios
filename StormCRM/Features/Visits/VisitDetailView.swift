@@ -86,18 +86,21 @@ final class VisitDetailViewModel: ObservableObject {
         api: APIClient,
         visitId: String,
         type: String,
-        location: (lat: Double, lng: Double)?
+        location: (lat: Double, lng: Double)?,
+        notifyCustomer: Bool? = nil
     ) async {
         struct Body: Encodable {
             let type: String
             let originLat: Double?
             let originLng: Double?
+            let notifyCustomer: Bool?
         }
         do {
             let body = Body(
                 type: type,
                 originLat: location?.lat,
-                originLng: location?.lng
+                originLng: location?.lng,
+                notifyCustomer: notifyCustomer
             )
             visit = try await api.post(path: APIPath.visitTime(visitId), body: body)
             timeEvents = (try? await api.get(path: APIPath.visitTime(visitId))) ?? timeEvents
@@ -394,6 +397,7 @@ struct VisitDetailView: View {
     @StateObject private var viewModel = VisitDetailViewModel()
     @State private var activeSheet: VisitActiveSheet?
     @State private var showFinishBillingPrompt = false
+    @State private var finishNotificationChoice: ((Bool) -> Void)?
     @State private var finishValidationMessage: String?
     @State private var finishBillingAmount: Double = 0
     @State private var showDeleteConfirm = false
@@ -570,6 +574,7 @@ struct VisitDetailView: View {
             await viewModel.load(api: env.apiClient, visitId: visitId, offlineSync: env.offlineSync)
             syncLiveTracking()
         }
+        .modifier(FinishNotificationPrompt(choice: $finishNotificationChoice))
         .alert("Cannot finish visit", isPresented: Binding(get: { finishValidationMessage != nil }, set: { if !$0 { finishValidationMessage = nil } })) {
             Button("OK", role: .cancel) { finishValidationMessage = nil }
         } message: { Text(finishValidationMessage ?? "") }
@@ -861,7 +866,8 @@ struct VisitDetailView: View {
         _ type: String,
         visit: VisitDetailDTO,
         total: Double,
-        paymentSummary: VisitPaymentSummary
+        paymentSummary: VisitPaymentSummary,
+        notifyCustomer: Bool? = nil
     ) async {
         var location: (lat: Double, lng: Double)?
         if type == "EN_ROUTE" {
@@ -889,15 +895,23 @@ struct VisitDetailView: View {
             }
         }
 
+        if type == "FINISH", notifyCustomer == nil {
+            finishNotificationChoice = { notify in
+                Task { await handleTimeEvent(type, visit: visit, total: total, paymentSummary: paymentSummary, notifyCustomer: notify) }
+            }
+            return
+        }
+
         await viewModel.postTimeEvent(
             api: env.apiClient,
             visitId: visitId,
             type: type,
-            location: location
+            location: location,
+            notifyCustomer: notifyCustomer
         )
         syncLiveTracking()
         // Payment is optional — prompt only, never block completion.
-        if type == "FINISH",
+        if type == "FINISH", viewModel.visit?.status == "COMPLETED",
            !(visit.lineItems ?? []).isEmpty,
            paymentSummary.hasBalanceDue {
             finishBillingAmount = paymentSummary.balanceDue ?? total
@@ -929,5 +943,21 @@ struct VisitDetailView: View {
 
     private func formattedJobAddress(_ visit: VisitDetailDTO) -> String? {
         AppleMapsURL.formattedAddress(for: visit)
+    }
+}
+
+private struct FinishNotificationPrompt: ViewModifier {
+    @Binding var choice: ((Bool) -> Void)?
+    func body(content: Content) -> some View {
+        content.alert("Notify customer?", isPresented: Binding(get: { choice != nil }, set: { if !$0 { choice = nil } })) {
+            Button("Finish and notify") { respond(true) }
+            Button("Finish without notifying") { respond(false) }
+            Button("Cancel", role: .cancel) { choice = nil }
+        } message: { Text("Send the customer a notification that this job is finished?") }
+    }
+    private func respond(_ notify: Bool) {
+        let action = choice
+        choice = nil
+        action?(notify)
     }
 }

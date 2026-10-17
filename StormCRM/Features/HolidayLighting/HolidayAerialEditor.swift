@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import UIKit
 
 struct HolidayAerialEditor: View {
     @ObservedObject var model: HolidayQuoteViewModel
@@ -7,26 +8,35 @@ struct HolidayAerialEditor: View {
     @State private var distance = 80.0
     @State private var mapCenter: CLLocationCoordinate2D?
     @State private var camera: MapCameraPosition = .automatic
-    @State private var mode = "move"
+    @State private var mode = "draw"
+    @State private var placementKind = "tree"
+    @State private var selectedSegmentID: String?
+    @State private var selectedPlacementID: String?
     @State private var draft: [HLPoint] = []
     @State private var showingManualMeasurements = false
     private let colors: [Color] = [.orange, .cyan, .pink, .green, .purple, .yellow]
     var body: some View {
         VStack(spacing: 0) {
             Picker("Map tool", selection: $mode) {
-                Text("Move").tag("move"); Text("Strands").tag("draw"); Text("Tree").tag("tree"); Text("Bush").tag("bush")
+                Text("Strands").tag("draw"); Text("Trees / Bushes").tag("placement"); Text("Select").tag("select")
             }.pickerStyle(.segmented).padding()
+            if mode == "placement" {
+                Picker("Place", selection: $placementKind) {
+                    Text("Tree").tag("tree")
+                    Text("Bush").tag("bush")
+                }.pickerStyle(.segmented).padding(.horizontal).padding(.bottom, 8)
+            }
             MapReader { proxy in
                 Map(position: $camera, bounds: MapCameraBounds(minimumDistance: 1, maximumDistance: 100_000), interactionModes: [.pan, .zoom, .rotate]) {
                     ForEach(Array(model.active.measurements.segments.enumerated()), id: \.element.id) { index, segment in
-                        MapPolyline(coordinates: segment.path.map(\.coordinate)).stroke(colors[index % colors.count], lineWidth: 5)
+                        MapPolyline(coordinates: segment.path.map(\.coordinate)).stroke(colors[index % colors.count], lineWidth: selectedSegmentID == segment.id ? 9 : 5)
                         if let point = segment.path.first {
-                            Annotation(segment.label, coordinate: point.coordinate) { Text(segment.label).font(.caption2.bold()).padding(4).background(.regularMaterial, in: Capsule()) }
+                            Annotation(segment.label, coordinate: point.coordinate) { Text(segment.label).font(.caption2.bold()).padding(4).background(selectedSegmentID == segment.id ? Color.yellow.opacity(0.9) : Color.white.opacity(0.9), in: Capsule()) }
                         }
                     }
                     ForEach(model.active.measurements.placements) { placement in
                         Annotation(placement.label, coordinate: placement.point.coordinate) {
-                            VStack(spacing: 2) { Image(systemName: placement.kind == "tree" ? "tree.fill" : "leaf.fill").foregroundStyle(.green); Text(placement.label).font(.caption2) }.padding(4).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                            VStack(spacing: 2) { Image(systemName: placement.kind == "tree" ? "tree.fill" : "leaf.fill").foregroundStyle(.green); Text(placement.label).font(.caption2) }.padding(4).background(selectedPlacementID == placement.id ? Color.yellow.opacity(0.9) : Color.white.opacity(0.9), in: RoundedRectangle(cornerRadius: 6))
                         }
                     }
                     if !draft.isEmpty {
@@ -36,22 +46,28 @@ struct HolidayAerialEditor: View {
                         }
                     }
                 }
+                .background(HLTwoFingerMapPan())
                 .onMapCameraChange { context in distance = context.camera.distance; mapCenter = context.camera.centerCoordinate }
                 .overlay(alignment: .topTrailing) { VStack { Button { zoom(0.5) } label: { Image(systemName: "plus.magnifyingglass") }; Button { zoom(2) } label: { Image(systemName: "minus.magnifyingglass") } }.buttonStyle(.bordered).padding(8).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10)) }
                 .mapStyle(.imagery(elevation: .flat))
                 .mapControls { MapCompass(); MapScaleView() }
                 .onTapGesture { location in
-                    guard mode != "move", let coordinate = proxy.convert(location, from: .local) else { return }
-                    let point = HLPoint(coordinate)
-                    if mode == "draw" { draft.append(point) }
-                    else {
-                        model.edit { option in
-                            let count = option.measurements.placements.filter { $0.kind == mode }.count + 1
-                            option.measurements.placements.append(HLPlacement(kind: mode, point: point, color: option.selections.color, count: count))
-                        }
+                    guard let coordinate = proxy.convert(location, from: .local) else { return }
+                    if mode == "select" {
+                        selectItem(at: location, proxy: proxy)
+                    } else if mode == "draw" {
+                        selectedSegmentID = nil; selectedPlacementID = nil
+                        draft.append(HLPoint(coordinate))
+                    } else {
+                        let placement = HLPlacement(
+                            kind: placementKind, point: HLPoint(coordinate), color: model.active.selections.color,
+                            count: model.active.measurements.placements.filter { $0.kind == placementKind }.count + 1
+                        )
+                        model.edit { $0.measurements.placements.append(placement) }
+                        selectedSegmentID = nil; selectedPlacementID = placement.id
                     }
                 }
-            }
+            }.frame(height: 320)
             if mode == "draw" {
                 HStack {
                     Button("Undo point") { if !draft.isEmpty { draft.removeLast() } }.disabled(draft.isEmpty)
@@ -59,11 +75,14 @@ struct HolidayAerialEditor: View {
                     Text("\(HLPoint.lengthFeet(draft), specifier: "%.1f") ft").monospacedDigit()
                     Spacer()
                     Button("Finish run") {
-                        model.edit { option in option.measurements.segments.append(HLSegment(path: draft, style: option.selections.style, color: option.selections.color, count: option.measurements.segments.count + 1)) }
+                        let segment = HLSegment(path: draft, style: model.active.selections.style, color: model.active.selections.color, count: model.active.measurements.segments.count + 1)
+                        model.edit { $0.measurements.segments.append(segment) }
+                        selectedSegmentID = segment.id; selectedPlacementID = nil
                         draft = []
                     }.disabled(draft.count < 2)
                 }.font(.subheadline).padding().background(.regularMaterial)
             }
+            selectionControls
             Button("Manual Measurements") { showingManualMeasurements = true }
                 .buttonStyle(.borderless)
                 .padding()
@@ -73,6 +92,7 @@ struct HolidayAerialEditor: View {
         .sheet(isPresented: $showingManualMeasurements) {
             NavigationStack {
                 HLMeasurementList(model: model)
+                    .safeAreaInset(edge: .top) { HLPreviewProgress(model: model) }
                     .toolbar {
                         ToolbarItem(placement: .confirmationAction) {
                             Button("Done") { showingManualMeasurements = false }
@@ -84,7 +104,39 @@ struct HolidayAerialEditor: View {
         .onChange(of: model.center) { _, _ in focus() }
 
         .onChange(of: mode) { _, next in if next != "draw" { draft = [] } }
+        .onChange(of: model.active.id) { _, _ in
+            draft = []; selectedSegmentID = nil; selectedPlacementID = nil
+        }
     }
+    @ViewBuilder private var selectionControls: some View {
+        if let id = selectedSegmentID, model.active.measurements.segments.contains(where: { $0.id == id }) {
+            HLAerialSegmentControls(segment: model.segmentBinding(id)) {
+                model.removeSegment(id); selectedSegmentID = nil
+            }.padding().background(.regularMaterial)
+        } else if let id = selectedPlacementID, model.active.measurements.placements.contains(where: { $0.id == id }) {
+            HLAerialPlacementControls(placement: model.placementBinding(id)) {
+                model.edit { $0.measurements.placements.removeAll { $0.id == id } }
+                selectedPlacementID = nil
+            }.padding().background(.regularMaterial)
+        }
+    }
+
+    private func selectItem(at location: CGPoint, proxy: MapProxy) {
+        var nearest = 28.0
+        selectedSegmentID = nil; selectedPlacementID = nil
+        for segment in model.active.measurements.segments {
+            let points = segment.path.compactMap { proxy.convert($0.coordinate, to: .local) }
+            let distances = zip(points, points.dropFirst()).map { HLMapHitTesting.distance(location, to: $0.0, end: $0.1) }
+            let distance = distances.min() ?? points.first.map { hypot(location.x - $0.x, location.y - $0.y) } ?? .infinity
+            if distance < nearest { nearest = distance; selectedSegmentID = segment.id }
+        }
+        for placement in model.active.measurements.placements {
+            guard let point = proxy.convert(placement.point.coordinate, to: .local) else { continue }
+            let distance = hypot(location.x - point.x, location.y - point.y)
+            if distance < nearest { nearest = distance; selectedSegmentID = nil; selectedPlacementID = placement.id }
+        }
+    }
+
     private func zoom(_ factor: Double) {
         guard let center = mapCenter ?? model.center?.coordinate else { return }
         camera = .camera(MapCamera(centerCoordinate: center, distance: min(100_000, max(1, distance * factor)), heading: 0, pitch: 0))
@@ -95,6 +147,70 @@ struct HolidayAerialEditor: View {
         }
     }
 }
+
+private struct HLAerialSegmentControls: View {
+    @Binding var segment: HLSegment
+    let onDelete: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack { Text(segment.label).font(.subheadline.bold()); Spacer(); Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }.accessibilityLabel("Delete " + segment.label) }
+            Toggle("Peak strand", isOn: $segment.hasPeak)
+        }
+    }
+}
+
+private struct HLAerialPlacementControls: View {
+    @Binding var placement: HLPlacement
+    let onDelete: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack { Text(placement.label).font(.subheadline.bold()); Spacer(); Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }.accessibilityLabel("Delete " + placement.label) }
+            HStack {
+                Text("Strand count")
+                Spacer()
+                TextField("Strands", value: $placement.strands, format: .number)
+                    .keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 70)
+            }
+            Picker("Difficulty", selection: $placement.difficulty) {
+                Text("Standard").tag(1); Text("Moderate").tag(2); Text("Difficult").tag(3)
+            }.pickerStyle(.segmented)
+        }
+    }
+}
+
+/// Configure MapKit's pan recognizers without changing pinch zoom or rotation.
+private struct HLTwoFingerMapPan: UIViewRepresentable {
+    func makeUIView(context: Context) -> PanConfigurationView { PanConfigurationView() }
+    func updateUIView(_ uiView: PanConfigurationView, context: Context) { uiView.setNeedsLayout() }
+    final class PanConfigurationView: UIView {
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            var ancestor = superview
+            for _ in 0..<6 {
+                guard let view = ancestor else { break }
+                if let map = findMap(in: view) {
+                    configurePan(in: map)
+                    return
+                }
+                ancestor = view.superview
+            }
+        }
+        private func findMap(in view: UIView) -> MKMapView? {
+            if let map = view as? MKMapView { return map }
+            for child in view.subviews { if let map = findMap(in: child) { return map } }
+            return nil
+        }
+        private func configurePan(in view: UIView) {
+            for recognizer in view.gestureRecognizers ?? [] {
+                if let pan = recognizer as? UIPanGestureRecognizer {
+                    pan.minimumNumberOfTouches = 2
+                }
+            }
+            for child in view.subviews { configurePan(in: child) }
+        }
+    }
+}
+
 
 struct HLMeasurementList: View {
     @ObservedObject var model: HolidayQuoteViewModel

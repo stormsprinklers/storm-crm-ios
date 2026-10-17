@@ -25,6 +25,9 @@ final class HolidayQuoteViewModel: ObservableObject {
     @Published var estimateID: String?
     @Published var busy = false
     @Published var generating = false
+    @Published var previewProgress: Double?
+    @Published var previewStage = ""
+    @Published var previewComplete = false
     @Published private var savedDraft: Data?
     private var pricingByOption: [String: HLPricing] = [:]
     var dirty: Bool {
@@ -282,14 +285,14 @@ final class HolidayQuoteViewModel: ObservableObject {
             notice = "Property photo saved"
         } catch { self.error = (error as? APIError)?.message ?? error.localizedDescription }
     }
-    func streetView(api: APIClient, heading: Double, pitch: Double) async {
+    func streetView(api: APIClient, heading: Double, pitch: Double, pano: String = "") async {
         guard await save(api: api) else { return }
         busy = true; error = nil; defer { busy = false }
         do {
-            let data = try await api.getData(path: path + "/photo", query: [URLQueryItem(name: "heading", value: String(heading)), URLQueryItem(name: "pitch", value: String(pitch))])
+            let data = try await api.getData(path: path + "/photo", query: [URLQueryItem(name: "heading", value: String(heading)), URLQueryItem(name: "pitch", value: String(pitch)), URLQueryItem(name: "pano", value: pano)])
             guard let image = UIImage(data: data) else { throw APIError.server("No Street View photo found. Take or select a property photo instead.") }
             photo = image; photoUnsaved = true
-            notice = "Street View loaded — tap Save photo to attach it"
+            notice = nil
         } catch { self.error = (error as? APIError)?.message ?? error.localizedDescription }
     }
     func generatePreview(api: APIClient) async {
@@ -297,15 +300,36 @@ final class HolidayQuoteViewModel: ObservableObject {
         guard !active.markup.isEmpty else { error = "Paint the areas that should receive lights first."; return }
         guard sourcePhotoURL != nil, !photoUnsaved else { error = "Save the property photo before generating a preview."; return }
         guard await save(api: api) else { return }
-        generating = true; error = nil; defer { generating = false }
+        guard !generating else { return }
+        generating = true; previewComplete = false; previewProgress = 0.2; previewStage = "Preparing photo"
+        error = nil
+        let optionID = activeID
+        let snapshotEncoder = JSONEncoder(); snapshotEncoder.outputFormatting = .sortedKeys
+        let snapshot = try? snapshotEncoder.encode(active)
+        defer { generating = false }
         do {
             let clean = try HLPhotoRenderer.jpeg(photo)
             let marked = try HLPhotoRenderer.jpeg(photo, strokes: active.markup)
-            guard clean.count + marked.count < 4 * 1024 * 1024 else { throw APIError.badRequest("Photo is too large. Select a smaller image.") }
+            let mask = try HLPhotoRenderer.mask(photo, strokes: active.markup)
+            guard clean.count + marked.count + mask.count < 4 * 1024 * 1024 else { throw APIError.badRequest("Photo is too large. Select a smaller image.") }
             struct Preview: Decodable { let previewImageUrl: String }
-            let _: Preview = try await api.uploadImages(path: path + "/visualize", fields: ["optionId": activeID, "persistOptionPreview": "true"], images: [("clean", clean), ("marked", marked)], timeout: 290)
+            previewProgress = 0.4; previewStage = "Generating lighting preview"
+            let preview: Preview = try await api.uploadImages(path: path + "/visualize", fields: ["optionId": optionID, "persistOptionPreview": "true"], images: [("clean", clean), ("marked", marked), ("editMask", mask)], timeout: 290)
+            previewProgress = 0.85; previewStage = "Saving preview"
             let response: HLQuoteResponse = try await api.get(path: path)
-            apply(response); notice = "Preview saved to CRM"
-        } catch { self.error = (error as? APIError)?.message ?? error.localizedDescription }
+            updatedAt = response.quote.updatedAt
+            if let index = options.firstIndex(where: { $0.id == optionID }),
+               (try? snapshotEncoder.encode(options[index])) == snapshot {
+                let hadLocalEdits = dirty
+                options[index].previewURL = preview.previewImageUrl
+                if !hadLocalEdits { dirty = false }
+            }
+            previewProgress = 1; previewStage = "Preview ready"; previewComplete = true
+            try? await Task.sleep(for: .seconds(3))
+            previewProgress = nil; previewComplete = false
+        } catch {
+            previewProgress = nil
+            self.error = (error as? APIError)?.message ?? error.localizedDescription
+        }
     }
 }

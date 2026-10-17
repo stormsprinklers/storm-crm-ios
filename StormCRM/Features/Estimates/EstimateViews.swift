@@ -164,6 +164,7 @@ struct EstimateDetailView: View {
     @State private var postApprovalMode: EstimatePostApprovalSheet.InitialMode = .choose
     @State private var pendingPostApproval = false
     @State private var activeOptionId: String?
+    @State private var showPayment = false
     @State private var showPresent = false
     @State private var showResendConfirm = false
     @State private var optionNameDraft = ""
@@ -185,6 +186,12 @@ struct EstimateDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         header(for: estimate)
+                        HStack(spacing: 24) {
+                            ForEach(actionItems(for: estimate).filter { ["approve", "send", "present"].contains($0.id) }) { item in
+                                Button(action: item.action) { Image(systemName: item.systemImage) }.accessibilityLabel(item.accessibilityLabel)
+                            }
+                            Button { showPayment = true } label: { Image(systemName: "creditcard") }.accessibilityLabel("Collect payment")
+                        }.font(.title3).buttonStyle(.borderless)
 
                         optionTabs(for: estimate)
 
@@ -321,11 +328,9 @@ struct EstimateDetailView: View {
                 if estimate?.status != "SENT" { break }
             }
         }
-        .alert(estimate?.hasBeenSent == true ? "Send this estimate again?" : "Send this estimate to the customer?", isPresented: $showResendConfirm) {
-            Button(estimate?.hasBeenSent == true ? "Send again" : "Send to customer") {
-                Task { await sendEstimate() }
-            }
-            Button("Cancel", role: .cancel) {}
+        .sheet(isPresented: $showPayment) { EstimatePaymentSheet(estimateId: estimateId) { await load(); await onUpdated() } }
+        .sheet(isPresented: $showResendConfirm) {
+            EstimateSendComposer(estimateId: estimateId) { await load(); await onUpdated() }
         }
     }
 
@@ -604,7 +609,7 @@ struct EstimateDetailView: View {
                     StormSectionHeader(title: "Actions", systemImage: "bolt")
 
                     let items = actionItems(for: estimate)
-                    let primary = items.filter { ["present", "send", "approve"].contains($0.id) }
+                    let primary: [EstimateActionItem] = []
                     let secondary = items.filter { !["present", "send", "approve"].contains($0.id) }
 
                     if !primary.isEmpty {
@@ -688,7 +693,7 @@ struct EstimateDetailView: View {
     private func actionItems(for estimate: EstimateDetailDTO) -> [EstimateActionItem] {
         var items: [EstimateActionItem] = []
 
-        if estimate.status == "DRAFT" || estimate.status == "SENT" {
+        if ["DRAFT", "SENT", "APPROVED"].contains(estimate.status) {
             items.append(
                 EstimateActionItem(
                     id: "present",
@@ -798,20 +803,6 @@ struct EstimateDetailView: View {
         }
     }
 
-
-    private func sendEstimate() async {
-        isSaving = true
-        error = nil
-        actionMessage = nil
-        defer { isSaving = false }
-        do {
-            estimate = try await env.apiClient.post(path: APIPath.estimateSend(estimateId))
-            actionMessage = "Estimate sent to customer"
-            await onUpdated()
-        } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
-        }
-    }
 
     private func sendFinancing() async {
         isSaving = true

@@ -64,7 +64,7 @@ struct HolidayQuoteEditor: View {
                     if model.estimateID != nil { estimateChoice = true }
                     else { Task { estimateDestination = await model.createEstimate(api: env.apiClient, revise: false) } }
                 } label: { Label(model.estimateID == nil ? "Create estimate" : "Update / create estimate", systemImage: "doc.text") }
-                .disabled(model.customerID == nil || !model.hasMeasurements)
+                .disabled(model.generating || model.customerID == nil || !model.hasMeasurements)
                 if let id = model.estimateID { Button("View estimate") { estimateDestination = id } }
             }
             Section {
@@ -73,15 +73,16 @@ struct HolidayQuoteEditor: View {
         }
         .buttonStyle(.borderless)
         .background(HLKeyboardDismissal())
-        .disabled(model.busy || model.generating)
+        .disabled(model.busy)
         .overlay { if model.busy { ProgressView("Saving / loading…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
         .navigationTitle(model.title)
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) { Button(model.visitID != nil ? "Back to visit" : "Done") { if model.dirty || model.photoUnsaved { confirmLeave = true } else { dismiss() } }.disabled(model.busy || model.generating) }
-            ToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { await model.save(api: env.apiClient) } }.disabled(model.busy || model.generating) }
+            ToolbarItem(placement: .topBarLeading) { Button(model.visitID != nil ? "Back to visit" : "Done") { if model.dirty || model.photoUnsaved { confirmLeave = true } else { dismiss() } }.disabled(model.busy) }
+            ToolbarItem(placement: .topBarTrailing) { Button("Save") { Task { estimateDestination = await model.createEstimate(api: env.apiClient, revise: model.estimateID != nil) } }.disabled(model.busy || model.generating) }
         }
+        .safeAreaInset(edge: .top) { HLPreviewProgress(model: model) }
         .safeAreaInset(edge: .bottom) {
             HStack { Image(systemName: model.dirty ? "pencil.circle" : "checkmark.icloud"); Text(model.photoUnsaved ? "Photo not saved" : model.dirty ? "Unsaved changes" : "Saved").font(.caption); Spacer() }
                 .padding(10).background(.regularMaterial)
@@ -186,7 +187,7 @@ struct HolidayQuoteEditor: View {
     }
     @ViewBuilder private var designSection: some View {
         Section {
-            HolidayAerialEditor(model: model, embedded: true).frame(height: 440).listRowInsets(EdgeInsets())
+            HolidayAerialEditor(model: model, embedded: true).listRowInsets(EdgeInsets())
             if model.center == nil { Button("Locate property") { Task { await model.locate(api: env.apiClient) } } }
         } header: { stepHeader("Design", id: "design") }
         Section {
