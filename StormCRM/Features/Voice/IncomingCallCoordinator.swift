@@ -30,6 +30,7 @@ final class IncomingCallCoordinator: NSObject, @unchecked Sendable {
     private var registrationGeneration = 0
     private var registrationTask: Task<Void, Never>?
 
+    private var incomingDisplayLabel: String?
     private var activeCallInvite: CallInvite?
     private var activeCall: Call?
     private var activeCallUUID: UUID?
@@ -171,9 +172,10 @@ final class IncomingCallCoordinator: NSObject, @unchecked Sendable {
 
     // MARK: - CallKit reporting
 
-    private func reportIncomingCall(from: String, uuid: UUID) {
+    private func reportIncomingCall(from: String, displayName: String, uuid: UUID) {
         let update = CXCallUpdate()
-        update.remoteHandle = CXHandle(type: .generic, value: from)
+        update.remoteHandle = CXHandle(type: from.hasPrefix("+") ? .phoneNumber : .generic, value: from)
+        update.localizedCallerName = displayName
         update.hasVideo = false
         update.supportsDTMF = true
         update.supportsHolding = false
@@ -245,6 +247,7 @@ final class IncomingCallCoordinator: NSObject, @unchecked Sendable {
 
     private func clearActiveCallState() {
         guard activeCall != nil || activeCallInvite != nil || activeCallUUID != nil else { return }
+        incomingDisplayLabel = nil
         activeCallInvite = nil
         activeCall = nil
         activeCallUUID = nil
@@ -307,7 +310,15 @@ extension IncomingCallCoordinator: NotificationDelegate {
         let uuid = callInvite.uuid
         activeCallInvite = callInvite
         activeCallUUID = uuid
-        reportIncomingCall(from: callInvite.from ?? "Incoming call", uuid: uuid)
+        let parameters = callInvite.customParameters ?? [:]
+        let phone = parameters["callerPhone"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let caller = parameters["callerName"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let company = parameters["companyName"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let from = phone.flatMap { $0.isEmpty ? nil : $0 } ?? callInvite.from ?? "Unknown caller"
+        let name = caller.flatMap { $0.isEmpty ? nil : $0 } ?? from
+        let label = [name, company].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        incomingDisplayLabel = label
+        reportIncomingCall(from: from, displayName: label, uuid: uuid)
     }
 
     func cancelledCallInviteReceived(cancelledCallInvite: CancelledCallInvite, error: Error) {
@@ -325,7 +336,7 @@ extension IncomingCallCoordinator: CallDelegate {
         if isOutgoingCall, let uuid = activeCallUUID {
             callKitProvider.reportOutgoingCall(with: uuid, connectedAt: Date())
         }
-        let label = isOutgoingCall ? outgoingHandleLabel : (call.from ?? activeCallInvite?.from)
+        let label = isOutgoingCall ? outgoingHandleLabel : (incomingDisplayLabel ?? call.from ?? activeCallInvite?.from)
         onCallAccepted?(label, !isOutgoingCall)
     }
 
