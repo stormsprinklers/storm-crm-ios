@@ -265,11 +265,13 @@ final class HolidayQuoteViewModel: ObservableObject {
             if url.host == URL(string: AppConfig.apiBaseURL)?.host {
                 let parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
                 let data = try await api.getData(path: url.path, query: parts?.queryItems ?? [])
-                photo = UIImage(data: data)
+                guard let image = UIImage(data: data) else { throw APIError.server("Could not open property photo") }
+                photo = image
             } else {
                 let (data, response) = try await URLSession.shared.data(from: url)
                 guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw APIError.server("Could not load property photo") }
-                photo = UIImage(data: data)
+                guard let image = UIImage(data: data) else { throw APIError.server("Could not open property photo") }
+                photo = image
             }
         } catch { self.error = "Could not load the saved property photo. Choose or take another photo." }
     }
@@ -297,6 +299,7 @@ final class HolidayQuoteViewModel: ObservableObject {
     }
     func generatePreview(api: APIClient) async {
         guard let photo else { error = "Choose a property photo first."; return }
+        guard !active.markup.isEmpty else { error = "Paint the areas you want lit before generating."; return }
         guard sourcePhotoURL != nil, !photoUnsaved else { error = "Save the property photo before generating a preview."; return }
         guard await save(api: api) else { return }
         guard !generating else { return }
@@ -308,10 +311,11 @@ final class HolidayQuoteViewModel: ObservableObject {
         defer { generating = false }
         do {
             let clean = try HLPhotoRenderer.jpeg(photo)
-            guard clean.count < 4 * 1024 * 1024 else { throw APIError.badRequest("Photo is too large. Select a smaller image.") }
+            let marked = try HLPhotoRenderer.jpeg(photo, strokes: active.markup)
+            guard clean.count + marked.count < 4 * 1024 * 1024 else { throw APIError.badRequest("Photo is too large. Select a smaller image.") }
             struct Preview: Decodable { let previewImageUrl: String }
             previewProgress = 0.4; previewStage = "Generating lighting preview"
-            let preview: Preview = try await api.uploadImages(path: path + "/visualize", fields: ["optionId": optionID, "persistOptionPreview": "true"], images: [("clean", clean)], timeout: 290)
+            let preview: Preview = try await api.uploadImages(path: path + "/visualize", fields: ["optionId": optionID, "persistOptionPreview": "true"], images: [("clean", clean), ("marked", marked)], timeout: 290)
             previewProgress = 0.85; previewStage = "Saving preview"
             let response: HLQuoteResponse = try await api.get(path: path)
             updatedAt = response.quote.updatedAt

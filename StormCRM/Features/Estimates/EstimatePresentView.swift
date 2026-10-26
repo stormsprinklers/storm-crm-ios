@@ -18,6 +18,8 @@ struct EstimatePresentView: View {
     @State private var showResendConfirm = false
     @State private var scheduleSend = false
     @State private var tool: String?
+    @State private var financingSending = false
+    @State private var financingMessage: String?
 
     private let canvasGray = Color(uiColor: .systemGray6)
 
@@ -85,13 +87,7 @@ struct EstimatePresentView: View {
                         Button("Edit presentation", systemImage: "pencil") { tool = "edit" }
                     } label: { Image(systemName: "ellipsis") }.accessibilityLabel("More")
                 }
-                if let url = estimate?.financingUrl, !url.isEmpty {
-                    ToolbarItem(placement: .bottomBar) {
-                        Button("Explore financing options") {
-                            Task { await sendFinancing() }
-                        }
-                    }
-                }
+
             }
             .sheet(item: Binding(
                 get: { openOptionId.map { PresentedOption(id: $0) } },
@@ -113,6 +109,22 @@ struct EstimatePresentView: View {
                     }.toolbar { ToolbarItem(placement:.cancellationAction) { Button("Done") {tool=nil} } }
                 }
             }
+            .safeAreaInset(edge: .bottom) {
+                if let url = estimate?.financingUrl, !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button { Task { await sendFinancing() } } label: {
+                        HStack {
+                            if financingSending { ProgressView() }
+                            Label(financingSending ? "Texting…" : "Explore financing options", systemImage: "banknote")
+                        }.frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(financingSending)
+                    .padding().background(canvasGray)
+                }
+            }
+            .alert("Financing", isPresented: Binding(get: { financingMessage != nil }, set: { if !$0 { financingMessage = nil } })) {
+                Button("OK", role: .cancel) { financingMessage = nil }
+            } message: { Text(financingMessage ?? "") }
             .task { await prepare() }
             .alert("Rename option", isPresented: Binding(
                 get: { renameOptionId != nil },
@@ -300,15 +312,18 @@ struct EstimatePresentView: View {
     }
 
     private func sendFinancing() async {
+        guard !financingSending else { return }
+        financingSending = true
+        defer { financingSending = false }
         do {
             struct Ack: Decodable {
                 let ok: Bool?
                 let smsSent: Bool?
             }
             let _: Ack = try await env.apiClient.post(path: APIPath.estimateFinancing(estimateId))
-            error = nil
+            financingMessage = "Financing options texted to the customer."
         } catch {
-            self.error = (error as? APIError)?.message ?? error.localizedDescription
+            financingMessage = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 }
