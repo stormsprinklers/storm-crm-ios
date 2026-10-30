@@ -2,10 +2,13 @@ import SwiftUI
 
 struct VoiceCallBar: View {
     @ObservedObject var voice: VoiceManager
+    var openCall: () -> Void = {}
 
     var body: some View {
         if voice.isInCall || voice.status.contains("Connecting") || voice.status.contains("Calling") {
             HStack(spacing: 12) {
+                Button(action: openCall) {
+                HStack {
                 Image(systemName: "phone.fill")
                     .foregroundStyle(.white)
                 VStack(alignment: .leading, spacing: 2) {
@@ -16,6 +19,10 @@ struct VoiceCallBar: View {
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.85))
                 }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityLabel("Open active call")
                 Spacer()
                 Button(voice.isMuted ? "Unmute" : "Mute") {
                     voice.toggleMute()
@@ -38,5 +45,26 @@ struct VoiceCallBar: View {
             .shadow(radius: 4)
             .transition(.move(edge: .top))
         }
+    }
+}
+
+struct ActiveVoiceCallView: View {
+    @ObservedObject var voice: VoiceManager
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 32) {
+                Image(systemName: "phone.fill").font(.system(size: 52))
+                Text(voice.activePhone ?? "Active call").font(.title2).multilineTextAlignment(.center)
+                Text(voice.status).foregroundStyle(.secondary)
+                Button(voice.isMuted ? "Unmute" : "Mute", systemImage: voice.isMuted ? "mic.slash.fill" : "mic.fill") { voice.toggleMute() }
+                    .buttonStyle(.bordered)
+                Button("End call", systemImage: "phone.down.fill") { voice.hangUp(); dismiss() }
+                    .buttonStyle(.borderedProminent).tint(.red)
+            }.padding().frame(maxWidth: .infinity, maxHeight: .infinity)
+            .navigationTitle("Call")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Back") { dismiss() } } }
+        }
+        .onChange(of: voice.isInCall) { _, active in if !active { dismiss() } }
     }
 }

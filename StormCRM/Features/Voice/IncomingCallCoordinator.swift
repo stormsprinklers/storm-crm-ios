@@ -22,6 +22,9 @@ final class IncomingCallCoordinator: NSObject, @unchecked Sendable {
     private let callKitProvider: CXProvider
     private let callKitController = CXCallController()
     private let audioDevice = DefaultAudioDevice()
+    private var ringbackPlayer: AVAudioPlayer?
+    private var outgoingRinging = false
+    private var callAudioActive = false
 
     private var voipDeviceToken: Data?
     private var accessTokenProvider: (() async -> String?)?
@@ -245,9 +248,45 @@ final class IncomingCallCoordinator: NSObject, @unchecked Sendable {
         activeCall?.isMuted = muted
     }
 
+    private func stopRingback() {
+        ringbackPlayer?.stop()
+        ringbackPlayer = nil
+        outgoingRinging = false
+    }
+
+    private func playRingbackIfNeeded() {
+        guard outgoingRinging, callAudioActive, ringbackPlayer == nil else { return }
+        // US ringback cadence: two seconds of 440/480 Hz, four seconds of silence.
+        let rate = 8000
+        var pcm = Data()
+        func append16(_ value: UInt16, to data: inout Data) {
+            var little = value.littleEndian
+            withUnsafeBytes(of: &little) { data.append(contentsOf: $0) }
+        }
+        for sample in 0..<(rate * 6) {
+            let time = Double(sample) / Double(rate)
+            let edge = min(1.0, min(time / 0.01, (2.0 - time) / 0.01))
+            let signal = time < 2 ? max(0, edge) * 0.16 * (sin(2 * .pi * 440 * time) + sin(2 * .pi * 480 * time)) : 0
+            append16(UInt16(bitPattern: Int16(signal * Double(Int16.max))), to: &pcm)
+        }
+        var wav = Data("RIFF".utf8)
+        func append32(_ value: UInt32) { var little = value.littleEndian; withUnsafeBytes(of: &little) { wav.append(contentsOf: $0) } }
+        append32(UInt32(pcm.count + 36)); wav.append(Data("WAVEfmt ".utf8)); append32(16)
+        append16(1, to: &wav); append16(1, to: &wav); append32(UInt32(rate)); append32(UInt32(rate * 2))
+        append16(2, to: &wav); append16(16, to: &wav); wav.append(Data("data".utf8)); append32(UInt32(pcm.count)); wav.append(pcm)
+        do {
+            let player = try AVAudioPlayer(data: wav)
+            player.numberOfLoops = -1
+            player.prepareToPlay()
+            ringbackPlayer = player
+            player.play()
+        } catch { onCallFailed?("Could not play ringback: \(error.localizedDescription)") }
+    }
+
     private func clearActiveCallState() {
         guard activeCall != nil || activeCallInvite != nil || activeCallUUID != nil else { return }
         incomingDisplayLabel = nil
+        stopRingback()
         activeCallInvite = nil
         activeCall = nil
         activeCallUUID = nil
@@ -332,7 +371,14 @@ extension IncomingCallCoordinator: NotificationDelegate {
 // MARK: - Twilio active-call delegate
 
 extension IncomingCallCoordinator: CallDelegate {
+    func callDidStartRinging(call: Call) {
+        guard isOutgoingCall else { return }
+        outgoingRinging = true
+        playRingbackIfNeeded()
+    }
+
     func callDidConnect(call: Call) {
+        stopRingback()
         if isOutgoingCall, let uuid = activeCallUUID {
             callKitProvider.reportOutgoingCall(with: uuid, connectedAt: Date())
         }
@@ -341,6 +387,7 @@ extension IncomingCallCoordinator: CallDelegate {
     }
 
     func callDidFailToConnect(call: Call, error: Error) {
+        stopRingback()
         print("Call failed to connect:", error.localizedDescription)
         onCallFailed?(error.localizedDescription)
         if let uuid = activeCallUUID {
@@ -350,6 +397,7 @@ extension IncomingCallCoordinator: CallDelegate {
     }
 
     func callDidDisconnect(call: Call, error: Error?) {
+        stopRingback()
         // Only report an out-of-band end to CallKit when the call dropped remotely; a local
         // end already went through a fulfilled CXEndCallAction.
         if !userInitiatedEnd, let uuid = activeCallUUID {
@@ -363,6 +411,8 @@ extension IncomingCallCoordinator: CallDelegate {
 
 extension IncomingCallCoordinator: CXProviderDelegate {
     func providerDidReset(_ provider: CXProvider) {
+        stopRingback()
+        callAudioActive = false
         audioDevice.isEnabled = false
         activeCall?.disconnect()
         activeCallInvite?.reject()
@@ -406,6 +456,7 @@ extension IncomingCallCoordinator: CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
+        stopRingback()
         if let call = activeCall {
             // Let the disconnect delegate perform cleanup; don't double-report to CallKit.
             userInitiatedEnd = true
@@ -424,9 +475,14 @@ extension IncomingCallCoordinator: CXProviderDelegate {
 
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
         audioDevice.isEnabled = true
+        callAudioActive = true
+        playRingbackIfNeeded()
     }
 
     func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+        callAudioActive = false
+        ringbackPlayer?.stop()
+        ringbackPlayer = nil
         audioDevice.isEnabled = false
     }
 }

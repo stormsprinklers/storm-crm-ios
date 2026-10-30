@@ -50,6 +50,7 @@ struct StormCRMApp: App {
 }
 
 struct RootView: View {
+    @State private var showActiveCall = false
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var env: AppEnvironment
     @EnvironmentObject private var appearanceSettings: AppearanceSettings
@@ -97,11 +98,15 @@ struct RootView: View {
             .animation(.easeInOut, value: auth.isAuthenticated)
 
             if auth.isAuthenticated {
-                VoiceCallBar(voice: env.voice)
+                VoiceCallBar(voice: env.voice) { showActiveCall = true }
                     .padding(.top, 4)
             }
         }
         .background(StormTheme.page.ignoresSafeArea())
+        .fullScreenCover(isPresented: $showActiveCall) { ActiveVoiceCallView(voice: env.voice) }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active && env.voice.isInCall { showActiveCall = true }
+        }
         .preferredColorScheme(appearanceSettings.appearance.preferredColorScheme)
         .alert("Could not switch company", isPresented: Binding(
             get: { auth.companySwitchError != nil },
