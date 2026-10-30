@@ -36,6 +36,7 @@ final class VoiceManager: ObservableObject {
     func clearReportedErrors() { reportedErrors = []; unreadErrorCount = 0 }
     @Published private(set) var isInCall = false
     @Published private(set) var isMuted = false
+    @Published private(set) var isSpeakerOn = false
     @Published private(set) var activePhone: String?
     @Published private(set) var isIncoming = false
     @Published private(set) var isListeningForCalls = false
@@ -280,6 +281,23 @@ final class VoiceManager: ObservableObject {
         lastError = nil
         status = cachedToken == nil ? "Ready" : "Voice ready"
         markPresence("AVAILABLE")
+    }
+
+    func refreshAudioRoute() {
+        #if canImport(AVFoundation)
+        isSpeakerOn = AVAudioSession.sharedInstance().currentRoute.outputs.contains { $0.portType == .builtInSpeaker }
+        #endif
+    }
+
+    func toggleSpeaker() {
+        #if canImport(AVFoundation)
+        do {
+            let session = AVAudioSession.sharedInstance()
+            let speaker = session.currentRoute.outputs.contains { $0.portType == .builtInSpeaker }
+            try session.overrideOutputAudioPort(speaker ? .none : .speaker)
+            refreshAudioRoute()
+        } catch { lastError = "Could not change call audio: \(error.localizedDescription)" }
+        #endif
     }
 
     func toggleMute() {

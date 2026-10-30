@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 struct VoiceCallBar: View {
     @ObservedObject var voice: VoiceManager
@@ -24,6 +25,11 @@ struct VoiceCallBar: View {
                 .contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("Open active call")
                 Spacer()
+                Button { voice.toggleSpeaker() } label: {
+                    Image(systemName: voice.isSpeakerOn ? "speaker.wave.3.fill" : "speaker.wave.2")
+                }
+                .foregroundStyle(voice.isSpeakerOn ? .yellow : .white)
+                .accessibilityLabel(voice.isSpeakerOn ? "Turn speaker off" : "Turn speaker on")
                 Button(voice.isMuted ? "Unmute" : "Mute") {
                     voice.toggleMute()
                 }
@@ -42,6 +48,8 @@ struct VoiceCallBar: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .background(StormTheme.brandNavy)
+            .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in voice.refreshAudioRoute() }
+            .onAppear { voice.refreshAudioRoute() }
             .shadow(radius: 4)
             .transition(.move(edge: .top))
         }
@@ -58,6 +66,8 @@ struct ActiveVoiceCallView: View {
                 Text(voice.activePhone ?? "Active call").font(.title2).multilineTextAlignment(.center)
                 Text(voice.status).foregroundStyle(.secondary)
                 Button(voice.isMuted ? "Unmute" : "Mute", systemImage: voice.isMuted ? "mic.slash.fill" : "mic.fill") { voice.toggleMute() }
+                    .buttonStyle(.bordered)
+                Button(voice.isSpeakerOn ? "Speaker on" : "Speaker off", systemImage: voice.isSpeakerOn ? "speaker.wave.3.fill" : "speaker.wave.2") { voice.toggleSpeaker() }
                     .buttonStyle(.bordered)
                 Button("End call", systemImage: "phone.down.fill") { voice.hangUp(); dismiss() }
                     .buttonStyle(.borderedProminent).tint(.red)
